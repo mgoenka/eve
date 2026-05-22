@@ -6,6 +6,15 @@ import { generateContentPack, postSpecial, synthesize, suggestSpecial } from '..
 import type { SuggestSpecialResponse } from '../services/eveService';
 import { EveLogo } from './EveLogo';
 
+// When a field's current value still matches the suggested default, render
+// it in faded italic-serif so the user reads it as a placeholder hint they
+// can use as-is or overwrite. Any change snaps the styling back to plain.
+function ghostIf(value: string, suggestion: string): string {
+  return value === suggestion
+    ? 'text-eve-cream/45 italic font-serif placeholder:text-eve-cream/30'
+    : 'text-eve-cream placeholder:text-eve-cream/30 placeholder:italic placeholder:font-serif';
+}
+
 interface Props {
   onSwitchToDiner: () => void;
 }
@@ -327,7 +336,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder={DEMO_RESTAURANTS[0].name}
-                className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base placeholder:text-eve-cream/30 placeholder:italic placeholder:font-serif"
+                className={`w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base ${ghostIf(name, DEMO_RESTAURANTS[0].name)}`}
               />
             </div>
 
@@ -340,7 +349,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                 value={city}
                 onChange={(e) => setCity(e.target.value)}
                 placeholder={DEMO_RESTAURANTS[0].city}
-                className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base placeholder:text-eve-cream/30 placeholder:italic placeholder:font-serif"
+                className={`w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base ${ghostIf(city, DEMO_RESTAURANTS[0].city)}`}
               />
               <p className="mt-1 text-[11px] text-eve-cream/45 italic font-serif">
                 Helps Eve disambiguate when multiple restaurants share a name.
@@ -357,7 +366,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                 onChange={(e) => setCuisine(e.target.value as Cuisine)}
                 placeholder="Eve will infer this from your name + city if you skip it"
                 list="restaurant-cuisine-suggestions"
-                className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base placeholder:text-eve-cream/30 placeholder:italic placeholder:font-serif"
+                className={`w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base ${ghostIf(cuisine, DEMO_RESTAURANTS[0].cuisine)}`}
               />
               <datalist id="restaurant-cuisine-suggestions">
                 {CUISINES.map((c) => (
@@ -375,7 +384,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                 value={voice}
                 onChange={(e) => setVoice(e.target.value)}
                 placeholder={DEMO_RESTAURANTS[0].voice}
-                className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base placeholder:text-eve-cream/30 placeholder:italic placeholder:font-serif"
+                className={`w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base ${ghostIf(voice, DEMO_RESTAURANTS[0].voice)}`}
               />
             </div>
 
@@ -388,7 +397,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                 value={signature}
                 onChange={(e) => setSignature(e.target.value)}
                 placeholder={DEMO_RESTAURANTS[0].signatureDishes}
-                className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] leading-relaxed resize-none placeholder:text-eve-cream/30 placeholder:italic placeholder:font-serif"
+                className={`w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] leading-relaxed resize-none ${ghostIf(signature, DEMO_RESTAURANTS[0].signatureDishes)}`}
               />
             </div>
 
@@ -469,18 +478,27 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
               <input
                 value={dishName}
                 onChange={(e) => setDishName(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px]"
+                placeholder="Eve will pick from your reviews"
+                className={`w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] ${
+                  suggestion && dishName === suggestion.dishName
+                    ? 'text-eve-cream/45 italic font-serif placeholder:text-eve-cream/30'
+                    : 'text-eve-cream placeholder:text-eve-cream/30 placeholder:italic placeholder:font-serif'
+                }`}
               />
             </div>
             <div className="md:col-span-2">
               <label className="block text-[11px] tracking-wide text-eve-gold/80 font-medium mb-2">
-                Tonight's note (one line)
+                Tonight's note
               </label>
               <input
                 value={dishDescription}
                 onChange={(e) => setDishDescription(e.target.value)}
-                placeholder="e.g. Made with the new spice blend; small batch tonight"
-                className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px]"
+                placeholder="e.g. Made with the new spice blend, small batch tonight"
+                className={`w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] ${
+                  suggestion && dishDescription === suggestion.dishDescription
+                    ? 'text-eve-cream/45 italic font-serif placeholder:text-eve-cream/30'
+                    : 'text-eve-cream placeholder:text-eve-cream/30 placeholder:italic placeholder:font-serif'
+                }`}
               />
             </div>
           </div>

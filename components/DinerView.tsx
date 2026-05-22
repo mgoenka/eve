@@ -67,6 +67,17 @@ const SURPRISE_FREETEXT = [
   'Make it interesting. Mix something old with something new.',
 ];
 
+const SUGGESTED_CITY = 'Santa Clara, CA';
+
+// CSS-utility helper: when the input's current value still matches the suggested default,
+// render the text in italic-serif faded style so it reads as a placeholder hint
+// rather than as committed text. The moment the user edits, styling snaps to plain.
+function ghostIf(value: string, suggestion: string): string {
+  return value === suggestion
+    ? 'text-eve-cream/45 italic font-serif placeholder:text-eve-cream/30'
+    : 'text-eve-cream placeholder:text-eve-cream/30 placeholder:italic placeholder:font-serif';
+}
+
 function pickRandom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
@@ -113,7 +124,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
 
   const [phase, setPhase] = useState<Phase>('input');
 
-  const [city, setCity] = useState(initial?.city || 'Santa Clara, CA');
+  const [city, setCity] = useState(initial?.city || SUGGESTED_CITY);
   const [vibe, setVibe] = useState<Vibe>(initial?.vibe || 'date_night');
   const [party, setParty] = useState<number>(initial?.party || 2);
   const [dietary, setDietary] = useState<DietaryPreference[]>(initial?.dietary || ['vegetarian']);
@@ -828,8 +839,8 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                     type="text"
                     value={city}
                     onChange={(e) => setCity(e.target.value)}
-                    placeholder="e.g. Santa Clara, CA"
-                    className="w-full px-5 py-3.5 pr-14 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-base"
+                    placeholder={SUGGESTED_CITY}
+                    className={`w-full px-5 py-3.5 pr-14 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-base ${ghostIf(city, SUGGESTED_CITY)}`}
                   />
                   <button
                     onClick={detectLocation}
