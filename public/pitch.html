@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Eve — Pitch Deck</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:wght@400;500;600;700;800&display=swap">
+  <style>
+    :root {
+      --ink: #1a0d2e;
+      --ink-soft: #2d1b3e;
+      --plum: #4a2d5e;
+      --rose: #e8a39e;
+      --gold: #f5d896;
+      --cream: #f8f4ee;
+      --paper-dim: #d4c8d8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%;
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: var(--ink);
+      color: var(--cream);
+      -webkit-font-smoothing: antialiased;
+    }
+    .deck {
+      scroll-snap-type: y mandatory;
+      overflow-y: scroll;
+      height: 100vh;
+    }
+    .slide {
+      scroll-snap-align: start;
+      min-height: 100vh;
+      padding: 60px 80px;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      background: linear-gradient(135deg, #1a0d2e 0%, #2d1b3e 100%);
+    }
+    .slide::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        radial-gradient(ellipse 100% 80% at 50% -10%, rgba(232, 163, 158, 0.12) 0%, transparent 60%),
+        radial-gradient(ellipse 70% 50% at 85% 90%, rgba(245, 216, 150, 0.08) 0%, transparent 55%);
+    }
+    .slide > * { position: relative; z-index: 1; }
+    .slide-num {
+      position: absolute;
+      top: 30px;
+      right: 40px;
+      font-size: 11px;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      color: rgba(248, 244, 238, 0.4);
+      z-index: 2;
+    }
+    .brand {
+      position: absolute;
+      top: 30px;
+      left: 40px;
+      font-family: 'Cormorant Garamond', serif;
+      font-style: italic;
+      font-size: 28px;
+      background: linear-gradient(90deg, var(--gold), var(--rose));
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      z-index: 2;
+    }
+    .eyebrow {
+      font-size: 12px;
+      letter-spacing: 0.4em;
+      text-transform: uppercase;
+      color: var(--gold);
+      margin-bottom: 24px;
+      opacity: 0.85;
+    }
+    h1.headline {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 88px;
+      line-height: 1.0;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      margin-bottom: 32px;
+      max-width: 1100px;
+    }
+    h1.headline em {
+      font-style: italic;
+      background: linear-gradient(90deg, var(--gold), var(--rose));
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    h2 {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 56px;
+      line-height: 1.05;
+      font-weight: 600;
+      margin-bottom: 28px;
+      max-width: 1100px;
+    }
+    h2 em {
+      font-style: italic;
+      background: linear-gradient(90deg, var(--gold), var(--rose));
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    h3 {
+      font-size: 14px;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      color: var(--gold);
+      margin-bottom: 18px;
+      opacity: 0.85;
+    }
+    p.lead {
+      font-size: 22px;
+      line-height: 1.55;
+      color: rgba(248, 244, 238, 0.85);
+      max-width: 900px;
+      margin-bottom: 32px;
+    }
+    .meta-row {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 32px;
+    }
+    .pill {
+      padding: 8px 18px;
+      border-radius: 999px;
+      border: 1px solid rgba(245, 216, 150, 0.35);
+      background: rgba(245, 216, 150, 0.08);
+      color: var(--gold);
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; max-width: 1200px; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; max-width: 1300px; }
+    .grid-4 { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 18px; max-width: 1300px; }
+    .card {
+      padding: 28px;
+      border-radius: 24px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .card .label {
+      font-size: 11px;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      color: var(--rose);
+      margin-bottom: 12px;
+    }
+    .card h4 {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 32px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .card p { font-size: 15px; line-height: 1.6; color: rgba(248,244,238,0.75); }
+    .card .big {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 64px;
+      font-weight: 700;
+      background: linear-gradient(90deg, var(--gold), var(--rose));
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      line-height: 1;
+      margin: 8px 0;
+    }
+    .arrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 14px;
+      color: rgba(248,244,238,0.55);
+      margin-top: 20px;
+      letter-spacing: 0.05em;
+    }
+    .stack {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      margin-top: 28px;
+    }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 22px;
+      border-radius: 14px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+    .row .left { font-size: 16px; color: rgba(248,244,238,0.95); }
+    .row .right { font-size: 14px; color: var(--gold); font-family: 'Cormorant Garamond', serif; font-weight: 600; }
+    .url-strip {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      margin-top: 28px;
+      font-size: 13px;
+      color: rgba(248,244,238,0.55);
+      font-family: 'JetBrains Mono', 'Inter', monospace;
+    }
+    .url-strip a { color: var(--gold); text-decoration: none; border-bottom: 1px dotted var(--gold); }
+    .closing-line {
+      font-family: 'Cormorant Garamond', serif;
+      font-style: italic;
+      font-size: 36px;
+      line-height: 1.3;
+      color: rgba(248,244,238,0.92);
+      margin-top: 24px;
+      max-width: 1000px;
+    }
+    .closing-line em {
+      font-style: italic;
+      background: linear-gradient(90deg, var(--gold), var(--rose));
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    @media (max-width: 1100px) {
+      .slide { padding: 40px 30px; }
+      h1.headline { font-size: 56px; }
+      h2 { font-size: 36px; }
+      .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="deck">
+
+    <!-- SLIDE 1: TITLE / HOOK -->
+    <section class="slide">
+      <span class="brand">eve</span>
+      <span class="slide-num">01 / 05</span>
+      <p class="eyebrow">An AI evening concierge</p>
+      <h1 class="headline">A perfect <em>eve.</em></h1>
+      <p class="lead">
+        Tell Eve where you are and what kind of night you want.
+        Get back a three-stop evening — dinner, the spot after, and the moment that closes it —
+        illustrated, narrated, and ready to live.
+      </p>
+      <div class="meta-row">
+        <span class="pill">Built in 4 hours · Solo · Mohit Goenka</span>
+        <span class="pill">Recipe → Eve · V2 of my AI cooking work</span>
+      </div>
+      <div class="url-strip" style="margin-top:48px;">
+        Live · <a href="https://eve.mohitgoenka.com">eve.mohitgoenka.com</a> &nbsp; · &nbsp;
+        Code · <a href="https://github.com/mgoenka/eve">github.com/mgoenka/eve</a>
+      </div>
+    </section>
+
+    <!-- SLIDE 2: THE PROBLEM (BOTH SIDES) -->
+    <section class="slide">
+      <span class="brand">eve</span>
+      <span class="slide-num">02 / 05</span>
+      <p class="eyebrow">The problem · two sides, one wound</p>
+      <h2>Yelp doesn't get me.<br /><em>And restaurants don't have time to be found.</em></h2>
+      <div class="grid-2" style="margin-top:32px;">
+        <div class="card">
+          <div class="label">Diner side</div>
+          <h4>The 90-review scroll</h4>
+          <p>I'm vegetarian. I want a date night. Yelp shows me 90 reviews of an Italian place I'll never sit at. Apple Maps is dumb. ChatGPT hallucinates restaurants. Nobody plans a <em style="font-family:'Cormorant Garamond',serif;color:var(--rose);">whole evening</em>.</p>
+        </div>
+        <div class="card">
+          <div class="label">Restaurant side</div>
+          <h4>The 9pm Instagram tax</h4>
+          <p>660K US restaurants. Nobody on staff is a marketer. Tonight's special goes unposted, or gets a stock-photo'd 6pm caption nobody reads. Existing tools are 4 disconnected SaaS subscriptions.</p>
+        </div>
+      </div>
+      <p class="closing-line">Eve fixes both — <em>and the two sides feed each other.</em></p>
+    </section>
+
+    <!-- SLIDE 3: THE PRODUCT (DEMO TRANSITION) -->
+    <section class="slide">
+      <span class="brand">eve</span>
+      <span class="slide-num">03 / 05</span>
+      <p class="eyebrow">Live demo · two sides, one engine</p>
+      <h2><em>One engine.</em><br />Two sides that feed each other.</h2>
+      <div class="grid-2">
+        <div class="card">
+          <div class="label">Diner side · /</div>
+          <p style="font-size:14px;">Vibe form → Eve generates a 3-stop evening:</p>
+          <div class="stack">
+            <div class="row"><span class="left">Stop 1 · Dinner anchor</span><span class="right">AI-illustrated card</span></div>
+            <div class="row"><span class="left">Stop 2 · Dessert / drinks / view</span><span class="right">AI-illustrated card</span></div>
+            <div class="row"><span class="left">Stop 3 · The closer</span><span class="right">AI-illustrated card</span></div>
+            <div class="row"><span class="left">Voice tour by Eve</span><span class="right">Cloud TTS · auto-play</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="label">Restaurant side · /restaurant</div>
+          <p style="font-size:14px;">Tonight's dish → Eve generates a complete content pack:</p>
+          <div class="stack">
+            <div class="row"><span class="left">Instagram post</span><span class="right">image + caption + tags</span></div>
+            <div class="row"><span class="left">15-sec Reel</span><span class="right">3 scenes + voiceover</span></div>
+            <div class="row"><span class="left">Menu card</span><span class="right">brand-voiced</span></div>
+            <div class="row"><span class="left">Email + SMS</span><span class="right">downloadable</span></div>
+          </div>
+        </div>
+      </div>
+      <p class="closing-line">Restaurants <em>publish to Eve diners</em> in one click → diner index gets richer → diners book → restaurants pay more. <strong style="font-style:normal;color:var(--gold);">Marketplace flywheel.</strong></p>
+    </section>
+
+    <!-- SLIDE 4: ARCHITECTURE + TECH -->
+    <section class="slide">
+      <span class="brand">eve</span>
+      <span class="slide-num">04 / 05</span>
+      <p class="eyebrow">Built only on Google · interleaved multimodal native</p>
+      <h2>Five Google products.<br /><em>One clean stack.</em></h2>
+      <div class="grid-4" style="margin-top:32px;">
+        <div class="card">
+          <div class="label">Generation</div>
+          <h4 style="font-size:24px;">Gemini 2.5 Flash Image</h4>
+          <p style="font-size:13px;">Mandatory tech ✓<br/><code style="font-family:monospace;font-size:12px;color:var(--rose);">responseModalities: ['TEXT','IMAGE']</code></p>
+        </div>
+        <div class="card">
+          <div class="label">Reasoning</div>
+          <h4 style="font-size:24px;">Gemini Flash</h4>
+          <p style="font-size:13px;">Plan skeleton, copy, narration script — grounded in user input</p>
+        </div>
+        <div class="card">
+          <div class="label">Voice</div>
+          <h4 style="font-size:24px;">Cloud TTS Chirp 3 HD</h4>
+          <p style="font-size:13px;">Eve narration, Reel voiceover</p>
+        </div>
+        <div class="card">
+          <div class="label">Hosting</div>
+          <h4 style="font-size:24px;">Cloud Run</h4>
+          <p style="font-size:13px;">us-west1 · Cloud Build · Secret Manager · Artifact Registry</p>
+        </div>
+      </div>
+      <div class="meta-row" style="margin-top:32px;">
+        <span class="pill">Google GenAI SDK ✓</span>
+        <span class="pill">Hosted on Google Cloud ✓</span>
+        <span class="pill">Interleaved text+image output ✓</span>
+        <span class="pill">3 bonus categories: Future of Work + Creativity + Media</span>
+      </div>
+      <p class="closing-line">No mocks. No stubs. <em>Live at eve.mohitgoenka.com.</em></p>
+    </section>
+
+    <!-- SLIDE 5: BUSINESS + WHY ME / WHY NOW -->
+    <section class="slide">
+      <span class="brand">eve</span>
+      <span class="slide-num">05 / 05</span>
+      <p class="eyebrow">The business · why now · why me</p>
+      <h2><em>$1T</em> local dining.<br />Two AI-native lines.</h2>
+      <div class="grid-3" style="margin-top:24px;">
+        <div class="card">
+          <div class="label">Restaurant SaaS</div>
+          <div class="big">$99/mo</div>
+          <p>660K US restaurants × 1% capture × $99/mo = <strong style="color:var(--gold);">$7.8M ARR</strong></p>
+          <p style="margin-top:12px;font-size:13px;opacity:0.7;">Comp: Toast ($30B), Hootsuite, Resy</p>
+        </div>
+        <div class="card">
+          <div class="label">Diner premium</div>
+          <div class="big">$4.99/mo</div>
+          <p>5M+ Bay-Area-style diners × 1% × $4.99/mo = <strong style="color:var(--gold);">$3M ARR</strong></p>
+          <p style="margin-top:12px;font-size:13px;opacity:0.7;">Comp: Yelp ($2B mcap), TripAdvisor</p>
+        </div>
+        <div class="card">
+          <div class="label">Marketplace flywheel</div>
+          <div class="big">∞</div>
+          <p>Restaurants post → diner supply richer → diners book more → restaurants pay more.</p>
+          <p style="margin-top:12px;font-size:13px;opacity:0.7;">The thing Toast doesn't have. The thing Yelp can't build.</p>
+        </div>
+      </div>
+      <p class="closing-line" style="margin-top:48px;">
+        I'm <em>Mohit Goenka.</em> Director of Engineering at Yahoo Mail.
+        110+ patents. 12 production AI apps. Recipe.mohitgoenka.com (V1) → Eve (V2).
+      </p>
+      <p style="font-size:18px;line-height:1.6;color:rgba(248,244,238,0.75);max-width:1000px;margin-top:24px;">
+        I'm vegetarian, I cook, I plan date nights. <strong style="color:var(--gold);">I am the customer.</strong>
+        Six months ago Gemini multimodal couldn't ship this reliably. Today it can.
+        We'd like to talk about what comes next.
+      </p>
+      <div class="url-strip" style="margin-top:36px;">
+        Live · <a href="https://eve.mohitgoenka.com">eve.mohitgoenka.com</a>
+        &nbsp; · &nbsp; Code · <a href="https://github.com/mgoenka/eve">github.com/mgoenka/eve</a>
+        &nbsp; · &nbsp; Mohit · <a href="https://mohitgoenka.com">mohitgoenka.com</a>
+      </div>
+    </section>
+
+  </div>
+</body>
+</html>
