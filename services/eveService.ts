@@ -233,6 +233,41 @@ export async function suggestSpecial(input: {
   return (await res.json()) as SuggestSpecialResponse;
 }
 
+export interface ParsedIntent {
+  extracted: {
+    location: string | null;
+    vibe: string | null;
+    party: number | null;
+    dietary: string[];
+    budgetPerPerson: number | null;
+    cuisinePref: string | null;
+    freeText: string | null;
+  };
+  isComplete: boolean;
+  spokenReply: string;
+}
+
+export async function eveParseIntent(
+  transcript: string,
+  currentForm: {
+    location?: string;
+    vibe?: string;
+    party?: number;
+    dietary?: string[];
+    budgetPerPerson?: number;
+    cuisinePref?: string;
+    freeText?: string;
+  }
+): Promise<ParsedIntent> {
+  const res = await fetch('/api/eve-parse-intent', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ transcript, currentForm }),
+  });
+  if (!res.ok) throw new Error(`Parse failed: ${(await res.text()).slice(0, 200)}`);
+  return (await res.json()) as ParsedIntent;
+}
+
 export async function eveAvatar(
   mood: 'devoted' | 'listening' | 'speaking' | 'thinking' | 'longing' = 'devoted'
 ): Promise<{ imageData: string; imageMime: string }> {

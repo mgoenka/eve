@@ -24,6 +24,7 @@ import {
   Heart,
   Mic,
   MicOff,
+  ChevronDown,
 } from 'lucide-react';
 import {
   VIBES,
@@ -44,6 +45,7 @@ import {
   eveRefine,
   reverseGeocode,
   eveAvatar,
+  eveParseIntent,
 } from '../services/eveService';
 import { StopCard } from './StopCard';
 import { EveLogo } from './EveLogo';
@@ -160,6 +162,12 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   const [voiceTranscript, setVoiceTranscript] = useState('');
   const recognitionRef = useRef<any>(null);
   const baseTextRef = useRef('');
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSpeechAtRef = useRef<number>(Date.now());
+
+  const [formExpanded, setFormExpanded] = useState(false);
+  const [eveGreeted, setEveGreeted] = useState(false);
+  const [parsing, setParsing] = useState(false);
 
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -212,6 +220,9 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   };
 
   // ----- Voice input via Web Speech API: set up the recognizer once -----
+  // The recognizer auto-stops on ~3 seconds of silence in "smart" mode,
+  // which the conversational mic uses; the manual textarea mic stays open
+  // until the user toggles it off.
   useEffect(() => {
     const SR =
       (typeof window !== 'undefined' &&
@@ -233,6 +244,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
       const fullText = (baseTextRef.current ? baseTextRef.current + ' ' : '') + transcript.trim();
       setVoiceTranscript(transcript.trim());
       setFreeText(fullText);
+      lastSpeechAtRef.current = Date.now();
     };
     rec.onend = () => setVoiceListening(false);
     rec.onerror = () => setVoiceListening(false);
@@ -241,6 +253,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
       try {
         rec.stop();
       } catch {}
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
     };
   }, []);
 
@@ -537,6 +550,135 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
     }
   }, [voiceListening, freeText]);
 
+  // Helper to actually parse the transcript and act on the result.
+  // Either fills out enough of the form to execute (and starts the plan),
+  // or speaks back asking for the one missing thing and re-opens the mic.
+  const processTranscript = useCallback(
+    async (transcript: string) => {
+      if (!transcript.trim()) return;
+      setParsing(true);
+      try {
+        const result = await eveParseIntent(transcript, {
+          location: city === SUGGESTED_CITY ? '' : city,
+          vibe,
+          party,
+          dietary,
+          budgetPerPerson,
+          cuisinePref,
+          freeText,
+        });
+
+        // Apply extracted fields where present
+        let nextLocation = city;
+        let nextVibe: Vibe = vibe;
+        let nextFreeText = freeText;
+        let nextDietary: DietaryPreference[] = dietary;
+        let nextParty = party;
+        if (result.extracted.location) {
+          nextLocation = result.extracted.location;
+          setCity(result.extracted.location);
+        }
+        if (result.extracted.vibe) {
+          const v = result.extracted.vibe as Vibe;
+          if (['date_night', 'celebrating', 'casual', 'family', 'friends', 'solo'].includes(v)) {
+            nextVibe = v;
+            setVibe(v);
+          }
+        }
+        if (typeof result.extracted.party === 'number' && result.extracted.party > 0) {
+          nextParty = result.extracted.party;
+          setParty(result.extracted.party);
+        }
+        if (result.extracted.dietary && result.extracted.dietary.length) {
+          const known: DietaryPreference[] = [
+            'vegetarian',
+            'vegan',
+            'gluten_free',
+            'halal',
+            'kosher',
+            'nut_free',
+            'dairy_free',
+          ];
+          const merged = Array.from(
+            new Set([...dietary, ...result.extracted.dietary.filter((d): d is DietaryPreference => known.includes(d as DietaryPreference))])
+          ) as DietaryPreference[];
+          nextDietary = merged;
+          setDietary(merged);
+        }
+        if (typeof result.extracted.budgetPerPerson === 'number' && result.extracted.budgetPerPerson > 0) {
+          setBudgetPerPerson(result.extracted.budgetPerPerson);
+        }
+        if (result.extracted.cuisinePref) setCuisinePref(result.extracted.cuisinePref);
+        if (result.extracted.freeText) {
+          nextFreeText = result.extracted.freeText;
+          setFreeText(result.extracted.freeText);
+        }
+
+        // Eve speaks her response
+        if (result.spokenReply) {
+          setEveIntroText(result.spokenReply);
+          await speakAsEveAndWait(result.spokenReply);
+        }
+
+        if (result.isComplete && nextLocation) {
+          // Done — execute the plan
+          setTimeout(() => {
+            buildPlan({
+              city: nextLocation,
+              vibe: nextVibe,
+              freeText: nextFreeText,
+              party: nextParty,
+              dietary: nextDietary,
+            });
+          }, 250);
+        } else {
+          // Need more info — re-open the mic for follow-up
+          setVoiceTranscript('');
+          baseTextRef.current = '';
+          setTimeout(() => {
+            const rec = recognitionRef.current;
+            if (!rec) return;
+            try {
+              rec.start();
+              setVoiceListening(true);
+              startSmartSilenceWatcher();
+            } catch {}
+          }, 400);
+        }
+      } catch (err: any) {
+        console.error('parse failed', err);
+      } finally {
+        setParsing(false);
+      }
+    },
+    [city, vibe, party, dietary, budgetPerPerson, cuisinePref, freeText, buildPlan]
+  );
+
+  // Watch for silence — when no speech result for 2.8s, auto-stop and parse.
+  const startSmartSilenceWatcher = useCallback(() => {
+    if (silenceTimerRef.current) clearInterval(silenceTimerRef.current);
+    lastSpeechAtRef.current = Date.now();
+    silenceTimerRef.current = setInterval(() => {
+      if (!voiceListening && silenceTimerRef.current) {
+        clearInterval(silenceTimerRef.current);
+        silenceTimerRef.current = null;
+        return;
+      }
+      if (Date.now() - lastSpeechAtRef.current > 2800 && (voiceTranscript || '').trim().length > 0) {
+        // Stop and process
+        const rec = recognitionRef.current;
+        try {
+          rec?.stop();
+        } catch {}
+        setVoiceListening(false);
+        if (silenceTimerRef.current) clearInterval(silenceTimerRef.current);
+        silenceTimerRef.current = null;
+        const captured = voiceTranscript;
+        setTimeout(() => processTranscript(captured), 200);
+      }
+    }, 400) as any;
+  }, [voiceListening, voiceTranscript, processTranscript]);
+
   const tellEveByVoice = useCallback(() => {
     const rec = recognitionRef.current;
     if (!rec) {
@@ -548,16 +690,38 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
         rec.stop();
       } catch {}
       setVoiceListening(false);
-      setTimeout(() => buildPlan({ freeText }), 250);
+      if (silenceTimerRef.current) clearInterval(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+      const captured = voiceTranscript;
+      setTimeout(() => processTranscript(captured), 200);
     } else {
-      baseTextRef.current = freeText;
+      baseTextRef.current = '';
       setVoiceTranscript('');
+      setFreeText('');
       try {
         rec.start();
         setVoiceListening(true);
+        lastSpeechAtRef.current = Date.now();
+        startSmartSilenceWatcher();
       } catch {}
     }
-  }, [voiceListening, freeText, buildPlan]);
+  }, [voiceListening, voiceTranscript, buildPlan, processTranscript, startSmartSilenceWatcher]);
+
+  // Page-load greeting: 5 sec after mount, attempt to greet. Browsers
+  // may block autoplay before any user gesture; we silently swallow that
+  // and the next user click will trigger Eve's voice anyway.
+  useEffect(() => {
+    if (eveGreeted || muted) return;
+    const greeting =
+      "Hi, I'm Eve. Tell me what kind of evening you want, or hit Surprise Me, and I'll plan it for you.";
+    const t = setTimeout(() => {
+      setEveGreeted(true);
+      setEveIntroText(greeting);
+      speakAsEve(greeting);
+    }, 5000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const surpriseMe = useCallback(() => {
     // Honor whatever the user has already filled out.
@@ -779,21 +943,52 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
             </button>
           </div>
 
-          {voiceListening && voiceTranscript && (
+          {(voiceListening || parsing) && (
             <div className="max-w-xl mx-auto mb-5 px-4 py-3 rounded-2xl border border-eve-rose/35 bg-eve-rose/5 text-center animate-fade-in">
-              <p className="text-[10px] tracking-wide text-eve-rose/85 mb-1 italic font-serif inline-flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-eve-rose animate-pulse" />
-                Eve hears you
+              <p className="text-[11px] tracking-wide text-eve-rose/85 mb-1 italic font-serif inline-flex items-center gap-1.5">
+                {parsing ? (
+                  <>
+                    <Loader2 size={10} className="animate-spin" />
+                    Eve is making sense of you
+                  </>
+                ) : (
+                  <>
+                    <span className="w-1.5 h-1.5 rounded-full bg-eve-rose animate-pulse" />
+                    Eve is listening
+                  </>
+                )}
               </p>
-              <p className="font-serif italic text-base text-eve-cream/90">"{voiceTranscript}"</p>
+              {voiceTranscript ? (
+                <p className="font-serif italic text-base text-eve-cream/90">"{voiceTranscript}"</p>
+              ) : (
+                <p className="font-serif italic text-sm text-eve-cream/55">tell her what evening you want</p>
+              )}
             </div>
           )}
 
-          <div className="text-center text-[12px] tracking-wider text-eve-cream/40 italic font-serif mb-5">
-            or, tell Eve more
+          {eveIntroText && !voiceListening && !parsing && (
+            <div className="max-w-xl mx-auto mb-5 px-4 py-3 rounded-2xl border border-eve-gold/30 bg-eve-gold/5 text-center animate-fade-in">
+              <p className="text-[11px] tracking-wide text-eve-gold/80 mb-1 italic font-serif inline-flex items-center gap-1.5">
+                {eveSpeaking && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-eve-gold animate-pulse" />
+                )}
+                Eve says
+              </p>
+              <p className="font-serif italic text-base text-eve-cream/90">"{eveIntroText}"</p>
+            </div>
+          )}
+
+          <div className="text-center mb-5">
+            <button
+              onClick={() => setFormExpanded((v) => !v)}
+              className="inline-flex items-center gap-1.5 text-[12px] tracking-wider text-eve-cream/50 hover:text-eve-cream italic font-serif transition-colors"
+            >
+              <ChevronDown size={11} className={`transition-transform ${formExpanded ? 'rotate-180' : ''}`} />
+              {formExpanded ? 'or just talk to Eve' : "I'd rather pick the details myself"}
+            </button>
           </div>
 
-          <div className="space-y-5">
+          <div className={`space-y-5 ${formExpanded ? '' : 'hidden'}`}>
             <div>
               <label className="block text-[12px] tracking-wide text-eve-gold/80 mb-2 font-medium">
                 The vibe
@@ -832,14 +1027,14 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="md:col-span-2">
                 <label className="block text-[12px] tracking-wide text-eve-gold/80 mb-2 font-medium">
-                  City or area
+                  Location
                 </label>
                 <div className="relative">
                   <input
                     type="text"
                     value={city}
                     onChange={(e) => setCity(e.target.value)}
-                    placeholder={SUGGESTED_CITY}
+                    placeholder="A city, a neighborhood, or a restaurant you have in mind"
                     className={`w-full px-5 py-3.5 pr-14 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-base ${ghostIf(city, SUGGESTED_CITY)}`}
                   />
                   <button
