@@ -18,6 +18,7 @@ RUN npm ci --omit=dev
 
 COPY --from=builder /app/dist ./dist
 COPY server.ts ./
+COPY agent.ts ./
 COPY constants.ts ./
 COPY types.ts ./
 COPY tsconfig.json ./
