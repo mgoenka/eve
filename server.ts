@@ -509,6 +509,36 @@ Schema:
   }
 });
 
+async function researchVenueDetails(
+  name: string,
+  city: string,
+  kind: string
+): Promise<string> {
+  if (!ai) return '';
+  const prompt = `Search the web for "${name}" in "${city}". In ONE paragraph (max 55 words), describe what the place actually looks like and what to expect — concrete sensory cues only:
+- Interior design / decor / lighting style
+- One signature dish OR signature visual element they are known for (depending on stop kind: ${kind})
+- The ambient mood (loud / quiet / intimate / lively)
+
+Constraints:
+- Use ONLY details verifiable from real reviews, official photos, or food media.
+- If you cannot confirm details, give general cues for that kind of place in ${city} and prefix with "Generally:".
+- Output ONLY the paragraph. No headings, no commentary, no preamble.`;
+  try {
+    const response = await ai.models.generateContent({
+      model: TEXT_MODEL,
+      contents: prompt,
+      config: {
+        temperature: 0.4,
+        tools: [{ googleSearch: {} }],
+      },
+    });
+    return ((response.text || '').trim() || '').slice(0, 600);
+  } catch {
+    return '';
+  }
+}
+
 app.post('/api/plan-experience/stop-image', async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
@@ -555,15 +585,22 @@ app.post('/api/plan-experience/stop-image', async (req, res) => {
   };
   const sceneStyle = kindStyle[kind] || kindStyle.dinner;
 
-  const prompt = `Create an editorial-style illustration for a venue card on a date-night planning app.
+  const venueDetails = await researchVenueDetails(name, city, kind);
+  const venueLine = venueDetails
+    ? `Real venue details (use these to ground the imagery): ${venueDetails}`
+    : '';
+
+  const prompt = `Create an editorial-style illustration for a venue card on an evening-planning app.
 
 Venue: ${name}, in ${city}
 Vibe descriptor: "${oneLineVibe}"
 Stop kind: ${kind}
 
+${venueLine}
+
 ${sceneStyle}
 
-Visual style: ${visualStyle}. Photoreal but slightly painterly, like a high-end magazine spread (Bon Appetit, Cereal Magazine). NO text in the image. NO logos. NO watermarks. NO captions. Single composed scene, no collage. Square aspect ratio framing.`;
+Visual style: ${visualStyle}. Photoreal but slightly painterly, like a high-end magazine spread (Bon Appetit, Cereal Magazine, Kinfolk). Honor the real venue details above when present — interior cues, signature dish, ambient mood — and apply the visual style on top. NO text in the image. NO logos. NO watermarks. NO captions. Single composed scene, no collage. Square aspect ratio framing.`;
 
   try {
     const response = await ai.models.generateContent({
