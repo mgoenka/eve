@@ -1,0 +1,45 @@
+substitutions:
+  _REGION: us-west1
+  _REPOSITORY: cloud-run-images
+
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/eve:$BUILD_ID'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/eve:latest'
+      - '.'
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/eve:$BUILD_ID']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/eve:latest']
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'eve'
+      - '--image'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/eve:$BUILD_ID'
+      - '--region'
+      - '${_REGION}'
+      - '--platform'
+      - 'managed'
+      - '--execution-environment'
+      - 'gen2'
+      - '--allow-unauthenticated'
+      - '--port'
+      - '8080'
+      - '--memory'
+      - '1Gi'
+      - '--cpu'
+      - '2'
+      - '--timeout'
+      - '600'
+      - '--set-secrets'
+      - 'GEMINI_API_KEY=GEMINI_API_KEY:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

@@ -1,0 +1,583 @@
+import { useEffect, useState } from 'react';
+import { Sparkles, Wand2, RotateCcw, Download, Copy, Check, ChefHat, Send } from 'lucide-react';
+import { CUISINES, DEMO_RESTAURANTS } from '../constants';
+import type { Cuisine, ContentPack, RestaurantBrand } from '../types';
+import { generateContentPack, postSpecial, synthesize } from '../services/eveService';
+
+interface Props {
+  onSwitchToDiner: () => void;
+}
+
+const STORAGE_KEY = 'eve.restaurantBrand';
+
+function loadBrand(): RestaurantBrand | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as RestaurantBrand) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveBrand(b: RestaurantBrand) {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(b));
+  } catch {}
+}
+
+function downloadDataUrl(filename: string, mime: string, base64: string) {
+  const link = document.createElement('a');
+  link.href = `data:${mime};base64,${base64}`;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+function downloadText(filename: string, text: string) {
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+export function RestaurantView({ onSwitchToDiner }: Props) {
+  const [brand, setBrand] = useState<RestaurantBrand | null>(loadBrand());
+  const [setupOpen, setSetupOpen] = useState(false);
+
+  const [name, setName] = useState(brand?.name || 'Saffron Garden');
+  const [city, setCity] = useState(brand?.city || 'Santa Clara, CA');
+  const [cuisine, setCuisine] = useState<Cuisine>(brand?.cuisine || 'indian');
+  const [voice, setVoice] = useState(brand?.voice || DEMO_RESTAURANTS[0].voice);
+  const [signature, setSignature] = useState(brand?.signatureDishes || DEMO_RESTAURANTS[0].signatureDishes);
+
+  const [dishName, setDishName] = useState('Paneer Butter Masala');
+  const [dishDescription, setDishDescription] = useState(
+    'Tonight: hand-cubed paneer simmered slow in a tomato-cashew gravy with kasuri methi, finished with cream and a swirl of butter. Served with garlic naan.'
+  );
+
+  const [generating, setGenerating] = useState(false);
+  const [pack, setPack] = useState<ContentPack | null>(null);
+  const [reelAudio, setReelAudio] = useState<string | null>(null);
+  const [posted, setPosted] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!brand) setSetupOpen(true);
+  }, [brand]);
+
+  const saveBrandFn = () => {
+    const b: RestaurantBrand = {
+      name: name.trim(),
+      city: city.trim(),
+      cuisine,
+      voice: voice.trim(),
+      signatureDishes: signature.trim(),
+    };
+    saveBrand(b);
+    setBrand(b);
+    setSetupOpen(false);
+  };
+
+  const generate = async () => {
+    if (!dishName.trim()) {
+      setError("Tell Eve what's on tonight.");
+      return;
+    }
+    setError(null);
+    setPack(null);
+    setReelAudio(null);
+    setPosted(false);
+    setGenerating(true);
+    try {
+      const result = await generateContentPack({
+        dishName: dishName.trim(),
+        dishDescription: dishDescription.trim(),
+        restaurantName: name.trim(),
+        cuisine,
+        voice,
+        city,
+        signatureDishes: signature,
+      });
+      setPack(result);
+
+      if (result.reel.fullVoiceoverScript) {
+        try {
+          const audio = await synthesize(result.reel.fullVoiceoverScript, 'reel');
+          setReelAudio(`data:${audio.audioMime};base64,${audio.audioData}`);
+        } catch {}
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Content pack failed');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const publishToEve = async () => {
+    if (!pack) return;
+    try {
+      await postSpecial({
+        restaurantName: name.trim(),
+        city: city.trim(),
+        cuisine,
+        dishName: pack.dishName,
+        caption: pack.instagramPost.caption,
+        imageData: pack.instagramPost.imageData,
+        imageMime: pack.instagramPost.imageMime,
+      });
+      setPosted(true);
+    } catch (err: any) {
+      setError(err?.message || 'Publish failed');
+    }
+  };
+
+  const copyToClipboard = async (id: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(id);
+      setTimeout(() => setCopied(null), 1600);
+    } catch {}
+  };
+
+  if (setupOpen) {
+    return (
+      <div className="relative z-10 min-h-screen flex flex-col">
+        <header className="px-6 md:px-10 py-5 flex items-center justify-between">
+          <span className="font-serif italic text-3xl text-shimmer">eve</span>
+          <button
+            onClick={onSwitchToDiner}
+            className="text-xs font-semibold text-eve-cream/60 hover:text-eve-cream uppercase tracking-widest"
+          >
+            For diners ↗
+          </button>
+        </header>
+        <main className="flex-1 max-w-2xl mx-auto w-full px-6 py-10">
+          <p className="text-[11px] tracking-[0.4em] uppercase text-eve-gold/80 mb-4">
+            For restaurants
+          </p>
+          <h1 className="font-serif text-4xl md:text-5xl leading-tight">
+            <span className="text-eve-cream">Tonight, </span>
+            <span className="text-shimmer italic">told beautifully.</span>
+          </h1>
+          <p className="mt-4 text-eve-cream/65 text-base leading-relaxed max-w-xl">
+            Set your restaurant once. Then every night, drop in the day's special and Eve generates an
+            Instagram post, a 15-second Reel with voiceover, a menu card, an email, and an SMS — all
+            consistent with your voice. Use them anywhere. Your dish also enters the Eve dining index for
+            local diners planning their night.
+          </p>
+
+          <div className="mt-8 space-y-5">
+            <div>
+              <label className="block text-[11px] tracking-[0.3em] uppercase text-eve-gold/70 mb-2">
+                Restaurant name
+              </label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[11px] tracking-[0.3em] uppercase text-eve-gold/70 mb-2">
+                  City / area
+                </label>
+                <input
+                  type="text"
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                  className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] tracking-[0.3em] uppercase text-eve-gold/70 mb-2">
+                  Cuisine
+                </label>
+                <select
+                  value={cuisine}
+                  onChange={(e) => setCuisine(e.target.value as Cuisine)}
+                  className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base text-eve-cream"
+                >
+                  {CUISINES.map((c) => (
+                    <option key={c.id} value={c.id} className="bg-eve-ink">
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[11px] tracking-[0.3em] uppercase text-eve-gold/70 mb-2">
+                Brand voice (one-line)
+              </label>
+              <input
+                type="text"
+                value={voice}
+                onChange={(e) => setVoice(e.target.value)}
+                placeholder="e.g. Warm, family-run, recipe-honoring; specifics over hype"
+                className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[11px] tracking-[0.3em] uppercase text-eve-gold/70 mb-2">
+                Signature dishes
+              </label>
+              <textarea
+                rows={3}
+                value={signature}
+                onChange={(e) => setSignature(e.target.value)}
+                placeholder="e.g. Paneer butter masala, dal makhani, garlic naan, mango lassi"
+                className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] leading-relaxed resize-none"
+              />
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {DEMO_RESTAURANTS.map((d) => (
+                <button
+                  key={d.id}
+                  onClick={() => {
+                    setName(d.name);
+                    setCity(d.city);
+                    setCuisine(d.cuisine);
+                    setVoice(d.voice);
+                    setSignature(d.signatureDishes);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-xs font-medium text-eve-cream/70 hover:text-eve-cream"
+                >
+                  <Sparkles size={11} />
+                  Try: {d.name}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={saveBrandFn}
+                disabled={!name.trim() || !city.trim()}
+                className="inline-flex items-center gap-2 px-7 py-3.5 rounded-full font-serif italic font-bold text-lg text-eve-ink bg-gradient-to-r from-amber-200 via-eve-gold to-eve-rose disabled:opacity-30 transition-all"
+              >
+                <ChefHat size={18} />
+                Continue
+              </button>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative z-10 min-h-screen flex flex-col">
+      <header className="px-6 md:px-10 py-5 flex items-center justify-between border-b border-white/5">
+        <div className="inline-flex items-center gap-3">
+          <span className="font-serif italic text-2xl text-shimmer">eve</span>
+          <span className="hidden md:inline text-xs text-eve-cream/45 tracking-[0.25em] uppercase">
+            for restaurants · {brand?.name}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setSetupOpen(true)}
+            className="px-3 py-2 rounded-full bg-white/5 hover:bg-white/10 text-xs font-semibold text-eve-cream/70 transition-colors"
+          >
+            Edit brand
+          </button>
+          <button
+            onClick={onSwitchToDiner}
+            className="px-3 py-2 rounded-full bg-white/5 hover:bg-white/10 text-xs font-semibold text-eve-cream/70 transition-colors"
+          >
+            For diners ↗
+          </button>
+        </div>
+      </header>
+
+      <main className="flex-1 max-w-5xl mx-auto w-full px-4 md:px-8 py-8">
+        <section className="rounded-3xl border border-white/10 bg-white/[0.03] backdrop-blur p-6 md:p-8">
+          <p className="text-[11px] tracking-[0.35em] uppercase text-eve-gold/80 mb-2">
+            Tonight at {brand?.name}
+          </p>
+          <h1 className="font-serif text-3xl md:text-4xl leading-tight mb-5 text-eve-cream">
+            What's on tonight?
+          </h1>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="md:col-span-1">
+              <label className="block text-[11px] tracking-[0.3em] uppercase text-eve-gold/70 mb-2">
+                Dish name
+              </label>
+              <input
+                value={dishName}
+                onChange={(e) => setDishName(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px]"
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-[11px] tracking-[0.3em] uppercase text-eve-gold/70 mb-2">
+                Tonight's note (one line)
+              </label>
+              <input
+                value={dishDescription}
+                onChange={(e) => setDishDescription(e.target.value)}
+                placeholder="e.g. Made with the new spice blend; small batch tonight"
+                className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px]"
+              />
+            </div>
+          </div>
+
+          {error && (
+            <div className="mt-4 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-200 text-sm">
+              {error}
+            </div>
+          )}
+
+          <div className="mt-6 flex flex-wrap items-center gap-3">
+            <button
+              onClick={generate}
+              disabled={generating || !dishName.trim()}
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-full font-serif italic font-bold text-lg text-eve-ink bg-gradient-to-r from-amber-200 via-eve-gold to-eve-rose disabled:opacity-30 transition-all"
+            >
+              <Wand2 size={18} />
+              {generating ? 'Forging the pack…' : 'Generate the pack'}
+            </button>
+            {pack && (
+              <button
+                onClick={publishToEve}
+                disabled={posted}
+                className={`inline-flex items-center gap-2 px-5 py-3 rounded-full font-semibold text-sm border transition-all ${
+                  posted
+                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+                    : 'bg-eve-rose/15 text-eve-rose border-eve-rose/40 hover:bg-eve-rose/25'
+                }`}
+              >
+                {posted ? <Check size={14} /> : <Send size={14} />}
+                {posted ? 'Live on Eve tonight' : 'Publish to Eve diners'}
+              </button>
+            )}
+          </div>
+        </section>
+
+        {pack && (
+          <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-5">
+            {/* Instagram */}
+            <section className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur overflow-hidden animate-fade-in-up">
+              <header className="px-5 py-3 flex items-center justify-between border-b border-white/5">
+                <div className="inline-flex items-center gap-2">
+                  <span className="text-[10px] tracking-[0.3em] uppercase text-eve-gold/80">
+                    Instagram post
+                  </span>
+                </div>
+                <div className="flex gap-1">
+                  {pack.instagramPost.imageData && (
+                    <button
+                      onClick={() =>
+                        downloadDataUrl(
+                          `${pack.dishName.replace(/\s+/g, '-')}-ig.png`,
+                          pack.instagramPost.imageMime || 'image/png',
+                          pack.instagramPost.imageData!
+                        )
+                      }
+                      className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 text-[10px] font-semibold tracking-wide uppercase text-eve-cream/70 inline-flex items-center gap-1"
+                    >
+                      <Download size={10} /> PNG
+                    </button>
+                  )}
+                  <button
+                    onClick={() => copyToClipboard('ig', `${pack.instagramPost.caption}\n\n${pack.instagramPost.hashtags.map((h) => '#' + h).join(' ')}`)}
+                    className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 text-[10px] font-semibold tracking-wide uppercase text-eve-cream/70 inline-flex items-center gap-1"
+                  >
+                    {copied === 'ig' ? <Check size={10} /> : <Copy size={10} />} caption
+                  </button>
+                </div>
+              </header>
+              {pack.instagramPost.imageData && (
+                <img
+                  src={`data:${pack.instagramPost.imageMime || 'image/png'};base64,${pack.instagramPost.imageData}`}
+                  alt={pack.dishName}
+                  className="w-full aspect-square object-cover"
+                />
+              )}
+              <div className="p-5">
+                <p className="text-[14px] leading-relaxed whitespace-pre-line text-eve-cream/90">
+                  {pack.instagramPost.caption}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {pack.instagramPost.hashtags.map((h, i) => (
+                    <span key={i} className="text-[11px] text-eve-rose/85">
+                      #{h}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            {/* Reel */}
+            <section className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur overflow-hidden animate-fade-in-up">
+              <header className="px-5 py-3 flex items-center justify-between border-b border-white/5">
+                <span className="text-[10px] tracking-[0.3em] uppercase text-eve-gold/80">
+                  15-sec Reel · 3 scenes + voiceover
+                </span>
+                <button
+                  onClick={() => copyToClipboard('reel', pack.reel.fullVoiceoverScript)}
+                  className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 text-[10px] font-semibold tracking-wide uppercase text-eve-cream/70 inline-flex items-center gap-1"
+                >
+                  {copied === 'reel' ? <Check size={10} /> : <Copy size={10} />} script
+                </button>
+              </header>
+              <div className="grid grid-cols-3 gap-px bg-white/5">
+                {pack.reel.scenes.map((sc, i) => (
+                  <div key={i} className="aspect-square bg-eve-ink/40 relative overflow-hidden">
+                    {sc.imageData ? (
+                      <img
+                        src={`data:${sc.imageMime || 'image/png'};base64,${sc.imageData}`}
+                        alt={sc.description}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="absolute inset-0 flex items-center justify-center text-[10px] uppercase tracking-widest text-white/30">
+                        scene {i + 1}
+                      </div>
+                    )}
+                    <div className="absolute bottom-0 inset-x-0 p-2 bg-gradient-to-t from-eve-ink/95 to-transparent">
+                      <p className="text-[11px] text-eve-cream/95 italic font-serif leading-tight">
+                        "{sc.voiceover}"
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="p-5">
+                <p className="text-[12px] text-eve-cream/70 leading-snug italic">
+                  Full voiceover: "{pack.reel.fullVoiceoverScript}"
+                </p>
+                {reelAudio && (
+                  <audio
+                    controls
+                    src={reelAudio}
+                    className="mt-3 w-full h-9 rounded-full"
+                  />
+                )}
+              </div>
+            </section>
+
+            {/* Menu Card */}
+            <section className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur overflow-hidden animate-fade-in-up">
+              <header className="px-5 py-3 flex items-center justify-between border-b border-white/5">
+                <span className="text-[10px] tracking-[0.3em] uppercase text-eve-gold/80">
+                  Menu card
+                </span>
+                <button
+                  onClick={() =>
+                    downloadText(
+                      `${pack.menuCard.name.replace(/\s+/g, '-')}-menu.txt`,
+                      `${pack.menuCard.name} ${pack.menuCard.suggestedPrice ? `— ${pack.menuCard.suggestedPrice}` : ''}\n${pack.menuCard.description}\n\n${pack.menuCard.allergenTags.join(' · ')}`
+                    )
+                  }
+                  className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 text-[10px] font-semibold tracking-wide uppercase text-eve-cream/70 inline-flex items-center gap-1"
+                >
+                  <Download size={10} /> txt
+                </button>
+              </header>
+              <div className="p-6">
+                <div className="flex items-baseline justify-between mb-3">
+                  <h3 className="font-serif text-2xl text-eve-cream">{pack.menuCard.name}</h3>
+                  {pack.menuCard.suggestedPrice && (
+                    <span className="font-serif text-xl text-eve-gold">
+                      {pack.menuCard.suggestedPrice}
+                    </span>
+                  )}
+                </div>
+                <p className="text-[14px] text-eve-cream/85 leading-relaxed">
+                  {pack.menuCard.description}
+                </p>
+                {pack.menuCard.allergenTags.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {pack.menuCard.allergenTags.map((tag, i) => (
+                      <span
+                        key={i}
+                        className="px-2 py-0.5 rounded-full text-[10px] tracking-wide uppercase text-eve-rose/90 border border-eve-rose/30 bg-eve-rose/5"
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
+
+            {/* Email + SMS */}
+            <section className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur overflow-hidden animate-fade-in-up">
+              <header className="px-5 py-3 flex items-center justify-between border-b border-white/5">
+                <span className="text-[10px] tracking-[0.3em] uppercase text-eve-gold/80">
+                  Email + SMS
+                </span>
+                <button
+                  onClick={() =>
+                    copyToClipboard(
+                      'email',
+                      `Subject: ${pack.emailBlast.subject}\n\n${pack.emailBlast.bodyHtml.replace(/<[^>]+>/g, '')}\n\n— SMS —\n${pack.smsBlast}`
+                    )
+                  }
+                  className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 text-[10px] font-semibold tracking-wide uppercase text-eve-cream/70 inline-flex items-center gap-1"
+                >
+                  {copied === 'email' ? <Check size={10} /> : <Copy size={10} />} all
+                </button>
+              </header>
+              <div className="p-5 space-y-4">
+                <div>
+                  <p className="text-[10px] tracking-[0.3em] uppercase text-eve-cream/45 mb-1">
+                    Email subject
+                  </p>
+                  <p className="text-[15px] text-eve-cream font-medium">
+                    {pack.emailBlast.subject}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] tracking-[0.3em] uppercase text-eve-cream/45 mb-1">
+                    Email body
+                  </p>
+                  <div
+                    className="text-[13px] text-eve-cream/85 leading-relaxed prose-eve"
+                    dangerouslySetInnerHTML={{ __html: pack.emailBlast.bodyHtml }}
+                  />
+                </div>
+                <div className="pt-4 border-t border-white/10">
+                  <p className="text-[10px] tracking-[0.3em] uppercase text-eve-cream/45 mb-1">
+                    SMS blast
+                  </p>
+                  <p className="text-[14px] text-eve-cream/90 italic font-serif leading-snug">
+                    {pack.smsBlast}
+                  </p>
+                </div>
+              </div>
+            </section>
+          </div>
+        )}
+
+        {pack && (
+          <div className="mt-8 max-w-2xl mx-auto text-center text-[12px] tracking-wide uppercase text-eve-cream/45">
+            <span className="inline-flex items-center gap-2">
+              <RotateCcw size={11} />
+              <span>Tomorrow night, drop a new dish — Eve does this again, on brand, in 60 seconds.</span>
+            </span>
+          </div>
+        )}
+      </main>
+
+      <footer className="text-center py-6 text-[10px] text-white/25 tracking-[0.3em] uppercase">
+        Powered by Gemini 2.5 · Google Cloud · ADK-ready
+      </footer>
+    </div>
+  );
+}

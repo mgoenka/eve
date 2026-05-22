@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#1a0d2e" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+    <title>Eve — Plan your night</title>
+    <meta name="description" content="Eve plans your evening end-to-end. Dinner, dessert, the walk, the spot afterward — generated as one fluid multimodal experience. Built on Gemini." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Eve" />
+    <meta property="og:title" content="Eve — Plan your night" />
+    <meta property="og:description" content="Your evening, curated end-to-end." />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:wght@400;500;600;700&display=swap">
+    <link rel="stylesheet" href="/index.css">
+    <style>
+      html, body, #root {
+        margin: 0;
+        padding: 0;
+        min-height: 100vh;
+      }
+      body {
+        font-family: 'Inter', -apple-system, sans-serif;
+        background: #1a0d2e;
+        color: #f8f4ee;
+        overflow-x: hidden;
+        -webkit-font-smoothing: antialiased;
+      }
+      .font-serif {
+        font-family: 'Cormorant Garamond', serif;
+      }
+      .site-bg::before {
+        content: '';
+        position: fixed;
+        inset: 0;
+        background:
+          radial-gradient(ellipse 100% 80% at 50% -10%, rgba(232, 163, 158, 0.16) 0%, transparent 60%),
+          radial-gradient(ellipse 70% 50% at 85% 90%, rgba(245, 216, 150, 0.10) 0%, transparent 55%),
+          radial-gradient(ellipse 60% 40% at 15% 75%, rgba(168, 85, 247, 0.08) 0%, transparent 55%);
+        pointer-events: none;
+        z-index: 0;
+      }
+      @keyframes fade-in {
+        from { opacity: 0; transform: translateY(8px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes fade-in-up {
+        from { opacity: 0; transform: translateY(28px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes shimmer {
+        0% { background-position: -200% 0; }
+        100% { background-position: 200% 0; }
+      }
+      @keyframes glow-pulse {
+        0%, 100% { box-shadow: 0 0 32px rgba(245, 216, 150, 0.25); }
+        50% { box-shadow: 0 0 48px rgba(245, 216, 150, 0.45); }
+      }
+      .animate-fade-in { animation: fade-in 0.4s ease-out forwards; }
+      .animate-fade-in-up { animation: fade-in-up 0.6s ease-out forwards; }
+      .animate-glow-pulse { animation: glow-pulse 2.4s ease-in-out infinite; }
+      .text-shimmer {
+        background: linear-gradient(90deg, #f5d896 0%, #fef3c7 35%, #e8a39e 65%, #f5d896 100%);
+        background-size: 200% 100%;
+        animation: shimmer 6s linear infinite;
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>

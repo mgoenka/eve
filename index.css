@@ -1,0 +1,20 @@
+@import "tailwindcss";
+
+@theme {
+  --color-eve-ink: #1a0d2e;
+  --color-eve-ink-soft: #2d1b3e;
+  --color-eve-plum: #4a2d5e;
+  --color-eve-rose: #e8a39e;
+  --color-eve-gold: #f5d896;
+  --color-eve-cream: #f8f4ee;
+  --color-eve-paper-dim: #d4c8d8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+}
