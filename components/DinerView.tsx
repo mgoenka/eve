@@ -167,14 +167,21 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   const [voiceListening, setVoiceListening] = useState(false);
   const [voiceUnsupported, setVoiceUnsupported] = useState(false);
   const [voiceTranscript, setVoiceTranscript] = useState('');
+  // Conversation mode = once started, the mic auto-resumes after Eve speaks
+  // each reply, so it feels like a continuous conversation, not a series
+  // of single-shot voice commands.
+  const [conversationActive, setConversationActive] = useState(false);
+  const [userMuted, setUserMuted] = useState(false);
+
   const recognitionRef = useRef<any>(null);
   const baseTextRef = useRef('');
   const silenceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastSpeechAtRef = useRef<number>(Date.now());
-  // Mirror state into refs so closures inside setInterval / setTimeout
-  // see live values (the React state captured at closure-creation is stale)
   const voiceListeningRef = useRef(false);
   const voiceTranscriptRef = useRef('');
+  const conversationActiveRef = useRef(false);
+  const userMutedRef = useRef(false);
+  const eveSpeakingRef = useRef(false);
 
   const [formExpanded, setFormExpanded] = useState(false);
   const [eveGreeted, setEveGreeted] = useState(false);
@@ -201,6 +208,23 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
       u.search = '';
       window.history.replaceState({}, '', u.toString());
     }
+    // Tear down conversation state
+    try {
+      recognitionRef.current?.stop();
+    } catch {}
+    if (silenceTimerRef.current) clearInterval(silenceTimerRef.current);
+    silenceTimerRef.current = null;
+    setVoiceListening(false);
+    voiceListeningRef.current = false;
+    setVoiceTranscript('');
+    voiceTranscriptRef.current = '';
+    setConversationActive(false);
+    conversationActiveRef.current = false;
+    setUserMuted(false);
+    userMutedRef.current = false;
+    setEveSpeaking(false);
+    eveSpeakingRef.current = false;
+
     setPhase('input');
     setStops([]);
     setStory(null);
@@ -237,6 +261,15 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   useEffect(() => {
     voiceTranscriptRef.current = voiceTranscript;
   }, [voiceTranscript]);
+  useEffect(() => {
+    conversationActiveRef.current = conversationActive;
+  }, [conversationActive]);
+  useEffect(() => {
+    userMutedRef.current = userMuted;
+  }, [userMuted]);
+  useEffect(() => {
+    eveSpeakingRef.current = eveSpeaking;
+  }, [eveSpeaking]);
 
   // ----- Voice input via Web Speech API: set up the recognizer once -----
   // The recognizer auto-stops on ~3 seconds of silence in "smart" mode,
@@ -260,10 +293,21 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
       for (let i = 0; i < e.results.length; i++) {
         transcript += e.results[i][0].transcript + ' ';
       }
-      const fullText = (baseTextRef.current ? baseTextRef.current + ' ' : '') + transcript.trim();
-      setVoiceTranscript(transcript.trim());
+      const trimmed = transcript.trim();
+      const fullText = (baseTextRef.current ? baseTextRef.current + ' ' : '') + trimmed;
+      setVoiceTranscript(trimmed);
       setFreeText(fullText);
       lastSpeechAtRef.current = Date.now();
+
+      // Interruption: if Eve is speaking and the user starts talking
+      // (3+ chars of new speech), pause Eve so the user can take the floor.
+      if (eveSpeakingRef.current && trimmed.length > 3) {
+        const a = eveAudioRef.current;
+        try {
+          a?.pause();
+        } catch {}
+        setEveSpeaking(false);
+      }
     };
     rec.onend = () => setVoiceListening(false);
     rec.onerror = () => setVoiceListening(false);
@@ -690,7 +734,9 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
         }
 
         if (result.isComplete && nextLocation) {
-          // Done — execute the plan
+          // Done — execute the plan and end the conversation
+          setConversationActive(false);
+          conversationActiveRef.current = false;
           setTimeout(() => {
             buildPlan({
               city: nextLocation,
@@ -701,18 +747,23 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
             });
           }, 250);
         } else {
-          // Need more info — re-open the mic for follow-up
+          // Need more info OR user is in conversation mode → re-open the mic.
           setVoiceTranscript('');
+          voiceTranscriptRef.current = '';
           baseTextRef.current = '';
-          setTimeout(() => {
-            const rec = recognitionRef.current;
-            if (!rec) return;
-            try {
-              rec.start();
-              setVoiceListening(true);
-              startSmartSilenceWatcher();
-            } catch {}
-          }, 400);
+          if (conversationActiveRef.current && !userMutedRef.current) {
+            setTimeout(() => {
+              const rec = recognitionRef.current;
+              if (!rec) return;
+              try {
+                rec.start();
+                setVoiceListening(true);
+                voiceListeningRef.current = true;
+                lastSpeechAtRef.current = Date.now();
+                startSmartSilenceWatcher();
+              } catch {}
+            }, 400);
+          }
         }
       } catch (err: any) {
         console.error('parse failed', err);
@@ -755,23 +806,25 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
     }, 400);
   }, [processTranscript]);
 
+  // Mic toggle behavior:
+  // 1. If user is NOT in a conversation yet → start one (activate conversation, open mic).
+  // 2. If user IS in conversation:
+  //    - If Eve is currently speaking → silence Eve (user wants to take the floor).
+  //    - If mic is currently listening → toggle "user muted" (mic stops; conversation stays alive).
+  //    - If mic is currently muted → unmute (mic re-opens, conversation continues).
   const tellEveByVoice = useCallback(() => {
     const rec = recognitionRef.current;
     if (!rec) {
       buildPlan();
       return;
     }
-    if (voiceListeningRef.current) {
-      try {
-        rec.stop();
-      } catch {}
-      setVoiceListening(false);
-      voiceListeningRef.current = false;
-      if (silenceTimerRef.current) clearInterval(silenceTimerRef.current);
-      silenceTimerRef.current = null;
-      const captured = voiceTranscriptRef.current;
-      setTimeout(() => processTranscript(captured), 150);
-    } else {
+
+    // Case 1: not in conversation yet → activate
+    if (!conversationActiveRef.current) {
+      setConversationActive(true);
+      conversationActiveRef.current = true;
+      setUserMuted(false);
+      userMutedRef.current = false;
       baseTextRef.current = '';
       setVoiceTranscript('');
       voiceTranscriptRef.current = '';
@@ -783,8 +836,62 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
         lastSpeechAtRef.current = Date.now();
         startSmartSilenceWatcher();
       } catch {}
+      return;
     }
-  }, [buildPlan, processTranscript, startSmartSilenceWatcher]);
+
+    // Case 2: Eve is speaking and user wants to interject → silence Eve, open mic
+    if (eveSpeakingRef.current) {
+      try {
+        eveAudioRef.current?.pause();
+      } catch {}
+      setEveSpeaking(false);
+      eveSpeakingRef.current = false;
+      setUserMuted(false);
+      userMutedRef.current = false;
+      baseTextRef.current = '';
+      setVoiceTranscript('');
+      voiceTranscriptRef.current = '';
+      try {
+        rec.start();
+        setVoiceListening(true);
+        voiceListeningRef.current = true;
+        lastSpeechAtRef.current = Date.now();
+        startSmartSilenceWatcher();
+      } catch {}
+      return;
+    }
+
+    // Case 3: in conversation, mic is on → mute the user
+    if (voiceListeningRef.current && !userMutedRef.current) {
+      try {
+        rec.stop();
+      } catch {}
+      setVoiceListening(false);
+      voiceListeningRef.current = false;
+      if (silenceTimerRef.current) clearInterval(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+      setUserMuted(true);
+      userMutedRef.current = true;
+      return;
+    }
+
+    // Case 4: in conversation, user is muted → unmute and resume listening
+    if (userMutedRef.current) {
+      setUserMuted(false);
+      userMutedRef.current = false;
+      baseTextRef.current = '';
+      setVoiceTranscript('');
+      voiceTranscriptRef.current = '';
+      try {
+        rec.start();
+        setVoiceListening(true);
+        voiceListeningRef.current = true;
+        lastSpeechAtRef.current = Date.now();
+        startSmartSilenceWatcher();
+      } catch {}
+      return;
+    }
+  }, [buildPlan, startSmartSilenceWatcher]);
 
   // Page-load greeting: try after 5 seconds AND on first user interaction
   // (whichever comes first). Browsers block autoplay before user gesture, so
@@ -1078,11 +1185,30 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                 className={`group inline-flex items-center gap-2.5 px-6 py-3.5 rounded-full font-serif italic font-bold text-lg transition-all border ${
                   voiceListening
                     ? 'bg-eve-rose/25 text-eve-rose border-eve-rose/60 animate-glow-pulse'
-                    : 'bg-white/[0.04] text-eve-cream border-eve-rose/40 hover:bg-eve-rose/15 hover:text-eve-rose'
+                    : userMuted
+                      ? 'bg-white/[0.04] text-eve-cream/55 border-white/15 hover:border-white/25'
+                      : 'bg-white/[0.04] text-eve-cream border-eve-rose/40 hover:bg-eve-rose/15 hover:text-eve-rose'
                 }`}
+                title={
+                  !conversationActive
+                    ? 'Tap to start talking with Eve'
+                    : eveSpeaking
+                      ? 'Tap to interrupt Eve and take the floor'
+                      : voiceListening
+                        ? 'Tap to mute yourself (Eve will wait)'
+                        : 'Tap to unmute yourself'
+                }
               >
-                {voiceListening ? <MicOff size={18} /> : <Mic size={18} />}
-                {voiceListening ? 'Listening…' : 'Tell Eve'}
+                {voiceListening ? <Mic size={18} /> : <MicOff size={18} />}
+                {!conversationActive
+                  ? 'Tell Eve'
+                  : eveSpeakingRef.current || eveSpeaking
+                    ? 'Cut in'
+                    : voiceListening
+                      ? 'Listening…'
+                      : userMuted
+                        ? 'Tap to talk'
+                        : 'Listening…'}
               </button>
             )}
             <button

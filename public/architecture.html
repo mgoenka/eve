@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Eve · Architecture</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+  <style>
+    :root {
+      --ink: #1a0d2e;
+      --ink-soft: #2d1b3e;
+      --plum: #4a2d5e;
+      --rose: #e8a39e;
+      --gold: #f5d896;
+      --cream: #f8f4ee;
+      --paper-dim: #d4c8d8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: var(--ink);
+      color: var(--cream);
+      -webkit-font-smoothing: antialiased;
+      min-height: 100vh;
+    }
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 100% 80% at 50% -10%, rgba(232, 163, 158, 0.10) 0%, transparent 60%),
+        radial-gradient(ellipse 70% 50% at 85% 90%, rgba(245, 216, 150, 0.07) 0%, transparent 55%);
+      pointer-events: none;
+      z-index: 0;
+    }
+    .shell { position: relative; z-index: 1; max-width: 1280px; margin: 0 auto; padding: 60px 32px 80px; }
+    header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 56px; }
+    .brand { font-family: 'Cormorant Garamond', serif; font-style: italic; font-size: 32px; background: linear-gradient(90deg, var(--gold), var(--rose)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+    header a { color: rgba(248,244,238,0.7); text-decoration: none; font-size: 12px; letter-spacing: 0.05em; }
+    header a:hover { color: var(--gold); }
+    .eyebrow { font-size: 12px; letter-spacing: 0.4em; text-transform: uppercase; color: var(--gold); margin-bottom: 18px; opacity: 0.85; }
+    h1 { font-family: 'Cormorant Garamond', serif; font-size: 64px; line-height: 1.05; font-weight: 600; margin-bottom: 24px; max-width: 1000px; }
+    h1 em { font-style: italic; background: linear-gradient(90deg, var(--gold), var(--rose)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+    .subtitle { font-family: 'Cormorant Garamond', serif; font-size: 22px; font-style: italic; color: rgba(248,244,238,0.75); max-width: 880px; line-height: 1.5; }
+    .section { margin-top: 64px; }
+    h2 { font-family: 'Cormorant Garamond', serif; font-size: 36px; font-weight: 600; margin-bottom: 24px; }
+    h2 em { font-style: italic; color: var(--gold); }
+    .lead { font-size: 16px; line-height: 1.7; color: rgba(248,244,238,0.78); max-width: 880px; margin-bottom: 24px; }
+
+    .stack-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; max-width: 980px; }
+    .stack-card { padding: 22px; border-radius: 18px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.10); }
+    .stack-card .label { font-size: 11px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--rose); margin-bottom: 10px; }
+    .stack-card h3 { font-family: 'Cormorant Garamond', serif; font-size: 22px; font-weight: 600; margin-bottom: 8px; color: var(--cream); }
+    .stack-card p { font-size: 14px; line-height: 1.6; color: rgba(248,244,238,0.72); }
+    .stack-card code { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--rose); background: rgba(232,163,158,0.10); padding: 2px 6px; border-radius: 4px; }
+
+    .ascii { font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.6; padding: 28px; border-radius: 18px; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.08); color: rgba(248,244,238,0.85); white-space: pre; overflow-x: auto; }
+    .ascii .accent { color: var(--gold); }
+    .ascii .rose { color: var(--rose); }
+    .ascii .dim { color: rgba(248,244,238,0.5); }
+
+    .endpoints { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+    .endpoint { padding: 16px 20px; border-radius: 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); }
+    .endpoint .method { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--gold); font-weight: 600; }
+    .endpoint .path { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--cream); }
+    .endpoint .desc { font-size: 13px; color: rgba(248,244,238,0.65); margin-top: 6px; line-height: 1.5; }
+
+    .flow { padding: 28px; border-radius: 18px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); margin-top: 16px; }
+    .flow ol { list-style: none; counter-reset: step; padding: 0; }
+    .flow li { counter-increment: step; padding-left: 44px; position: relative; padding-bottom: 14px; line-height: 1.6; color: rgba(248,244,238,0.85); font-size: 14px; }
+    .flow li::before { content: counter(step); position: absolute; left: 0; top: 0; width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, var(--gold), var(--rose)); color: var(--ink); font-weight: 700; display: flex; align-items: center; justify-content: center; font-size: 12px; font-family: 'JetBrains Mono', monospace; }
+    .flow li code { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--rose); background: rgba(232,163,158,0.10); padding: 2px 6px; border-radius: 4px; }
+
+    @media (max-width: 800px) {
+      .shell { padding: 40px 20px; }
+      h1 { font-size: 44px; }
+      h2 { font-size: 28px; }
+      .stack-grid, .endpoints { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <a href="/" class="brand">eve</a>
+      <a href="/">← back to Eve</a>
+    </header>
+
+    <p class="eyebrow">Architecture · Eve · Built on Google</p>
+    <h1>Seven Google products, <em>one quietly devoted concierge.</em></h1>
+    <p class="subtitle">Eve is a multimodal AI evening concierge built end-to-end on Google's stack for the Build with AI Hackathon 2026. Voice in, voice out, multimodal interleaved cards, real-time grounding, ADK-pattern agent runtime, all in one Cloud Run service.</p>
+
+    <section class="section">
+      <h2>The Google <em>stack</em></h2>
+      <div class="stack-grid">
+        <div class="stack-card">
+          <div class="label">Mandatory tech ✓</div>
+          <h3>Gemini 2.5 Flash Image</h3>
+          <p>Interleaved <code>responseModalities: ['TEXT', 'IMAGE']</code> generates each venue card, the hero food shot, and the three Reel scenes in a single API call.</p>
+        </div>
+        <div class="stack-card">
+          <div class="label">Reasoning</div>
+          <h3>Gemini Flash</h3>
+          <p>Plan skeleton, brand-voiced copy, evening narrative arc, conversational reply parsing, intent extraction, and Eve's spoken progress phrases.</p>
+        </div>
+        <div class="stack-card">
+          <div class="label">Grounding</div>
+          <h3>Google Search tool</h3>
+          <p>Built-in Search grounding via <code>tools: [{ googleSearch: {} }]</code> verifies every recommended venue is real and mines fresh review data for the restaurant featured-dish suggestion.</p>
+        </div>
+        <div class="stack-card">
+          <div class="label">Voice</div>
+          <h3>Cloud Text-to-Speech Chirp 3 HD</h3>
+          <p>Eve's spoken intro phrases, the evening narration, the Reel voiceover, and every conversational reply. The <code>en-US-Chirp3-HD-Aoede</code> voice carries the persona.</p>
+        </div>
+        <div class="stack-card">
+          <div class="label">Map surface</div>
+          <h3>Google Maps</h3>
+          <p>Per-stop deep links search the venue. The whole-evening button opens a multi-stop walking route across all three places.</p>
+        </div>
+        <div class="stack-card">
+          <div class="label">Hosting</div>
+          <h3>Cloud Run gen2</h3>
+          <p>Single container in <code>us-west1</code>. Cloud Build CI, Secret Manager for the API key, Artifact Registry for images, custom domain via Cloud Run domain mappings.</p>
+        </div>
+        <div class="stack-card">
+          <div class="label">Voice in</div>
+          <h3>Web Speech API</h3>
+          <p>Browser-native streaming speech recognition feeds Eve's intent parser. Silence-detected at 2.5s. Continuous conversation mode keeps the mic open between turns.</p>
+        </div>
+        <div class="stack-card">
+          <div class="label">Bonus</div>
+          <h3>ADK-pattern Agent Runtime</h3>
+          <p>Native TypeScript Agent / Tool / Runner abstraction in <code>agent.ts</code>, mirroring Google's Agent Development Kit architecture without taking on a fragile mid-hackathon dependency. Exposed at <code>/api/agent/run</code>.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Top-down <em>diagram</em></h2>
+      <div class="ascii"><span class="accent">┌──────────────────────────────────────────────────────────────────────┐
+│</span>  Browser  ·  React 19 + Vite + Tailwind v4                        <span class="accent">│
+│</span>  /              → Diner conversation surface (voice, story flow)   <span class="accent">│
+│</span>  /restaurant    → Restaurant content studio + marketplace pulse    <span class="accent">│
+│</span>  /pitch.html    → 5-slide judging-quality pitch deck               <span class="accent">│
+│</span>  /architecture  → this page                                        <span class="accent">│
+│                                                                       │
+│</span>  Voice IN  : Web Speech API → live transcript → silence at 2.5s    <span class="accent">│
+│</span>  Voice OUT : <span class="rose">&lt;audio&gt;</span> playback of TTS-generated MP3 (auto-unlock)   <span class="accent">│
+└──────────────────────┬───────────────────────────────────────────────┘
+                       │</span> JSON over HTTPS  (Eve's intent + plan + media)<span class="accent">
+                       ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│</span>  Cloud Run · Express + TypeScript · @google/genai SDK + Search    <span class="accent">│
+│                                                                       │
+│</span>  Diner endpoints                                                  <span class="accent">│
+│</span>   <span class="rose">/api/eve-parse-intent</span>     parse speech to fields, ask if missing <span class="accent">│
+│</span>   <span class="rose">/api/eve-intro</span>            4-phrase progress narration            <span class="accent">│
+│</span>   <span class="rose">/api/plan-experience/</span>     skeleton (Search-grounded plan)        <span class="accent">│
+│</span>     <span class="rose">skeleton</span>                                                       <span class="accent">│
+│</span>   <span class="rose">/api/plan-experience/</span>     real venue research (Search) +         <span class="accent">│
+│</span>     <span class="rose">stop-image</span>             Gemini 2.5 Flash Image (interleaved)    <span class="accent">│
+│</span>   <span class="rose">/api/eve-story</span>            7-beat second-person narrative         <span class="accent">│
+│</span>   <span class="rose">/api/eve-outro</span>            send-off line, vibe-modulated          <span class="accent">│
+│</span>   <span class="rose">/api/eve-refine</span>           conversational re-plan w/ regen cards <span class="accent">│
+│</span>   <span class="rose">/api/eve-avatar</span>           Klimt-painterly Eve portrait            <span class="accent">│
+│</span>   <span class="rose">/api/reverse-geocode</span>      lat/lng → city name                    <span class="accent">│
+│</span>   <span class="rose">/api/tts</span>                  Cloud TTS Chirp 3 HD                    <span class="accent">│
+│</span>   <span class="rose">/api/specials</span>             in-memory dining index                 <span class="accent">│
+│                                                                       │
+│</span>  Restaurant endpoints                                             <span class="accent">│
+│</span>   <span class="rose">/api/suggest-special</span>      Search-mine recent reviews →           <span class="accent">│
+│</span>                              today's featured dish + competitors  <span class="accent">│
+│</span>   <span class="rose">/api/content-pack</span>         IG post + Reel storyboard + menu +     <span class="accent">│
+│</span>                              email + SMS in one call              <span class="accent">│
+│</span>   <span class="rose">/api/post-special</span>         publish to dining index               <span class="accent">│
+│                                                                       │
+│</span>  Bonus                                                            <span class="accent">│
+│</span>   <span class="rose">/api/agent/run</span>            ADK-pattern agent runtime              <span class="accent">│
+│</span>   <span class="rose">/api/health</span>               architecture metadata                 <span class="accent">│
+└──────────────────────────────────────────────────────────────────────┘
+              ▲                                       ▲
+              │</span> grounded                              <span class="accent">│</span> grounded<span class="accent">
+              │                                       │
+        ┌──────────────────┐               ┌────────────────────────┐
+        │</span> Gemini 2.5     <span class="accent">│               │</span> Google Search built-in <span class="accent">│
+        │</span> • Flash Image  <span class="accent">│               │</span> tool — real-time web   <span class="accent">│
+        │</span>   (interleaved)<span class="accent">│               │</span> grounding, no extra    <span class="accent">│
+        │</span> • Flash         <span class="accent">│               │</span> API key                <span class="accent">│
+        └──────────────────┘               └────────────────────────┘
+                                          ┌──────────────────────────┐
+                                          │</span> Cloud Text-to-Speech     <span class="accent">│
+                                          │</span> Chirp 3 HD voice (Aoede) <span class="accent">│
+                                          └──────────────────────────┘</span></div>
+    </section>
+
+    <section class="section">
+      <h2>The diner <em>conversation</em></h2>
+      <p class="lead">Eve's conversational mode is engineered around a continuous-listening loop with smart silence detection, audio-context unlocking, and barge-in interruption. Once the user enters the conversation, the mic stays open between turns until a plan executes.</p>
+      <div class="flow">
+        <ol>
+          <li>User clicks <code>Tell Eve</code> → Web Speech API starts streaming partial transcripts to the browser.</li>
+          <li>The recognizer fires <code>onresult</code> on every partial. We track <code>lastSpeechAt</code> on a <code>useRef</code> (state would be stale inside the silence interval).</li>
+          <li>If 2.5s elapse with no new partial AND the transcript is non-empty, we stop the recognizer and POST the transcript to <code>/api/eve-parse-intent</code>.</li>
+          <li>Server-side, Gemini Flash extracts <code>{location, vibe, party, dietary, budget, cuisine, freeText}</code>, decides if it has enough to plan, and writes a one-line spoken reply in Eve's voice.</li>
+          <li>The reply is synthesized via Cloud TTS Chirp 3 HD and played in the <code>&lt;audio&gt;</code> element. The audio context was unlocked on the user's first <code>pointerdown</code>, so <code>play()</code> succeeds.</li>
+          <li>If <code>isComplete</code> → execute the plan (4 parallel API calls: 3 stop-image + 1 narration). If not, the mic re-opens for the user's follow-up. Conversation loops.</li>
+          <li>The user can interrupt Eve mid-speech; the recognizer's <code>onresult</code> handler pauses Eve's audio when fresh speech arrives.</li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>The marketplace <em>flywheel</em></h2>
+      <div class="flow">
+        <ol>
+          <li>Restaurant lands on <code>/restaurant</code>, sets brand once. Cuisine is inferred from name + city via Google Search if blank.</li>
+          <li><code>/api/suggest-special</code> Search-mines recent Yelp / Google / blog reviews of THIS restaurant. If specific dish praise found → that's tonight's special. Otherwise pivots to current trend research + recommends real competitor restaurants.</li>
+          <li><code>/api/content-pack</code> generates the full multi-platform kit in one call: AI-illustrated Instagram post, three-scene Reel with voiceover script + audio, brand-voiced menu card, email subject + body, and an SMS blurb.</li>
+          <li>Owner clicks <code>Publish to Eve diners</code> → dish enters the <code>POSTED_SPECIALS</code> in-memory index.</li>
+          <li>A diner asking Eve for an evening that night in the same city gets the special suggested with an <code>Eve Originals</code> badge — driving foot traffic.</li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Try the <em>endpoints</em></h2>
+      <p class="lead">All endpoints are live on the same Cloud Run service. Try them yourself with <code style="font-family:'JetBrains Mono',monospace;">curl</code> or Postman.</p>
+      <div class="endpoints">
+        <div class="endpoint">
+          <div class="method">GET</div>
+          <div class="path">/api/health</div>
+          <div class="desc">Returns architecture metadata: SDK version, models in use, registered tools, agent pattern.</div>
+        </div>
+        <div class="endpoint">
+          <div class="method">POST</div>
+          <div class="path">/api/agent/run</div>
+          <div class="desc">ADK-pattern agent runtime. Body: <code>{plan: [{tool, input}]}</code>. Returns tool outputs + latency telemetry.</div>
+        </div>
+        <div class="endpoint">
+          <div class="method">POST</div>
+          <div class="path">/api/eve-parse-intent</div>
+          <div class="desc">Parse user speech to evening fields. Returns extracted slots + Eve's one-line reply.</div>
+        </div>
+        <div class="endpoint">
+          <div class="method">POST</div>
+          <div class="path">/api/plan-experience/skeleton</div>
+          <div class="desc">Search-grounded 3-stop plan. Real venues only.</div>
+        </div>
+        <div class="endpoint">
+          <div class="method">POST</div>
+          <div class="path">/api/plan-experience/stop-image</div>
+          <div class="desc">Researches real venue then renders interleaved text+image card.</div>
+        </div>
+        <div class="endpoint">
+          <div class="method">POST</div>
+          <div class="path">/api/suggest-special</div>
+          <div class="desc">Mines reviews + trends to suggest tonight's featured dish + competitor restaurants.</div>
+        </div>
+        <div class="endpoint">
+          <div class="method">POST</div>
+          <div class="path">/api/content-pack</div>
+          <div class="desc">Generates IG post + Reel + menu card + email + SMS in one call.</div>
+        </div>
+        <div class="endpoint">
+          <div class="method">POST</div>
+          <div class="path">/api/tts</div>
+          <div class="desc">Cloud Text-to-Speech Chirp 3 HD. Returns base64 MP3.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Built by</h2>
+      <p class="lead"><strong>Mohit Goenka</strong> — solo founder, end-to-end build. Director of Engineering at Yahoo Mail (mobile platforms across iOS, Android, Web for 250M+ monthly users), 110+ patents, 12 production AI apps shipped. Recipe.mohitgoenka.com (50K+ visits) was the V1 prototype that informed Eve. Active member of <strong>GDG San Jose</strong>.</p>
+    </section>
+  </div>
+</body>
+</html>
