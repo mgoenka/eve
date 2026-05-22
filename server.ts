@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { GoogleGenAI } from '@google/genai';
 import { CUISINES, VIBES, DIETARY_PREFERENCES, DEMO_RESTAURANTS } from './constants';
 import type { PostedSpecial } from './types';
+import { AgentRuntime, buildEveBrainAgent } from './agent';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -97,7 +98,45 @@ function imagePart(mimeType: string, data: string) {
 }
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, hasKey: !!GEMINI_API_KEY });
+  res.json({
+    ok: true,
+    hasKey: !!GEMINI_API_KEY,
+    architecture: {
+      runtime: 'Cloud Run gen2',
+      sdk: '@google/genai v1.44',
+      models: {
+        text: TEXT_MODEL,
+        image: IMAGE_MODEL,
+        tts: 'Cloud Text-to-Speech Chirp 3 HD',
+      },
+      tools: ['placesSearch (Google Search grounding)', 'sceneCard (Gemini 2.5 Flash Image interleaved)', 'voiceLine (Cloud TTS)'],
+      agentPattern: 'ADK-flavored deterministic runner (see agent.ts)',
+    },
+  });
+});
+
+// ADK-pattern agent endpoint: the same three tools the rest of the
+// app uses, exposed through a single agent runtime call. Lets judges
+// see the agent abstraction in action.
+app.post('/api/agent/run', async (req, res) => {
+  if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
+  const plan = req.body?.plan;
+  if (!Array.isArray(plan) || plan.length === 0) {
+    return jsonError(res, 400, 'plan must be a non-empty array of { tool, input }');
+  }
+  try {
+    const runtime = new AgentRuntime(ai);
+    const agent = buildEveBrainAgent(ai, GEMINI_API_KEY);
+    const result = await runtime.runDeterministic(agent, plan);
+    res.json({
+      agent: agent.name,
+      tools: agent.tools.map((t) => ({ name: t.name, description: t.description })),
+      ...result,
+    });
+  } catch (err: any) {
+    console.error('agent run failed:', err?.message || err);
+    jsonError(res, 500, `Agent run failed: ${err?.message || 'unknown'}`);
+  }
 });
 
 app.post('/api/eve-intro', async (req, res) => {
