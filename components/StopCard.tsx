@@ -1,14 +1,16 @@
-import { Loader2, MapPin, Clock, Footprints, Sparkles } from 'lucide-react';
+import { Loader2, MapPin, Clock, Footprints, Sparkles, ExternalLink } from 'lucide-react';
 import type { ExperienceStop } from '../types';
 import { STOP_KINDS } from '../constants';
 
 interface Props {
   stop: ExperienceStop;
   index: number;
+  city?: string;
 }
 
-export function StopCard({ stop, index }: Props) {
+export function StopCard({ stop, index, city }: Props) {
   const kindMeta = STOP_KINDS.find((k) => k.kind === stop.kind);
+  const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${stop.name} ${city || ''}`.trim())}`;
   return (
     <article
       className="relative rounded-3xl overflow-hidden border border-white/10 bg-white/[0.04] backdrop-blur animate-fade-in-up shadow-[0_8px_40px_rgba(26,13,46,0.5)]"
@@ -78,18 +80,30 @@ export function StopCard({ stop, index }: Props) {
           </div>
         )}
 
-        <div className="mt-4 flex items-center gap-3 text-[11px] text-white/50">
-          {stop.walkMinutesFromPrev > 0 && (
-            <span className="inline-flex items-center gap-1">
-              <Footprints size={11} />
-              {stop.walkMinutesFromPrev} min walk
-            </span>
-          )}
-          {stop.durationMinutes > 0 && (
-            <span className="inline-flex items-center gap-1">
-              <MapPin size={11} />~{stop.durationMinutes} min here
-            </span>
-          )}
+        <div className="mt-4 flex items-center justify-between gap-3 text-[11px] text-white/50">
+          <div className="flex items-center gap-3">
+            {stop.walkMinutesFromPrev > 0 && (
+              <span className="inline-flex items-center gap-1">
+                <Footprints size={11} />
+                {stop.walkMinutesFromPrev} min walk
+              </span>
+            )}
+            {stop.durationMinutes > 0 && (
+              <span className="inline-flex items-center gap-1">
+                <MapPin size={11} />~{stop.durationMinutes} min here
+              </span>
+            )}
+          </div>
+          <a
+            href={mapsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-eve-gold/10 hover:bg-eve-gold/20 border border-eve-gold/30 text-eve-gold text-[10px] font-semibold tracking-wide uppercase transition-colors"
+          >
+            <MapPin size={10} />
+            Maps
+            <ExternalLink size={9} />
+          </a>
         </div>
       </div>
     </article>

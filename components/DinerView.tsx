@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Sparkles, Wand2, RotateCcw, Play, Pause, VolumeX, Volume2, Store, ArrowUpRight, ArrowDownRight, Clock as ClockIcon, Leaf, Coins } from 'lucide-react';
+import { Sparkles, Wand2, RotateCcw, Play, Pause, VolumeX, Volume2, Store, ArrowUpRight, ArrowDownRight, Clock as ClockIcon, Leaf, Coins, Footprints } from 'lucide-react';
 import {
   VIBES,
   DIETARY_PREFERENCES,
@@ -452,9 +452,25 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {stops.map((stop, i) => (
-            <StopCard key={`${stop.name}-${i}`} stop={stop} index={i} />
+            <StopCard key={`${stop.name}-${i}`} stop={stop} index={i} city={city} />
           ))}
         </div>
+
+        {stops.length >= 2 && stops.every((s) => s.status === 'ready') && (
+          <div className="mt-6 flex justify-center">
+            <a
+              href={`https://www.google.com/maps/dir/${stops
+                .map((s) => encodeURIComponent(`${s.name} ${city}`))
+                .join('/')}/?travelmode=walking`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-eve-gold/15 hover:bg-eve-gold/25 border border-eve-gold/40 text-eve-gold text-sm font-semibold transition-colors"
+            >
+              <Footprints size={14} />
+              Open the whole night on Google Maps
+            </a>
+          </div>
+        )}
 
         <div className="mt-8 flex flex-wrap items-center justify-center gap-2">
           <span className="text-[10px] tracking-[0.3em] uppercase text-eve-cream/40 mr-1">
