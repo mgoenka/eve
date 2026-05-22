@@ -667,6 +667,88 @@ Strict JSON only:
   });
 });
 
+app.post('/api/suggest-special', async (req, res) => {
+  if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
+
+  const restaurantName: string = (req.body?.restaurantName || '').trim();
+  const city: string = (req.body?.city || '').trim();
+  const cuisine: string = (req.body?.cuisine || 'fusion').trim();
+  const signatureDishes: string = (req.body?.signatureDishes || '').trim();
+
+  if (!restaurantName || !city) {
+    return jsonError(res, 400, 'restaurantName and city required');
+  }
+
+  const prompt = `You are a culinary intelligence agent helping a small restaurant owner pick what to feature tonight on social media. The restaurant is:
+
+Name: ${restaurantName}
+City: ${city}
+Cuisine: ${cuisine}
+Signature dishes (the owner's words): ${signatureDishes || 'not provided'}
+
+Use Google Search to do these things, in order:
+
+1. Search for RECENT reviews of "${restaurantName}" in "${city}" — Google reviews, Yelp, TripAdvisor, food blogs, recent Instagram posts. Look for what dishes diners specifically praised in the last 30-90 days.
+
+2. If you find concrete dish-level praise (e.g. "the paneer was incredible", "their tagliolini al limone is the best in town"), pick the most-praised dish as the featured suggestion. Set mode = "from_reviews" and quote what reviewers said.
+
+3. If you do NOT find specific dish praise (new restaurant, low review count, or reviews focused on service rather than food):
+   - Search for what's trending in ${cuisine} cuisine RIGHT NOW (seasonal, viral on TikTok / Instagram, recent food media).
+   - Pick a dish the restaurant could plausibly make given their cuisine and signatures.
+   - Set mode = "from_trending".
+   - ALSO recommend 2-3 specific real restaurants in or near ${city} known for this dish, so the owner can see who's setting the bar.
+
+4. Always include 2 ALTERNATIVE dish suggestions for variety.
+
+Return strict JSON only, no markdown:
+{
+  "mode": "from_reviews" | "from_trending",
+  "dishName": "specific dish name to feature",
+  "dishDescription": "1-2 sentences describing the dish in the brand voice the owner would use, ingredient-led, max 40 words",
+  "rationale": "1-2 sentences explaining why THIS dish for tonight, citing specific review snippets or trend signals you found",
+  "alternatives": [
+    { "dishName": "alt 1", "rationale": "one-sentence why" },
+    { "dishName": "alt 2", "rationale": "one-sentence why" }
+  ],
+  "recommendedRestaurants": [
+    { "name": "real restaurant name", "city": "city", "dish": "dish they're known for", "why": "one sentence on what they do well" }
+  ]
+}
+
+Notes:
+- recommendedRestaurants should ONLY have entries if mode is "from_trending"; empty array if mode is "from_reviews".
+- Be honest. If you cannot verify reviews, say so via mode = "from_trending".
+- Do not invent specific reviewer names. You may quote review-style phrasing as "diners said..." or "reviewers noted..." without attribution.`;
+
+  try {
+    let response: any;
+    let usedSearch = false;
+    try {
+      response = await ai.models.generateContent({
+        model: TEXT_MODEL,
+        contents: prompt,
+        config: {
+          temperature: 0.6,
+          tools: [{ googleSearch: {} }],
+        },
+      });
+      usedSearch = true;
+    } catch {
+      response = await ai.models.generateContent({
+        model: TEXT_MODEL,
+        contents: prompt,
+        config: { temperature: 0.6 },
+      });
+    }
+    const parsed = safeParseJson(response.text || '');
+    if (!parsed) return jsonError(res, 502, 'Suggest returned non-JSON');
+    res.json({ ...parsed, usedSearch });
+  } catch (err: any) {
+    console.error('suggest-special failed:', err?.message || err);
+    jsonError(res, 500, `Suggest failed: ${err?.message || 'unknown'}`);
+  }
+});
+
 app.post('/api/post-special', (req, res) => {
   const restaurantName: string = (req.body?.restaurantName || '').trim();
   const city: string = (req.body?.city || '').trim();

@@ -190,6 +190,31 @@ export async function eveRefine(input: {
   return (await res.json()) as EveRefineResponse;
 }
 
+export interface SuggestSpecialResponse {
+  mode: 'from_reviews' | 'from_trending';
+  dishName: string;
+  dishDescription: string;
+  rationale: string;
+  alternatives: Array<{ dishName: string; rationale: string }>;
+  recommendedRestaurants: Array<{ name: string; city: string; dish: string; why: string }>;
+  usedSearch?: boolean;
+}
+
+export async function suggestSpecial(input: {
+  restaurantName: string;
+  city: string;
+  cuisine: string;
+  signatureDishes: string;
+}): Promise<SuggestSpecialResponse> {
+  const res = await fetch('/api/suggest-special', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(`Suggest failed: ${(await res.text()).slice(0, 200)}`);
+  return (await res.json()) as SuggestSpecialResponse;
+}
+
 export async function reverseGeocode(lat: number, lng: number): Promise<{ city: string }> {
   const res = await fetch('/api/reverse-geocode', {
     method: 'POST',

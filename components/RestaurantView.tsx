@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Sparkles, Wand2, RotateCcw, Download, Copy, Check, ChefHat, Send } from 'lucide-react';
+import { Sparkles, Wand2, RotateCcw, Download, Copy, Check, ChefHat, Send, Lightbulb, Loader2, Instagram, ExternalLink } from 'lucide-react';
 import { CUISINES, DEMO_RESTAURANTS } from '../constants';
 import type { Cuisine, ContentPack, RestaurantBrand } from '../types';
-import { generateContentPack, postSpecial, synthesize } from '../services/eveService';
+import { generateContentPack, postSpecial, synthesize, suggestSpecial } from '../services/eveService';
+import type { SuggestSpecialResponse } from '../services/eveService';
 
 interface Props {
   onSwitchToDiner: () => void;
@@ -69,6 +70,9 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
   const [copied, setCopied] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestion, setSuggestion] = useState<SuggestSpecialResponse | null>(null);
+
   useEffect(() => {
     if (!brand) setSetupOpen(true);
   }, [brand]);
@@ -84,6 +88,78 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
     saveBrand(b);
     setBrand(b);
     setSetupOpen(false);
+  };
+
+  const suggestSpecialFn = async () => {
+    setSuggesting(true);
+    setError(null);
+    try {
+      const result = await suggestSpecial({
+        restaurantName: name.trim(),
+        city: city.trim(),
+        cuisine,
+        signatureDishes: signature,
+      });
+      setSuggestion(result);
+      setDishName(result.dishName);
+      setDishDescription(result.dishDescription);
+    } catch (err: any) {
+      setError(err?.message || 'Suggest failed');
+    } finally {
+      setSuggesting(false);
+    }
+  };
+
+  const applySuggestionAlt = (alt: { dishName: string; rationale: string }) => {
+    setDishName(alt.dishName);
+    setDishDescription(alt.rationale);
+  };
+
+  const openInstagramShare = () => {
+    if (!pack) return;
+    const text = `${pack.instagramPost.caption}\n\n${pack.instagramPost.hashtags
+      .map((h) => '#' + h)
+      .join(' ')}`;
+    if (pack.instagramPost.imageData && pack.instagramPost.imageMime) {
+      try {
+        const byteString = atob(pack.instagramPost.imageData);
+        const ab = new ArrayBuffer(byteString.length);
+        const ia = new Uint8Array(ab);
+        for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+        const blob = new Blob([ab], { type: pack.instagramPost.imageMime });
+        const file = new File([blob], `${pack.dishName.replace(/\s+/g, '-')}.png`, {
+          type: pack.instagramPost.imageMime,
+        });
+        const navAny = navigator as any;
+        if (navAny.canShare?.({ files: [file] })) {
+          navAny
+            .share({ files: [file], text, title: pack.dishName })
+            .catch(() => {
+              copyAndDownloadFallback(text);
+            });
+          return;
+        }
+      } catch {}
+    }
+    copyAndDownloadFallback(text);
+  };
+
+  const copyAndDownloadFallback = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied('ig_share');
+      setTimeout(() => setCopied(null), 2400);
+    } catch {}
+    if (pack?.instagramPost.imageData && pack.instagramPost.imageMime) {
+      downloadDataUrl(
+        `${pack.dishName.replace(/\s+/g, '-')}-ig.png`,
+        pack.instagramPost.imageMime,
+        pack.instagramPost.imageData
+      );
+    }
+    setTimeout(() => {
+      window.open('https://www.instagram.com/', '_blank', 'noopener,noreferrer');
+    }, 800);
   };
 
   const generate = async () => {
@@ -344,6 +420,14 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
 
           <div className="mt-6 flex flex-wrap items-center gap-3">
             <button
+              onClick={suggestSpecialFn}
+              disabled={suggesting || !name.trim()}
+              className="inline-flex items-center gap-2 px-5 py-3 rounded-full font-semibold text-sm border border-eve-gold/40 bg-eve-gold/10 text-eve-gold hover:bg-eve-gold/20 disabled:opacity-30 transition-all"
+            >
+              {suggesting ? <Loader2 size={14} className="animate-spin" /> : <Lightbulb size={14} />}
+              {suggesting ? 'Eve is reading reviews…' : 'Pick today\'s special for me'}
+            </button>
+            <button
               onClick={generate}
               disabled={generating || !dishName.trim()}
               className="inline-flex items-center gap-2 px-6 py-3 rounded-full font-serif italic font-bold text-lg text-eve-ink bg-gradient-to-r from-amber-200 via-eve-gold to-eve-rose disabled:opacity-30 transition-all"
@@ -368,6 +452,61 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
           </div>
         </section>
 
+        {suggestion && (
+          <section className="mt-6 rounded-3xl border border-eve-gold/30 bg-gradient-to-br from-eve-gold/8 to-eve-rose/5 p-6 md:p-7 animate-fade-in-up">
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <div>
+                <p className="text-[10px] tracking-[0.3em] uppercase text-eve-gold mb-1 inline-flex items-center gap-1.5">
+                  <Lightbulb size={11} />
+                  Eve suggests · {suggestion.mode === 'from_reviews' ? 'from your recent reviews' : 'from current trends'}
+                </p>
+                <h3 className="font-serif text-2xl text-eve-cream">{suggestion.dishName}</h3>
+              </div>
+              <span className="text-[10px] tracking-wide uppercase text-eve-rose/85 font-semibold">
+                Auto-filled below
+              </span>
+            </div>
+            <p className="text-[14px] text-eve-cream/80 italic font-serif leading-snug mb-3">
+              {suggestion.rationale}
+            </p>
+            {suggestion.alternatives?.length > 0 && (
+              <div className="mt-4">
+                <p className="text-[10px] tracking-[0.3em] uppercase text-eve-cream/45 mb-2">
+                  Or try
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {suggestion.alternatives.map((alt, i) => (
+                    <button
+                      key={i}
+                      onClick={() => applySuggestionAlt(alt)}
+                      className="text-[12px] px-3 py-1.5 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 hover:border-eve-gold/40 text-eve-cream/85 transition-colors"
+                      title={alt.rationale}
+                    >
+                      {alt.dishName}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {suggestion.recommendedRestaurants?.length > 0 && (
+              <div className="mt-5 pt-5 border-t border-white/10">
+                <p className="text-[10px] tracking-[0.3em] uppercase text-eve-cream/45 mb-3">
+                  Restaurants known for {suggestion.dishName}
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {suggestion.recommendedRestaurants.map((r, i) => (
+                    <div key={i} className="rounded-2xl bg-white/[0.03] border border-white/10 p-3">
+                      <div className="font-serif text-[15px] text-eve-cream font-semibold">{r.name}</div>
+                      <div className="text-[11px] text-eve-cream/55 mb-1.5">{r.city}</div>
+                      <p className="text-[12px] text-eve-cream/75 leading-snug">{r.why}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
         {pack && (
           <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-5">
             {/* Instagram */}
@@ -379,6 +518,14 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                   </span>
                 </div>
                 <div className="flex gap-1">
+                  <button
+                    onClick={openInstagramShare}
+                    className="px-3 py-1 rounded-full bg-gradient-to-r from-pink-500/20 to-purple-500/20 hover:from-pink-500/30 hover:to-purple-500/30 border border-pink-400/40 text-[10px] font-bold tracking-wide uppercase text-pink-300 inline-flex items-center gap-1"
+                    title="Share to Instagram"
+                  >
+                    {copied === 'ig_share' ? <Check size={10} /> : <Instagram size={10} />}
+                    {copied === 'ig_share' ? 'Copied & opening IG' : 'Post to IG'}
+                  </button>
                   {pack.instagramPost.imageData && (
                     <button
                       onClick={() =>
@@ -390,14 +537,14 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                       }
                       className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 text-[10px] font-semibold tracking-wide uppercase text-eve-cream/70 inline-flex items-center gap-1"
                     >
-                      <Download size={10} /> PNG
+                      <Download size={10} />
                     </button>
                   )}
                   <button
                     onClick={() => copyToClipboard('ig', `${pack.instagramPost.caption}\n\n${pack.instagramPost.hashtags.map((h) => '#' + h).join(' ')}`)}
                     className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 text-[10px] font-semibold tracking-wide uppercase text-eve-cream/70 inline-flex items-center gap-1"
                   >
-                    {copied === 'ig' ? <Check size={10} /> : <Copy size={10} />} caption
+                    {copied === 'ig' ? <Check size={10} /> : <Copy size={10} />}
                   </button>
                 </div>
               </header>
