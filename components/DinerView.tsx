@@ -162,8 +162,12 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   const [voiceTranscript, setVoiceTranscript] = useState('');
   const recognitionRef = useRef<any>(null);
   const baseTextRef = useRef('');
-  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const silenceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastSpeechAtRef = useRef<number>(Date.now());
+  // Mirror state into refs so closures inside setInterval / setTimeout
+  // see live values (the React state captured at closure-creation is stale)
+  const voiceListeningRef = useRef(false);
+  const voiceTranscriptRef = useRef('');
 
   const [formExpanded, setFormExpanded] = useState(false);
   const [eveGreeted, setEveGreeted] = useState(false);
@@ -218,6 +222,14 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
     setBudgetPerPerson(Math.round(s.budgetUSD / s.party));
     setFreeText(s.freeText);
   };
+
+  // Keep refs in sync with state so silence-detector closures see fresh values.
+  useEffect(() => {
+    voiceListeningRef.current = voiceListening;
+  }, [voiceListening]);
+  useEffect(() => {
+    voiceTranscriptRef.current = voiceTranscript;
+  }, [voiceTranscript]);
 
   // ----- Voice input via Web Speech API: set up the recognizer once -----
   // The recognizer auto-stops on ~3 seconds of silence in "smart" mode,
@@ -287,32 +299,47 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
 
   const speakAsEve = useCallback(
     async (text: string) => {
-      if (!text || muted) return;
+      console.log('[Eve] speakAsEve:', text.slice(0, 70));
+      if (!text || muted) {
+        console.log('[Eve] skipped (muted=' + muted + ', empty=' + !text + ')');
+        return;
+      }
       setEveSpeaking(true);
       try {
         const audio = await synthesize(text, 'eve');
         const a = eveAudioRef.current;
-        if (!a) return;
+        if (!a) {
+          console.error('[Eve] audio element ref is null');
+          return;
+        }
         a.src = `data:${audio.audioMime || 'audio/mpeg'};base64,${audio.audioData}`;
         a.currentTime = 0;
-        await a.play().catch(() => {});
-      } catch {
-        // silent
+        try {
+          await a.play();
+          console.log('[Eve] play() OK');
+        } catch (err) {
+          console.error('[Eve] play() rejected:', err);
+        }
+      } catch (err) {
+        console.error('[Eve] synth failed:', err);
       }
     },
     [muted]
   );
 
   // Plays a line and resolves only when audio finishes (or 8s timeout).
-  // Used during the "Eve thinking out loud" sequence so phrases don't overlap.
   const speakAsEveAndWait = useCallback(
     async (text: string) => {
+      console.log('[Eve] speakAsEveAndWait:', text.slice(0, 70));
       if (!text || muted) return;
       setEveSpeaking(true);
       try {
         const audio = await synthesize(text, 'eve');
         const a = eveAudioRef.current;
-        if (!a) return;
+        if (!a) {
+          console.error('[Eve] audio element ref is null (wait)');
+          return;
+        }
         a.src = `data:${audio.audioMime || 'audio/mpeg'};base64,${audio.audioData}`;
         a.currentTime = 0;
         await new Promise<void>((resolve) => {
@@ -324,17 +351,52 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
             resolve();
           };
           a.addEventListener('ended', finish, { once: true });
-          a.play().catch(() => finish());
-          setTimeout(finish, 8000);
+          a.play()
+            .then(() => console.log('[Eve] play() OK (wait)'))
+            .catch((err) => {
+              console.error('[Eve] play() rejected (wait):', err);
+              finish();
+            });
+          setTimeout(finish, 12000);
         });
-      } catch {
-        // silent
+      } catch (err) {
+        console.error('[Eve] synth failed (wait):', err);
       } finally {
         setEveSpeaking(false);
       }
     },
     [muted]
   );
+
+  // Unlock the audio playback context on first user gesture. Browsers
+  // require an explicit play() after gesture before any subsequent
+  // play() calls work. We do a silent play+pause once.
+  useEffect(() => {
+    const unlock = () => {
+      const a = eveAudioRef.current;
+      if (!a) return;
+      console.log('[Eve] unlocking audio context');
+      const wasMuted = a.muted;
+      a.muted = true;
+      a
+        .play()
+        .then(() => {
+          a.pause();
+          a.muted = wasMuted;
+          console.log('[Eve] audio context unlocked');
+        })
+        .catch((err) => {
+          console.warn('[Eve] unlock failed:', err);
+          a.muted = wasMuted;
+        });
+    };
+    document.addEventListener('pointerdown', unlock, { once: true });
+    document.addEventListener('keydown', unlock, { once: true });
+    return () => {
+      document.removeEventListener('pointerdown', unlock);
+      document.removeEventListener('keydown', unlock);
+    };
+  }, []);
 
   useEffect(() => {
     const a = eveAudioRef.current;
@@ -654,30 +716,37 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
     [city, vibe, party, dietary, budgetPerPerson, cuisinePref, freeText, buildPlan]
   );
 
-  // Watch for silence — when no speech result for 2.8s, auto-stop and parse.
+  // Watch for silence — when no speech result for 2.5s with at least some
+  // transcribed text, auto-stop the recognizer and feed the transcript to
+  // the parser. Uses refs (not state) inside the interval because state
+  // captured by the interval callback would be stale.
   const startSmartSilenceWatcher = useCallback(() => {
     if (silenceTimerRef.current) clearInterval(silenceTimerRef.current);
     lastSpeechAtRef.current = Date.now();
     silenceTimerRef.current = setInterval(() => {
-      if (!voiceListening && silenceTimerRef.current) {
-        clearInterval(silenceTimerRef.current);
+      const listening = voiceListeningRef.current;
+      const transcript = voiceTranscriptRef.current;
+      if (!listening) {
+        if (silenceTimerRef.current) clearInterval(silenceTimerRef.current);
         silenceTimerRef.current = null;
         return;
       }
-      if (Date.now() - lastSpeechAtRef.current > 2800 && (voiceTranscript || '').trim().length > 0) {
-        // Stop and process
+      const sinceLastSpeech = Date.now() - lastSpeechAtRef.current;
+      if (sinceLastSpeech > 2500 && transcript.trim().length > 0) {
+        // User went quiet — stop and process
         const rec = recognitionRef.current;
         try {
           rec?.stop();
         } catch {}
         setVoiceListening(false);
+        voiceListeningRef.current = false;
         if (silenceTimerRef.current) clearInterval(silenceTimerRef.current);
         silenceTimerRef.current = null;
-        const captured = voiceTranscript;
-        setTimeout(() => processTranscript(captured), 200);
+        const captured = transcript;
+        setTimeout(() => processTranscript(captured), 150);
       }
-    }, 400) as any;
-  }, [voiceListening, voiceTranscript, processTranscript]);
+    }, 400);
+  }, [processTranscript]);
 
   const tellEveByVoice = useCallback(() => {
     const rec = recognitionRef.current;
@@ -685,27 +754,30 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
       buildPlan();
       return;
     }
-    if (voiceListening) {
+    if (voiceListeningRef.current) {
       try {
         rec.stop();
       } catch {}
       setVoiceListening(false);
+      voiceListeningRef.current = false;
       if (silenceTimerRef.current) clearInterval(silenceTimerRef.current);
       silenceTimerRef.current = null;
-      const captured = voiceTranscript;
-      setTimeout(() => processTranscript(captured), 200);
+      const captured = voiceTranscriptRef.current;
+      setTimeout(() => processTranscript(captured), 150);
     } else {
       baseTextRef.current = '';
       setVoiceTranscript('');
+      voiceTranscriptRef.current = '';
       setFreeText('');
       try {
         rec.start();
         setVoiceListening(true);
+        voiceListeningRef.current = true;
         lastSpeechAtRef.current = Date.now();
         startSmartSilenceWatcher();
       } catch {}
     }
-  }, [voiceListening, voiceTranscript, buildPlan, processTranscript, startSmartSilenceWatcher]);
+  }, [buildPlan, processTranscript, startSmartSilenceWatcher]);
 
   // Page-load greeting: try after 5 seconds AND on first user interaction
   // (whichever comes first). Browsers block autoplay before user gesture, so
@@ -903,7 +975,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   if (phase === 'input') {
     return (
       <div className="relative z-10 min-h-screen flex flex-col">
-        <audio ref={eveAudioRef} preload="auto" muted={muted} />
+        <audio ref={eveAudioRef} preload="auto" />
         <header className="px-6 md:px-10 py-5 flex items-center justify-between">
           <a href="/" className="inline-flex items-center gap-2 group">
             <EveLogo size={42} withWordmark />
@@ -1235,8 +1307,8 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
 
   return (
     <div className="relative z-10 min-h-screen flex flex-col">
-      <audio ref={audioRef} preload="auto" muted={muted} />
-      <audio ref={eveAudioRef} preload="auto" muted={muted} />
+      <audio ref={audioRef} preload="auto" />
+      <audio ref={eveAudioRef} preload="auto" />
 
       <header className="px-6 md:px-10 py-5 flex items-center justify-between border-b border-white/5">
         <button onClick={reset} className="inline-flex items-center gap-2">
