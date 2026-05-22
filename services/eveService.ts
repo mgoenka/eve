@@ -6,6 +6,7 @@ import type {
   Cuisine,
   ContentPack,
   PostedSpecial,
+  EveStory,
 } from '@/types';
 
 export interface PlanSkeletonRequest {
@@ -13,7 +14,7 @@ export interface PlanSkeletonRequest {
   vibe: Vibe;
   party: number;
   dietary: DietaryPreference[];
-  budgetUSD: number;
+  budgetPerPersonUSD: number;
   freeText: string;
   cuisinePref?: string;
   whenISO?: string;
@@ -155,6 +156,22 @@ export async function eveOutro(input: {
   });
   if (!res.ok) throw new Error(`Outro failed: ${(await res.text()).slice(0, 200)}`);
   return (await res.json()) as { outro: string };
+}
+
+export async function eveStory(input: {
+  title: string;
+  stops: Array<{ name: string; kind: string; oneLineVibe: string; signatureItem?: string }>;
+  vibe: string;
+  city: string;
+  party: number;
+}): Promise<EveStory> {
+  const res = await fetch('/api/eve-story', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(`Story failed: ${(await res.text()).slice(0, 200)}`);
+  return (await res.json()) as EveStory;
 }
 
 export interface EveRefineResponse {

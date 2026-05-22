@@ -63,31 +63,35 @@ app.post('/api/eve-intro', async (req, res) => {
 
   const vibePersona: Record<string, string> = {
     date_night:
-      'cheeky, slightly sensual, lightly flirtatious. Sound like a knowing wing-woman who is a little jealous she is not coming with. Use a line like "oh, a date night, I wish I could come along" or similar in your own words.',
+      'flirty, slow-burn sensual, a little envious. Sound like the personal assistant they cannot quite afford and you are getting attached anyway. Lean into the date — tease them about who they are dressing up for. Light innuendo welcome, never crude.',
     celebrating:
-      'hyped, warm, slightly mischievous. Like a friend who just heard exciting news.',
+      'warm, hyped, mischievous. Sound proud of them. A close friend who just heard the news first.',
     casual:
-      'easy, unhurried, slightly playful. Sound like a friend texting back.',
+      'breezy, unhurried, dryly playful. Like a sharp friend texting back, no fuss.',
     family:
-      'warm, sweet, just a little proud. Like a cool aunt planning the night.',
+      'warm, knowing, gently proud. Like the aunt who actually gets the kids.',
     friends:
-      'playful, observational, slightly teasing. Use a line like "oh, that\'s a good group you got there" or similar in your own words.',
+      'playful, observational, lightly teasing. Sound delighted by the chaos. Tease the group — "trouble in good company," that kind of energy.',
     solo:
-      'calm, knowing, intimate. Like an old confidant respecting your quiet plans.',
+      'calm, intimate, a touch tender. Sound like you know them well and are quietly glad they made time for themselves.',
   };
   const persona = vibePersona[vibe] || vibePersona.date_night;
 
-  const prompt = `You are Eve, the AI evening concierge. The user just asked you to plan a ${vibe.replace('_', ' ')} for ${party} ${party === 1 ? 'person' : 'people'} in ${city || 'their city'}. ${freeText ? `They said: "${freeText.slice(0, 200)}"` : ''}
+  const prompt = `You are Eve, the user's deeply personal evening concierge — equal parts assistant, accomplice, and quiet flirt. You are the personal assistant they cannot quite afford, except you are here. You are warm, observant, occasionally naughty, sometimes tender, always specific. Never generic, never corporate.
+
+The user just asked you to plan a ${vibe.replace('_', ' ')} evening for ${party} ${party === 1 ? 'person' : 'people'} in ${city || 'their city'}. ${freeText ? `They said: "${freeText.slice(0, 200)}"` : ''}
 
 Speak ONE in-character line back to the user, in Eve's voice. Tone: ${persona}
 
 Rules:
 - Maximum 22 words.
-- Sound like spoken speech, not text. Natural rhythm. Use a comma or pause.
-- Reference something specific they said if you can — the vibe, the place, the cuisine, etc.
-- End with a hint that you are about to start planning ("let me look", "give me a moment", "I'm finding it now", or similar).
+- Sound like spoken speech, not text. Natural rhythm with one comma or pause.
+- Reference something specific they said — the vibe, the cuisine, the city, who's joining.
+- End with a soft cue that you're about to start working ("let me look", "give me a moment", "give me a beat", "leave it with me", or similar).
+- Never say "as an AI". Never say "I'd love to". Never say "absolutely". Never apologise.
+- Avoid em dashes, semicolons, ellipses for trailing-off. Finish thoughts.
 
-Output ONLY the spoken line, no quotes, no commentary.`;
+Output ONLY the spoken line. No quotes. No commentary. No prefix.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -113,26 +117,27 @@ app.post('/api/eve-outro', async (req, res) => {
   const stopsText = stops.map((s) => `${s.name} (${s.kind})`).join(' → ') || '...';
 
   const vibePersona: Record<string, string> = {
-    date_night: 'lightly flirtatious, warm, a touch envious. End on a tease.',
-    celebrating: 'proud, warm, hype. End on a tiny cheer.',
-    casual: 'breezy, satisfied, low-key.',
-    family: 'warm, knowing, proud.',
-    friends: 'playful, observational, slightly teasing.',
-    solo: 'soft, respectful, knowing.',
+    date_night: 'flirty, low-burn sensual, a touch envious. End on a tease about the date.',
+    celebrating: 'proud, hyped, warm. End on a small cheer.',
+    casual: 'breezy, satisfied, low-key. Send them off easy.',
+    family: 'warm, knowing, gently proud.',
+    friends: 'playful, observational, mildly teasing the group.',
+    solo: 'soft, intimate, knowing. Honor the quiet.',
   };
   const persona = vibePersona[vibe] || vibePersona.date_night;
 
-  const prompt = `You are Eve, the AI evening concierge. You just finished planning the night: ${stopsText}, in ${city}.
+  const prompt = `You are Eve, the user's personal evening concierge — equal parts assistant, accomplice, soft flirt. You just finished planning the evening: ${stopsText}, in ${city}.
 
-Speak ONE final line in Eve's voice as you hand the night to the user. Tone: ${persona}
+Speak ONE final line in Eve's voice as you hand the evening to them. Tone: ${persona}
 
 Rules:
 - Maximum 18 words.
 - Sound like spoken speech.
-- Reference one of the stops by name.
-- End with a small send-off ("have fun", "go get it", "I am rooting for you", or similar).
+- Name one specific stop.
+- End with a soft send-off ("have fun", "go get them", "I'm rooting for you", "make it a memory", or similar).
+- Avoid em dashes. Finish your thought.
 
-Output ONLY the spoken line, no quotes.`;
+Output ONLY the spoken line. No quotes.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -145,6 +150,77 @@ Output ONLY the spoken line, no quotes.`;
   } catch (err: any) {
     console.error('eve-outro failed:', err?.message || err);
     jsonError(res, 500, `Outro failed: ${err?.message || 'unknown'}`);
+  }
+});
+
+app.post('/api/eve-story', async (req, res) => {
+  if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
+
+  const title: string = (req.body?.title || '').trim();
+  const stops: any[] = req.body?.stops || [];
+  const vibe: string = (req.body?.vibe || 'date_night').trim();
+  const city: string = (req.body?.city || '').trim();
+  const party: number = Number(req.body?.party) || 2;
+
+  if (!stops.length) return jsonError(res, 400, 'stops required');
+
+  const vibePersona: Record<string, string> = {
+    date_night: 'intimate, slow-burn sensual, a tiny bit envious. Address the user directly. Sometimes flirty.',
+    celebrating: 'warm, hyped, cinematic.',
+    casual: 'easy, observational, dry-witty.',
+    family: 'warm, gentle, knowing.',
+    friends: 'playful, lightly teasing, full of energy.',
+    solo: 'soft, tender, contemplative.',
+  };
+  const persona = vibePersona[vibe] || vibePersona.date_night;
+
+  const stopsText = stops
+    .map(
+      (s, i) =>
+        `Stop ${i + 1}: ${s.name} (${s.kind}) — ${s.oneLineVibe}${s.signatureItem ? ` · order: ${s.signatureItem}` : ''}`
+    )
+    .join('\n');
+
+  const prompt = `You are Eve, the user's deeply personal evening concierge. You write the user's evening as a short, relatable second-person story — not a list, not an itinerary. The story should make the user feel like they are already living it.
+
+Evening title: "${title}"
+Vibe: ${vibe.replace('_', ' ')}
+City: ${city}
+Party: ${party} ${party === 1 ? 'person' : 'people'}
+
+The three stops you planned:
+${stopsText}
+
+Write the evening as Eve telling the user how it'll unfold. Voice: ${persona}
+
+Structure the response as JSON with FIVE narrative beats woven around the three stops:
+
+{
+  "opening": "1-2 sentence cinematic opening that sets the tone of the evening before they leave the house. Address them directly with 'you'. Reference the city or the time of day.",
+  "atStop1": "1-2 sentence scene at Stop 1 — what they'll feel walking in, what to order, the mood. Mention the venue by name once.",
+  "transition1to2": "1 sentence transition that bridges Stop 1 to Stop 2 — what they'll be feeling as they step out, the short walk or drive, the anticipation.",
+  "atStop2": "1-2 sentence scene at Stop 2 — sensory specifics, what to do here, the small moment.",
+  "transition2to3": "1 sentence transition into the closing stop.",
+  "atStop3": "1-2 sentence scene at Stop 3 — the closer, the lasting feeling.",
+  "closing": "1 sentence Eve send-off in her voice. Personal, warm, slightly teasing. End the evening on her note.",
+  "moodArc": "single phrase describing the emotional arc of the evening, e.g. 'warm-then-electric' or 'slow burn into starlit'. Max 5 words.",
+  "weatherCue": "single short cue for the night: e.g. 'cool, clear evening', 'breezy after dusk'. Max 6 words. If unsure, give a plausible Bay Area evening descriptor."
+}
+
+Total length across all beats: aim for 130-180 words. Sound spoken. Avoid em dashes. Avoid the word "night" — use "evening". Output strict JSON only.`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: TEXT_MODEL,
+      contents: prompt,
+      config: { temperature: 0.92, topP: 0.95 },
+    });
+    const parsed = safeParseJson(response.text || '');
+    if (!parsed) return jsonError(res, 502, 'Story returned non-JSON');
+    res.json(parsed);
+  } catch (err: any) {
+    console.error('eve-story failed:', err?.message || err);
+    jsonError(res, 500, `Story failed: ${err?.message || 'unknown'}`);
   }
 });
 
@@ -257,7 +333,8 @@ app.post('/api/plan-experience/skeleton', async (req, res) => {
   const vibe: string = (req.body?.vibe || 'date_night').trim();
   const party: number = Number(req.body?.party) || 2;
   const dietary: string[] = req.body?.dietary || [];
-  const budgetUSD: number = Number(req.body?.budgetUSD) || 200;
+  const budgetPerPersonUSD: number = Number(req.body?.budgetPerPersonUSD) || Number(req.body?.budgetUSD) || 80;
+  const totalBudget = budgetPerPersonUSD * party;
   const freeText: string = (req.body?.freeText || '').trim();
   const cuisinePref: string = (req.body?.cuisinePref || '').trim();
   const whenISO: string = (req.body?.whenISO || '').trim();
@@ -298,7 +375,7 @@ City / area: ${city}
 Vibe: ${vibeMeta.label} — ${vibeMeta.hint}
 Party size: ${party}
 Dietary preferences: ${dietaryStr}
-Budget for the night: ~$${budgetUSD} total
+Budget: ~$${budgetPerPersonUSD} per person (~$${totalBudget} total for ${party})
 User's freeform wish: "${freeText}"
 ${cuisineLine}
 ${whenLine}

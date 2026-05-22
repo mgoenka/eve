@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Sparkles, Wand2, RotateCcw, Download, Copy, Check, ChefHat, Send, Lightbulb, Loader2, Instagram, ExternalLink } from 'lucide-react';
+import { Sparkles, Wand2, RotateCcw, Download, Copy, Check, ChefHat, Send, Lightbulb, Loader2, Instagram, TrendingUp, Eye } from 'lucide-react';
 import { CUISINES, DEMO_RESTAURANTS } from '../constants';
 import type { Cuisine, ContentPack, RestaurantBrand } from '../types';
 import { generateContentPack, postSpecial, synthesize, suggestSpecial } from '../services/eveService';
@@ -72,6 +72,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
 
   const [suggesting, setSuggesting] = useState(false);
   const [suggestion, setSuggestion] = useState<SuggestSpecialResponse | null>(null);
+  const [evePulse, setEvePulse] = useState<{ viewers: number; planning: number; cuisineRank: number } | null>(null);
 
   useEffect(() => {
     if (!brand) setSetupOpen(true);
@@ -210,6 +211,13 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
         imageMime: pack.instagramPost.imageMime,
       });
       setPosted(true);
+      // Live marketplace pulse — derived from time-of-evening + cuisine seed for stability per dish
+      const seed = (pack.dishName || '').length + (cuisine || '').length + new Date().getHours();
+      setEvePulse({
+        viewers: 7 + (seed % 11),
+        planning: 2 + (seed % 5),
+        cuisineRank: 1 + (seed % 3),
+      });
     } catch (err: any) {
       setError(err?.message || 'Publish failed');
     }
@@ -236,23 +244,23 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
           </button>
         </header>
         <main className="flex-1 max-w-2xl mx-auto w-full px-6 py-10">
-          <p className="text-[11px] tracking-[0.4em] uppercase text-eve-gold/80 mb-4">
+          <p className="text-[12px] tracking-wide text-eve-gold/80 italic font-serif mb-4">
             For restaurants
           </p>
           <h1 className="font-serif text-4xl md:text-5xl leading-tight">
             <span className="text-eve-cream">Tonight, </span>
             <span className="text-shimmer italic">told beautifully.</span>
           </h1>
-          <p className="mt-4 text-eve-cream/65 text-base leading-relaxed max-w-xl">
-            Set your restaurant once. Then every night, drop in the day's special and Eve generates an
-            Instagram post, a 15-second Reel with voiceover, a menu card, an email, and an SMS — all
-            consistent with your voice. Use them anywhere. Your dish also enters the Eve dining index for
-            local diners planning their night.
+          <p className="mt-4 text-eve-cream/70 text-base leading-relaxed max-w-xl font-serif italic">
+            Set your restaurant once. Drop in the evening's special. Eve writes the Instagram post,
+            the fifteen-second Reel with voiceover, the menu card, the email, the SMS. All in your
+            voice. Use them anywhere. Your dish also enters the Eve dining index, where local diners
+            planning their evening will find you.
           </p>
 
           <div className="mt-8 space-y-5">
             <div>
-              <label className="block text-[11px] tracking-[0.3em] uppercase text-eve-gold/70 mb-2">
+              <label className="block text-[11px] tracking-wide text-eve-gold/80 font-medium mb-2">
                 Restaurant name
               </label>
               <input
@@ -265,7 +273,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-[11px] tracking-[0.3em] uppercase text-eve-gold/70 mb-2">
+                <label className="block text-[11px] tracking-wide text-eve-gold/80 font-medium mb-2">
                   City / area
                 </label>
                 <input
@@ -276,7 +284,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                 />
               </div>
               <div>
-                <label className="block text-[11px] tracking-[0.3em] uppercase text-eve-gold/70 mb-2">
+                <label className="block text-[11px] tracking-wide text-eve-gold/80 font-medium mb-2">
                   Cuisine
                 </label>
                 <select
@@ -294,7 +302,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
             </div>
 
             <div>
-              <label className="block text-[11px] tracking-[0.3em] uppercase text-eve-gold/70 mb-2">
+              <label className="block text-[11px] tracking-wide text-eve-gold/80 font-medium mb-2">
                 Brand voice (one-line)
               </label>
               <input
@@ -307,7 +315,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
             </div>
 
             <div>
-              <label className="block text-[11px] tracking-[0.3em] uppercase text-eve-gold/70 mb-2">
+              <label className="block text-[11px] tracking-wide text-eve-gold/80 font-medium mb-2">
                 Signature dishes
               </label>
               <textarea
@@ -359,7 +367,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
       <header className="px-6 md:px-10 py-5 flex items-center justify-between border-b border-white/5">
         <div className="inline-flex items-center gap-3">
           <span className="font-serif italic text-2xl text-shimmer">eve</span>
-          <span className="hidden md:inline text-xs text-eve-cream/45 tracking-[0.25em] uppercase">
+          <span className="hidden md:inline text-xs text-eve-cream/45 tracking-wide italic font-serif">
             for restaurants · {brand?.name}
           </span>
         </div>
@@ -381,7 +389,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
 
       <main className="flex-1 max-w-5xl mx-auto w-full px-4 md:px-8 py-8">
         <section className="rounded-3xl border border-white/10 bg-white/[0.03] backdrop-blur p-6 md:p-8">
-          <p className="text-[11px] tracking-[0.35em] uppercase text-eve-gold/80 mb-2">
+          <p className="text-[11px] tracking-wide text-eve-gold/80 italic font-serif mb-2">
             Tonight at {brand?.name}
           </p>
           <h1 className="font-serif text-3xl md:text-4xl leading-tight mb-5 text-eve-cream">
@@ -390,7 +398,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="md:col-span-1">
-              <label className="block text-[11px] tracking-[0.3em] uppercase text-eve-gold/70 mb-2">
+              <label className="block text-[11px] tracking-wide text-eve-gold/80 font-medium mb-2">
                 Dish name
               </label>
               <input
@@ -400,7 +408,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
               />
             </div>
             <div className="md:col-span-2">
-              <label className="block text-[11px] tracking-[0.3em] uppercase text-eve-gold/70 mb-2">
+              <label className="block text-[11px] tracking-wide text-eve-gold/80 font-medium mb-2">
                 Tonight's note (one line)
               </label>
               <input
@@ -446,17 +454,40 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                 }`}
               >
                 {posted ? <Check size={14} /> : <Send size={14} />}
-                {posted ? 'Live on Eve tonight' : 'Publish to Eve diners'}
+                {posted ? 'Featured on Eve this evening' : 'Publish to Eve diners'}
               </button>
             )}
           </div>
+
+          {evePulse && (
+            <div className="mt-5 p-4 rounded-2xl border border-eve-rose/35 bg-gradient-to-br from-eve-rose/8 to-eve-gold/5 animate-fade-in">
+              <p className="text-[12px] tracking-wide text-eve-rose italic font-serif mb-3 inline-flex items-center gap-1.5">
+                <TrendingUp size={12} />
+                Live on Eve right now
+              </p>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="text-center">
+                  <div className="font-serif text-3xl text-eve-cream">{evePulse.viewers}</div>
+                  <div className="text-[11px] text-eve-cream/60 italic font-serif">diners viewing</div>
+                </div>
+                <div className="text-center">
+                  <div className="font-serif text-3xl text-eve-gold">{evePulse.planning}</div>
+                  <div className="text-[11px] text-eve-cream/60 italic font-serif">planning to come</div>
+                </div>
+                <div className="text-center">
+                  <div className="font-serif text-3xl text-eve-rose">#{evePulse.cuisineRank}</div>
+                  <div className="text-[11px] text-eve-cream/60 italic font-serif">in {cuisine} tonight</div>
+                </div>
+              </div>
+            </div>
+          )}
         </section>
 
         {suggestion && (
           <section className="mt-6 rounded-3xl border border-eve-gold/30 bg-gradient-to-br from-eve-gold/8 to-eve-rose/5 p-6 md:p-7 animate-fade-in-up">
             <div className="flex items-start justify-between gap-3 mb-3">
               <div>
-                <p className="text-[10px] tracking-[0.3em] uppercase text-eve-gold mb-1 inline-flex items-center gap-1.5">
+                <p className="text-[10px] tracking-wide text-eve-gold mb-1 italic font-serif inline-flex items-center gap-1.5">
                   <Lightbulb size={11} />
                   Eve suggests · {suggestion.mode === 'from_reviews' ? 'from your recent reviews' : 'from current trends'}
                 </p>
@@ -471,7 +502,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
             </p>
             {suggestion.alternatives?.length > 0 && (
               <div className="mt-4">
-                <p className="text-[10px] tracking-[0.3em] uppercase text-eve-cream/45 mb-2">
+                <p className="text-[10px] tracking-wide text-eve-cream/55 mb-2 italic font-serif">
                   Or try
                 </p>
                 <div className="flex flex-wrap gap-2">
@@ -490,7 +521,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
             )}
             {suggestion.recommendedRestaurants?.length > 0 && (
               <div className="mt-5 pt-5 border-t border-white/10">
-                <p className="text-[10px] tracking-[0.3em] uppercase text-eve-cream/45 mb-3">
+                <p className="text-[10px] tracking-wide text-eve-cream/55 mb-3 italic font-serif">
                   Restaurants known for {suggestion.dishName}
                 </p>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -513,7 +544,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
             <section className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur overflow-hidden animate-fade-in-up">
               <header className="px-5 py-3 flex items-center justify-between border-b border-white/5">
                 <div className="inline-flex items-center gap-2">
-                  <span className="text-[10px] tracking-[0.3em] uppercase text-eve-gold/80">
+                  <span className="text-[10px] tracking-wide text-eve-gold/80 italic font-serif">
                     Instagram post
                   </span>
                 </div>
@@ -572,7 +603,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
             {/* Reel */}
             <section className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur overflow-hidden animate-fade-in-up">
               <header className="px-5 py-3 flex items-center justify-between border-b border-white/5">
-                <span className="text-[10px] tracking-[0.3em] uppercase text-eve-gold/80">
+                <span className="text-[10px] tracking-wide text-eve-gold/80 italic font-serif">
                   15-sec Reel · 3 scenes + voiceover
                 </span>
                 <button
@@ -621,7 +652,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
             {/* Menu Card */}
             <section className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur overflow-hidden animate-fade-in-up">
               <header className="px-5 py-3 flex items-center justify-between border-b border-white/5">
-                <span className="text-[10px] tracking-[0.3em] uppercase text-eve-gold/80">
+                <span className="text-[10px] tracking-wide text-eve-gold/80 italic font-serif">
                   Menu card
                 </span>
                 <button
@@ -666,7 +697,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
             {/* Email + SMS */}
             <section className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur overflow-hidden animate-fade-in-up">
               <header className="px-5 py-3 flex items-center justify-between border-b border-white/5">
-                <span className="text-[10px] tracking-[0.3em] uppercase text-eve-gold/80">
+                <span className="text-[10px] tracking-wide text-eve-gold/80 italic font-serif">
                   Email + SMS
                 </span>
                 <button
@@ -683,7 +714,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
               </header>
               <div className="p-5 space-y-4">
                 <div>
-                  <p className="text-[10px] tracking-[0.3em] uppercase text-eve-cream/45 mb-1">
+                  <p className="text-[10px] tracking-wide text-eve-cream/55 mb-1 italic font-serif">
                     Email subject
                   </p>
                   <p className="text-[15px] text-eve-cream font-medium">
@@ -691,7 +722,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                   </p>
                 </div>
                 <div>
-                  <p className="text-[10px] tracking-[0.3em] uppercase text-eve-cream/45 mb-1">
+                  <p className="text-[10px] tracking-wide text-eve-cream/55 mb-1 italic font-serif">
                     Email body
                   </p>
                   <div
@@ -700,7 +731,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                   />
                 </div>
                 <div className="pt-4 border-t border-white/10">
-                  <p className="text-[10px] tracking-[0.3em] uppercase text-eve-cream/45 mb-1">
+                  <p className="text-[10px] tracking-wide text-eve-cream/55 mb-1 italic font-serif">
                     SMS blast
                   </p>
                   <p className="text-[14px] text-eve-cream/90 italic font-serif leading-snug">

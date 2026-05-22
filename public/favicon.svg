@@ -1,15 +1,31 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
   <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#f5d896"/>
-      <stop offset="50%" stop-color="#e8a39e"/>
+    <linearGradient id="dusk" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fef3c7"/>
+      <stop offset="40%" stop-color="#f5d896"/>
+      <stop offset="80%" stop-color="#e8a39e"/>
       <stop offset="100%" stop-color="#a855f7"/>
     </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%" stop-color="#fef3c7" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#f5d896" stop-opacity="0"/>
+    </radialGradient>
   </defs>
+
   <rect width="64" height="64" rx="14" fill="#1a0d2e"/>
-  <circle cx="32" cy="32" r="22" fill="none" stroke="url(#g)" stroke-width="2.5" opacity="0.65"/>
-  <path d="M32 14 A 18 18 0 0 1 50 32" fill="none" stroke="url(#g)" stroke-width="3"/>
-  <circle cx="32" cy="14" r="3" fill="#f5d896"/>
-  <circle cx="50" cy="32" r="2.5" fill="#e8a39e"/>
-  <text x="32" y="40" text-anchor="middle" font-family="Cormorant Garamond, serif" font-size="22" font-weight="600" fill="#f5d896" font-style="italic">e</text>
+  <circle cx="32" cy="32" r="22" fill="url(#glow)"/>
+
+  <!-- Crescent moon arc -->
+  <path d="M 18 32 Q 18 14 32 14 Q 24 22 24 32 Q 24 42 32 50 Q 18 50 18 32 Z" fill="url(#dusk)" opacity="0.94"/>
+
+  <!-- Star sparkle -->
+  <g transform="translate(45 21)">
+    <path d="M 0 -5 L 1.2 -1.2 L 5 0 L 1.2 1.2 L 0 5 L -1.2 1.2 L -5 0 L -1.2 -1.2 Z" fill="#fef3c7"/>
+  </g>
+  <g transform="translate(48 39)" opacity="0.7">
+    <path d="M 0 -3 L 0.7 -0.7 L 3 0 L 0.7 0.7 L 0 3 L -0.7 0.7 L -3 0 L -0.7 -0.7 Z" fill="#f5d896"/>
+  </g>
+
+  <!-- "e" mark -->
+  <text x="32" y="40" text-anchor="middle" font-family="Cormorant Garamond, serif" font-size="20" font-weight="600" font-style="italic" fill="#1a0d2e" letter-spacing="-0.02em">e</text>
 </svg>

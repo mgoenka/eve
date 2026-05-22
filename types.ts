@@ -59,6 +59,18 @@ export interface ExperiencePlan {
   error?: string;
 }
 
+export interface EveStory {
+  opening: string;
+  atStop1: string;
+  transition1to2: string;
+  atStop2: string;
+  transition2to3: string;
+  atStop3: string;
+  closing: string;
+  moodArc: string;
+  weatherCue: string;
+}
+
 export interface RestaurantBrand {
   name: string;
   city: string;
