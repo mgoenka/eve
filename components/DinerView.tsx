@@ -253,6 +253,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           budgetUSD: budget,
           freeText: useFreeText,
           cuisinePref,
+          whenISO,
         });
       } catch (err: any) {
         setError(err?.message || 'Eve could not plan your night.');
@@ -343,7 +344,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
         }
       } catch {}
     },
-    [city, vibe, party, dietary, budget, freeText, cuisinePref, speakAsEve]
+    [city, vibe, party, dietary, budget, freeText, cuisinePref, whenISO, speakAsEve]
   );
 
   const surpriseMe = useCallback(() => {

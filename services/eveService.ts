@@ -16,6 +16,7 @@ export interface PlanSkeletonRequest {
   budgetUSD: number;
   freeText: string;
   cuisinePref?: string;
+  whenISO?: string;
 }
 
 export interface PlanSkeletonResponse {

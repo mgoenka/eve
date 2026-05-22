@@ -260,12 +260,27 @@ app.post('/api/plan-experience/skeleton', async (req, res) => {
   const budgetUSD: number = Number(req.body?.budgetUSD) || 200;
   const freeText: string = (req.body?.freeText || '').trim();
   const cuisinePref: string = (req.body?.cuisinePref || '').trim();
+  const whenISO: string = (req.body?.whenISO || '').trim();
 
   if (!city) return jsonError(res, 400, 'city required');
 
   const dietaryStr = dietary.length ? dietary.join(', ') : 'no specific restrictions';
   const vibeMeta = VIBES.find((v) => v.id === vibe) || VIBES[0];
   const cuisineLine = cuisinePref ? `Preferred cuisine for the dinner anchor: ${cuisinePref}.` : '';
+  let whenLine = '';
+  if (whenISO) {
+    const target = new Date(whenISO + 'T00:00:00');
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const diffDays = Math.round((target.getTime() - today.getTime()) / 86400000);
+    const dayLabel =
+      diffDays === 0
+        ? 'TONIGHT'
+        : diffDays === 1
+          ? 'TOMORROW NIGHT'
+          : `the night of ${target.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}`;
+    whenLine = `Date: this plan is for ${dayLabel}. Consider day-of-week vibe (Tuesdays are quiet, Saturdays are busy) and pick venues that will plausibly be open and good that night.`;
+  }
 
   const specialsHints = POSTED_SPECIALS.filter((s) =>
     s.city.toLowerCase().includes(city.toLowerCase().split(',')[0])
@@ -286,6 +301,7 @@ Dietary preferences: ${dietaryStr}
 Budget for the night: ~$${budgetUSD} total
 User's freeform wish: "${freeText}"
 ${cuisineLine}
+${whenLine}
 
 ${specialsHints ? `Restaurants currently posted on Eve in this area you should consider as the dinner anchor when they fit:\n${specialsHints}\n` : ''}
 
