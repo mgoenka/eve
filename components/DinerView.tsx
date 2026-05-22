@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Sparkles, Wand2, RotateCcw, Play, Pause, VolumeX, Volume2, Store } from 'lucide-react';
+import { Sparkles, Wand2, RotateCcw, Play, Pause, VolumeX, Volume2, Store, ArrowUpRight, ArrowDownRight, Clock as ClockIcon, Leaf, Coins } from 'lucide-react';
 import {
   VIBES,
   DIETARY_PREFERENCES,
@@ -41,6 +41,8 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   const [narrationAudio, setNarrationAudio] = useState<string | null>(null);
   const [narrationMime, setNarrationMime] = useState<string>('audio/mpeg');
   const [narrationText_, setNarrationText] = useState<string>('');
+  const [groundedSources, setGroundedSources] = useState<string[]>([]);
+  const [groundedSearchUsed, setGroundedSearchUsed] = useState(false);
 
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -111,6 +113,8 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
     if (cancelRef.current) return;
 
     setPlanTitle(skeleton.title || 'A night, planned.');
+    setGroundedSources(skeleton.groundedSources || []);
+    setGroundedSearchUsed(!!skeleton.groundedSearchUsed);
 
     let evePosted: string[] = [];
     try {
@@ -436,12 +440,48 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
             {planTitle || '…'}
           </h2>
           <p className="mt-2 text-eve-cream/55 text-sm">{city}</p>
+          {groundedSearchUsed && (
+            <p className="mt-3 text-[10px] tracking-[0.3em] uppercase text-eve-rose/85 inline-flex items-center gap-1.5">
+              <Sparkles size={10} />
+              {groundedSources.length > 0
+                ? `Grounded via Google Search · ${groundedSources.length} sources`
+                : 'Grounded via Google Search'}
+            </p>
+          )}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {stops.map((stop, i) => (
             <StopCard key={`${stop.name}-${i}`} stop={stop} index={i} />
           ))}
+        </div>
+
+        <div className="mt-8 flex flex-wrap items-center justify-center gap-2">
+          <span className="text-[10px] tracking-[0.3em] uppercase text-eve-cream/40 mr-1">
+            Tweak the night
+          </span>
+          {[
+            { label: 'Make it more upscale', emoji: ArrowUpRight, suffix: ' Make every stop more upscale and refined.', cls: 'amber' },
+            { label: 'Make it more casual', emoji: ArrowDownRight, suffix: ' Make every stop more casual and easygoing.', cls: 'rose' },
+            { label: 'Earlier night', emoji: ClockIcon, suffix: ' Shift the entire night earlier — start by 6 PM.', cls: 'gold' },
+            { label: 'Vegan only', emoji: Leaf, suffix: ' Strictly vegan across all stops including the dessert.', cls: 'emerald' },
+            { label: 'Cheaper', emoji: Coins, suffix: ' Cut the budget roughly in half. Find quality at a lower price band.', cls: 'sky' },
+          ].map((chip) => {
+            const Icon = chip.emoji;
+            return (
+              <button
+                key={chip.label}
+                onClick={() => {
+                  setFreeText((prev) => (prev || '') + chip.suffix);
+                  setTimeout(() => buildPlan(), 0);
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.10] border border-white/10 hover:border-eve-gold/40 text-xs font-medium text-eve-cream/80 hover:text-eve-cream transition-colors"
+              >
+                <Icon size={11} />
+                {chip.label}
+              </button>
+            );
+          })}
         </div>
 
         {narrationAudio && (

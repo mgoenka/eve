@@ -130,14 +130,46 @@ Return strict JSON only:
 }`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: TEXT_MODEL,
-      contents: prompt,
-      config: { temperature: 0.85, topP: 0.92 },
-    });
+    let response: any;
+    let groundedSearchUsed = false;
+    let groundedSources: string[] = [];
+
+    try {
+      response = await ai.models.generateContent({
+        model: TEXT_MODEL,
+        contents:
+          prompt +
+          '\n\nIMPORTANT: Use Google Search to verify each venue you propose actually exists in the area, with the correct cuisine and dietary fit. Only output venues you have confirmed via search. After Search, return ONLY the JSON described above, nothing else.',
+        config: {
+          temperature: 0.7,
+          topP: 0.9,
+          tools: [{ googleSearch: {} }],
+        },
+      });
+      groundedSearchUsed = true;
+      const cand: any = response.candidates?.[0] || {};
+      const meta: any = cand.groundingMetadata || cand.grounding_metadata || {};
+      const chunks: any[] = meta.groundingChunks || meta.grounding_chunks || [];
+      const queries: string[] = meta.webSearchQueries || meta.web_search_queries || [];
+      groundedSources = chunks
+        .map((c) => c?.web?.uri || c?.web?.title || c?.title)
+        .filter(Boolean)
+        .slice(0, 5);
+      if (groundedSources.length === 0 && queries.length > 0) {
+        groundedSources = queries.slice(0, 5);
+      }
+    } catch (toolErr: any) {
+      console.warn('Search-grounded skeleton failed, falling back to non-grounded:', toolErr?.message || toolErr);
+      response = await ai.models.generateContent({
+        model: TEXT_MODEL,
+        contents: prompt,
+        config: { temperature: 0.85, topP: 0.92 },
+      });
+    }
+
     const parsed = safeParseJson(response.text || '');
     if (!parsed) return jsonError(res, 502, 'Model returned non-JSON skeleton');
-    res.json(parsed);
+    res.json({ ...parsed, groundedSearchUsed, groundedSources });
   } catch (err: any) {
     console.error('plan-experience/skeleton failed:', err?.message || err);
     jsonError(res, 500, `Skeleton failed: ${err?.message || 'unknown'}`);

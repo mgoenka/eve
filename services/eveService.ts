@@ -21,6 +21,8 @@ export interface PlanSkeletonRequest {
 export interface PlanSkeletonResponse {
   title: string;
   stops: Array<Omit<ExperienceStop, 'status' | 'imageData' | 'imageMime' | 'error'>>;
+  groundedSearchUsed?: boolean;
+  groundedSources?: string[];
 }
 
 export async function planSkeleton(req: PlanSkeletonRequest): Promise<PlanSkeletonResponse> {
