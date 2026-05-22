@@ -4,6 +4,7 @@ import { CUISINES, DEMO_RESTAURANTS } from '../constants';
 import type { Cuisine, ContentPack, RestaurantBrand } from '../types';
 import { generateContentPack, postSpecial, synthesize, suggestSpecial } from '../services/eveService';
 import type { SuggestSpecialResponse } from '../services/eveService';
+import { EveLogo } from './EveLogo';
 
 interface Props {
   onSwitchToDiner: () => void;
@@ -235,10 +236,10 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
     return (
       <div className="relative z-10 min-h-screen flex flex-col">
         <header className="px-6 md:px-10 py-5 flex items-center justify-between">
-          <span className="font-serif italic text-3xl text-shimmer">eve</span>
+          <a href="/restaurant" className="inline-flex items-center gap-2"><EveLogo size={42} withWordmark /></a>
           <button
             onClick={onSwitchToDiner}
-            className="text-xs font-semibold text-eve-cream/60 hover:text-eve-cream uppercase tracking-widest"
+            className="text-xs font-medium text-eve-cream/70 hover:text-eve-cream italic font-serif"
           >
             For diners ↗
           </button>
@@ -248,7 +249,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
             For restaurants
           </p>
           <h1 className="font-serif text-4xl md:text-5xl leading-tight">
-            <span className="text-eve-cream">Tonight, </span>
+            <span className="text-eve-cream">Every <span className="italic"><span className="text-shimmer">Eve</span><span className="text-eve-cream/95">ning</span></span>, </span>
             <span className="text-shimmer italic">told beautifully.</span>
           </h1>
           <p className="mt-4 text-eve-cream/70 text-base leading-relaxed max-w-xl font-serif italic">
@@ -366,8 +367,8 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
     <div className="relative z-10 min-h-screen flex flex-col">
       <header className="px-6 md:px-10 py-5 flex items-center justify-between border-b border-white/5">
         <div className="inline-flex items-center gap-3">
-          <span className="font-serif italic text-2xl text-shimmer">eve</span>
-          <span className="hidden md:inline text-xs text-eve-cream/45 tracking-wide italic font-serif">
+          <EveLogo size={36} withWordmark />
+          <span className="hidden md:inline text-xs text-eve-cream/55 italic font-serif">
             for restaurants · {brand?.name}
           </span>
         </div>

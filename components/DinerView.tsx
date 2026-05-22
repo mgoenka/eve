@@ -43,6 +43,7 @@ import {
   reverseGeocode,
 } from '../services/eveService';
 import { StopCard } from './StopCard';
+import { EveLogo } from './EveLogo';
 
 interface Props {
   onSwitchToRestaurant: () => void;
@@ -116,10 +117,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   const [budgetPerPerson, setBudgetPerPerson] = useState<number>(initial?.budgetPerPerson || 100);
   const [cuisinePref, setCuisinePref] = useState(initial?.cuisinePref || '');
   const [whenISO, setWhenISO] = useState(initial?.whenISO || todayISO());
-  const [freeText, setFreeText] = useState(
-    initial?.freeText ||
-      'Indian or Italian dinner, dessert nearby, finish with a quiet garden walk under stringlights'
-  );
+  const [freeText, setFreeText] = useState(initial?.freeText || '');
   const [error, setError] = useState<string | null>(null);
 
   const [planTitle, setPlanTitle] = useState('');
@@ -408,12 +406,14 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   );
 
   const surpriseMe = useCallback(() => {
-    const surpriseVibe = pickRandom(SURPRISE_VIBES);
-    setVibe(surpriseVibe);
-    const txt = pickRandom(SURPRISE_FREETEXT);
-    setFreeText(txt);
-    buildPlan({ vibe: surpriseVibe, freeText: txt });
-  }, [buildPlan]);
+    // Honor whatever the user has already filled out.
+    // Only randomize the things they haven't touched.
+    const useVibe: Vibe = vibe; // keep their vibe selection
+    const useFreeText = freeText.trim()
+      ? freeText
+      : pickRandom(SURPRISE_FREETEXT);
+    buildPlan({ vibe: useVibe, freeText: useFreeText });
+  }, [buildPlan, vibe, freeText]);
 
   const sendChat = useCallback(async () => {
     const msg = chatInput.trim();
@@ -567,9 +567,9 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
       <div className="relative z-10 min-h-screen flex flex-col">
         <audio ref={eveAudioRef} preload="auto" muted={muted} />
         <header className="px-6 md:px-10 py-5 flex items-center justify-between">
-          <div className="inline-flex items-center gap-3">
-            <span className="font-serif italic text-3xl text-shimmer">eve</span>
-          </div>
+          <a href="/" className="inline-flex items-center gap-2 group">
+            <EveLogo size={42} withWordmark />
+          </a>
           <button
             onClick={onSwitchToRestaurant}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-medium bg-white/5 hover:bg-white/10 text-eve-cream/80 hover:text-eve-cream border border-white/10 transition-colors"
@@ -582,14 +582,16 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
         <main className="flex-1 max-w-3xl mx-auto w-full px-6 py-6 md:py-12">
           <div className="text-center mb-8 md:mb-10">
             <p className="text-[12px] tracking-wider text-eve-gold/85 mb-3 italic font-serif">
-              Hi, I'm Eve.
+              Hi, I'm <span className="text-shimmer not-italic font-semibold">Eve</span>.
             </p>
             <h1 className="font-serif text-5xl md:text-7xl leading-[1.0]">
               <span className="text-eve-cream">A perfect </span>
-              <span className="text-shimmer italic">evening.</span>
+              <span className="italic"><span className="text-shimmer">Eve</span><span className="text-eve-cream/95">ning.</span></span>
             </h1>
             <p className="mt-5 text-eve-cream/65 text-base md:text-lg max-w-2xl mx-auto leading-relaxed font-serif italic">
-              Tell me what evening you want. Or hit Surprise Me, I'll find you somewhere good.
+              Tell me what kind of <span className="text-shimmer not-italic">Eve</span>ning you want.
+              Or hit <em className="not-italic font-semibold text-eve-gold">Surprise Me</em>,
+              I'll find you somewhere good.
             </p>
             <p className="mt-2 text-[11px] tracking-wider text-eve-rose/75 italic">
               The personal assistant you can't currently afford.
@@ -769,9 +771,9 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
               <textarea
                 value={freeText}
                 onChange={(e) => setFreeText(e.target.value)}
-                placeholder="What do you want from the evening? Be specific or vague — Eve will work with what you give."
+                placeholder="Indian or Italian dinner, dessert nearby, then a quiet garden walk under stringlights..."
                 rows={3}
-                className="w-full px-5 py-4 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-[15px] leading-relaxed resize-none"
+                className="w-full px-5 py-4 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-[15px] leading-relaxed resize-none placeholder:text-eve-cream/30 placeholder:italic placeholder:font-serif"
               />
               <div className="mt-2 flex flex-wrap gap-2">
                 {SAMPLE_QUERIES.map((s) => (
@@ -819,8 +821,8 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
       <audio ref={eveAudioRef} preload="auto" muted={muted} />
 
       <header className="px-6 md:px-10 py-5 flex items-center justify-between border-b border-white/5">
-        <button onClick={reset} className="font-serif italic text-2xl text-shimmer">
-          eve
+        <button onClick={reset} className="inline-flex items-center gap-2">
+          <EveLogo size={36} withWordmark />
         </button>
         <div className="flex items-center gap-2">
           {phase === 'ready' && stops.length > 0 && (
@@ -852,7 +854,11 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
       <main className="flex-1 max-w-5xl mx-auto w-full px-4 md:px-8 py-8">
         <div className="text-center mb-6">
           <p className="text-[12px] tracking-wide text-eve-gold/75 mb-2 italic font-serif">
-            {phase === 'forging' ? 'Eve is planning' : 'Your evening'}
+            {phase === 'forging' ? (
+              <><span className="text-shimmer not-italic font-semibold">Eve</span> is planning</>
+            ) : (
+              <>Your <span className="text-shimmer not-italic">Eve</span>ning</>
+            )}
           </p>
           <h2 className="font-serif italic text-3xl md:text-5xl leading-tight text-eve-cream">
             {planTitle || '…'}
