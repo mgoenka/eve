@@ -22,6 +22,8 @@ import {
   Check,
   Wind,
   Heart,
+  Mic,
+  MicOff,
 } from 'lucide-react';
 import {
   VIBES,
@@ -140,6 +142,12 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   const [locating, setLocating] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
 
+  const [voiceListening, setVoiceListening] = useState(false);
+  const [voiceUnsupported, setVoiceUnsupported] = useState(false);
+  const [voiceTranscript, setVoiceTranscript] = useState('');
+  const recognitionRef = useRef<any>(null);
+  const baseTextRef = useRef('');
+
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -189,6 +197,39 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
     setBudgetPerPerson(Math.round(s.budgetUSD / s.party));
     setFreeText(s.freeText);
   };
+
+  // ----- Voice input via Web Speech API: set up the recognizer once -----
+  useEffect(() => {
+    const SR =
+      (typeof window !== 'undefined' &&
+        ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)) ||
+      null;
+    if (!SR) {
+      setVoiceUnsupported(true);
+      return;
+    }
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = 'en-US';
+    rec.onresult = (e: any) => {
+      let transcript = '';
+      for (let i = 0; i < e.results.length; i++) {
+        transcript += e.results[i][0].transcript + ' ';
+      }
+      const fullText = (baseTextRef.current ? baseTextRef.current + ' ' : '') + transcript.trim();
+      setVoiceTranscript(transcript.trim());
+      setFreeText(fullText);
+    };
+    rec.onend = () => setVoiceListening(false);
+    rec.onerror = () => setVoiceListening(false);
+    recognitionRef.current = rec;
+    return () => {
+      try {
+        rec.stop();
+      } catch {}
+    };
+  }, []);
 
   const detectLocation = useCallback(async () => {
     if (!('geolocation' in navigator)) return;
@@ -342,35 +383,36 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
         })
         .catch(() => {});
 
-      for (let i = 0; i < initialStops.length; i++) {
-        if (cancelRef.current) return;
-        setStops((prev) =>
-          prev.map((st, idx) => (idx === i ? { ...st, status: 'generating' } : st))
-        );
-        try {
-          const img = await stopImage({
-            name: initialStops[i].name,
-            kind: initialStops[i].kind,
-            oneLineVibe: initialStops[i].oneLineVibe,
-            city: useCity,
-            vibe: useVibe,
-          });
+      // Mark all stops as generating, then fan out images in parallel
+      setStops((prev) => prev.map((st) => ({ ...st, status: 'generating' })));
+      await Promise.all(
+        initialStops.map(async (stop, i) => {
           if (cancelRef.current) return;
-          setStops((prev) =>
-            prev.map((st, idx) =>
-              idx === i
-                ? { ...st, imageData: img.imageData, imageMime: img.imageMime, status: 'ready' }
-                : st
-            )
-          );
-        } catch (err: any) {
-          setStops((prev) =>
-            prev.map((st, idx) =>
-              idx === i ? { ...st, status: 'error', error: err?.message || 'Image failed' } : st
-            )
-          );
-        }
-      }
+          try {
+            const img = await stopImage({
+              name: stop.name,
+              kind: stop.kind,
+              oneLineVibe: stop.oneLineVibe,
+              city: useCity,
+              vibe: useVibe,
+            });
+            if (cancelRef.current) return;
+            setStops((prev) =>
+              prev.map((st, idx) =>
+                idx === i
+                  ? { ...st, imageData: img.imageData, imageMime: img.imageMime, status: 'ready' }
+                  : st
+              )
+            );
+          } catch (err: any) {
+            setStops((prev) =>
+              prev.map((st, idx) =>
+                idx === i ? { ...st, status: 'error', error: err?.message || 'Image failed' } : st
+              )
+            );
+          }
+        })
+      );
 
       if (cancelRef.current) return;
 
@@ -404,6 +446,48 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
     },
     [city, vibe, party, dietary, budgetPerPerson, freeText, cuisinePref, whenISO, speakAsEve]
   );
+
+  const toggleVoiceListening = useCallback(() => {
+    const rec = recognitionRef.current;
+    if (!rec) return;
+    if (voiceListening) {
+      try {
+        rec.stop();
+      } catch {}
+      setVoiceListening(false);
+      return;
+    }
+    baseTextRef.current = freeText;
+    setVoiceTranscript('');
+    try {
+      rec.start();
+      setVoiceListening(true);
+    } catch {
+      setVoiceListening(false);
+    }
+  }, [voiceListening, freeText]);
+
+  const tellEveByVoice = useCallback(() => {
+    const rec = recognitionRef.current;
+    if (!rec) {
+      buildPlan();
+      return;
+    }
+    if (voiceListening) {
+      try {
+        rec.stop();
+      } catch {}
+      setVoiceListening(false);
+      setTimeout(() => buildPlan({ freeText }), 250);
+    } else {
+      baseTextRef.current = freeText;
+      setVoiceTranscript('');
+      try {
+        rec.start();
+        setVoiceListening(true);
+      } catch {}
+    }
+  }, [voiceListening, freeText, buildPlan]);
 
   const surpriseMe = useCallback(() => {
     // Honor whatever the user has already filled out.
@@ -471,33 +555,33 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           .then(setStory)
           .catch(() => {});
 
-        for (let i = 0; i < newStops.length; i++) {
-          setStops((prev) =>
-            prev.map((st, idx) => (idx === i ? { ...st, status: 'generating' } : st))
-          );
-          try {
-            const img = await stopImage({
-              name: newStops[i].name,
-              kind: newStops[i].kind,
-              oneLineVibe: newStops[i].oneLineVibe,
-              city,
-              vibe,
-            });
-            setStops((prev) =>
-              prev.map((st, idx) =>
-                idx === i
-                  ? { ...st, imageData: img.imageData, imageMime: img.imageMime, status: 'ready' }
-                  : st
-              )
-            );
-          } catch (err: any) {
-            setStops((prev) =>
-              prev.map((st, idx) =>
-                idx === i ? { ...st, status: 'error', error: err?.message || 'Image failed' } : st
-              )
-            );
-          }
-        }
+        setStops((prev) => prev.map((st) => ({ ...st, status: 'generating' })));
+        await Promise.all(
+          newStops.map(async (stop, i) => {
+            try {
+              const img = await stopImage({
+                name: stop.name,
+                kind: stop.kind,
+                oneLineVibe: stop.oneLineVibe,
+                city,
+                vibe,
+              });
+              setStops((prev) =>
+                prev.map((st, idx) =>
+                  idx === i
+                    ? { ...st, imageData: img.imageData, imageMime: img.imageMime, status: 'ready' }
+                    : st
+                )
+              );
+            } catch (err: any) {
+              setStops((prev) =>
+                prev.map((st, idx) =>
+                  idx === i ? { ...st, status: 'error', error: err?.message || 'Image failed' } : st
+                )
+              );
+            }
+          })
+        );
       }
     } catch (err: any) {
       setChatHistory((h) => [
@@ -593,12 +677,25 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
               Or hit <em className="not-italic font-semibold text-eve-gold">Surprise Me</em>,
               I'll find you somewhere good.
             </p>
-            <p className="mt-2 text-[11px] tracking-wider text-eve-rose/75 italic">
-              The personal assistant you can't currently afford.
+            <p className="mt-2 text-[12px] tracking-wider text-eve-rose/80 italic font-serif">
+              Yours, quietly.
             </p>
           </div>
 
-          <div className="flex justify-center mb-7">
+          <div className="flex justify-center gap-3 mb-7 flex-wrap">
+            {!voiceUnsupported && (
+              <button
+                onClick={tellEveByVoice}
+                className={`group inline-flex items-center gap-2.5 px-6 py-3.5 rounded-full font-serif italic font-bold text-lg transition-all border ${
+                  voiceListening
+                    ? 'bg-eve-rose/25 text-eve-rose border-eve-rose/60 animate-glow-pulse'
+                    : 'bg-white/[0.04] text-eve-cream border-eve-rose/40 hover:bg-eve-rose/15 hover:text-eve-rose'
+                }`}
+              >
+                {voiceListening ? <MicOff size={18} /> : <Mic size={18} />}
+                {voiceListening ? 'Listening…' : 'Tell Eve'}
+              </button>
+            )}
             <button
               onClick={surpriseMe}
               className="group inline-flex items-center gap-2.5 px-7 py-3.5 rounded-full font-serif italic font-bold text-lg text-eve-ink bg-gradient-to-r from-amber-200 via-eve-gold to-eve-rose hover:from-amber-100 hover:via-yellow-300 hover:to-rose-300 transition-all shadow-[0_0_44px_rgba(245,216,150,0.40)] hover:shadow-[0_0_60px_rgba(232,163,158,0.55)]"
@@ -607,6 +704,16 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
               Surprise Me
             </button>
           </div>
+
+          {voiceListening && voiceTranscript && (
+            <div className="max-w-xl mx-auto mb-5 px-4 py-3 rounded-2xl border border-eve-rose/35 bg-eve-rose/5 text-center animate-fade-in">
+              <p className="text-[10px] tracking-wide text-eve-rose/85 mb-1 italic font-serif inline-flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-eve-rose animate-pulse" />
+                Eve hears you
+              </p>
+              <p className="font-serif italic text-base text-eve-cream/90">"{voiceTranscript}"</p>
+            </div>
+          )}
 
           <div className="text-center text-[12px] tracking-wider text-eve-cream/40 italic font-serif mb-5">
             or, tell Eve more
@@ -765,9 +872,24 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
             </div>
 
             <div>
-              <label className="block text-[12px] tracking-wide text-eve-gold/80 mb-2 font-medium">
-                Tell Eve more (optional)
-              </label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-[12px] tracking-wide text-eve-gold/80 font-medium">
+                  Tell Eve more (optional)
+                </label>
+                {!voiceUnsupported && (
+                  <button
+                    onClick={toggleVoiceListening}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium transition-all ${
+                      voiceListening
+                        ? 'bg-eve-rose/20 text-eve-rose border border-eve-rose/50'
+                        : 'bg-white/[0.04] text-eve-cream/70 border border-white/10 hover:border-eve-rose/40'
+                    }`}
+                  >
+                    {voiceListening ? <MicOff size={11} /> : <Mic size={11} />}
+                    {voiceListening ? 'Stop' : 'Speak'}
+                  </button>
+                )}
+              </div>
               <textarea
                 value={freeText}
                 onChange={(e) => setFreeText(e.target.value)}
