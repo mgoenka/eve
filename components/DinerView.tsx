@@ -76,8 +76,8 @@ const SUGGESTED_CITY = 'Santa Clara, CA';
 // rather than as committed text. The moment the user edits, styling snaps to plain.
 function ghostIf(value: string, suggestion: string): string {
   return value === suggestion
-    ? 'text-eve-cream/45 italic font-serif placeholder:text-eve-cream/30'
-    : 'text-eve-cream placeholder:text-eve-cream/30 placeholder:italic placeholder:font-serif';
+    ? 'text-eve-cream/55 italic font-serif placeholder:text-eve-cream/45'
+    : 'text-eve-cream placeholder:text-eve-cream/45 placeholder:italic placeholder:font-serif';
 }
 
 function pickRandom<T>(arr: T[]): T {
@@ -149,6 +149,13 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   const [eveOutroText, setEveOutroText] = useState('');
   const [eveSpeaking, setEveSpeaking] = useState(false);
   const [eveAvatarUrl, setEveAvatarUrl] = useState<string | null>(null);
+
+  // Animated walkthrough — Eve walks the user through the evening narratively,
+  // highlighting each stop card in turn while speaking the corresponding beat.
+  // walkingIdx semantics: -1 idle, 0 opening, 1 atStop1, 2 transition1to2,
+  // 3 atStop2, 4 transition2to3, 5 atStop3, 6 closing, 7 done
+  const [walkingIdx, setWalkingIdx] = useState<number>(-1);
+  const walkingCancelRef = useRef(false);
 
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
@@ -915,6 +922,52 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
     }
   }, [chatInput, refining, stops, vibe, city, dietary, party, budgetPerPerson, planTitle, speakAsEve]);
 
+  // Walks through the evening: highlights each stop in sequence as Eve
+  // speaks the corresponding story beat. Adds the "someone narrating it
+  // for you" feel.
+  const startWalkthrough = useCallback(async () => {
+    if (!story) return;
+    walkingCancelRef.current = false;
+    const beats: { idx: number; text: string }[] = [
+      { idx: 0, text: story.opening },
+      { idx: 1, text: story.atStop1 },
+      { idx: 2, text: story.transition1to2 },
+      { idx: 3, text: story.atStop2 },
+      { idx: 4, text: story.transition2to3 },
+      { idx: 5, text: story.atStop3 },
+      { idx: 6, text: story.closing },
+    ].filter((b) => b.text);
+
+    for (const beat of beats) {
+      if (walkingCancelRef.current) break;
+      setWalkingIdx(beat.idx);
+      await speakAsEveAndWait(beat.text);
+      // a small breath between beats
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    if (!walkingCancelRef.current) setWalkingIdx(-1);
+  }, [story, speakAsEveAndWait]);
+
+  const stopWalkthrough = useCallback(() => {
+    walkingCancelRef.current = true;
+    setWalkingIdx(-1);
+    if (eveAudioRef.current) {
+      try {
+        eveAudioRef.current.pause();
+      } catch {}
+    }
+  }, []);
+
+  // Map walking idx to which stop is currently in focus (highlighted).
+  // Beats 1, 3, 5 are AT a specific stop. Transitions don't highlight one.
+  const highlightedStopIdx = (() => {
+    if (walkingIdx < 0) return -1;
+    if (walkingIdx === 1) return 0;
+    if (walkingIdx === 3) return 1;
+    if (walkingIdx === 5) return 2;
+    return -1;
+  })();
+
   const sharePlan = useCallback(async () => {
     const url = buildShareURL({
       city,
@@ -1186,7 +1239,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                   onChange={(e) => setCuisinePref(e.target.value)}
                   placeholder="any cuisine, or pick from below"
                   list="cuisine-suggestions"
-                  className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-base placeholder:text-eve-cream/30 placeholder:italic placeholder:font-serif"
+                  className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-base placeholder:text-eve-cream/45 placeholder:italic placeholder:font-serif"
                 />
                 <datalist id="cuisine-suggestions">
                   {CUISINES.map((c) => (
@@ -1263,7 +1316,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                 onChange={(e) => setFreeText(e.target.value)}
                 placeholder="Indian or Italian dinner, dessert nearby, then a quiet garden walk under stringlights..."
                 rows={3}
-                className="w-full px-5 py-4 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-[15px] leading-relaxed resize-none placeholder:text-eve-cream/30 placeholder:italic placeholder:font-serif"
+                className="w-full px-5 py-4 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-[15px] leading-relaxed resize-none placeholder:text-eve-cream/45 placeholder:italic placeholder:font-serif"
               />
               <div className="mt-2 flex flex-wrap gap-2">
                 {SAMPLE_QUERIES.map((s) => (
@@ -1298,7 +1351,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           </div>
         </main>
 
-        <footer className="text-center py-6 text-[11px] text-white/35 italic font-serif">
+        <footer className="text-center py-6 text-[11px] text-white/55 italic font-serif">
           Gemini 2.5 · Google Search · Cloud TTS · Maps
         </footer>
       </div>
@@ -1425,21 +1478,53 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
               i === 0 ? story?.atStop1 : i === 1 ? story?.atStop2 : i === 2 ? story?.atStop3 : '';
             const transitionText =
               i === 1 ? story?.transition1to2 : i === 2 ? story?.transition2to3 : '';
+            const transitionActive =
+              walkingIdx === 2 && i === 1 ? true : walkingIdx === 4 && i === 2 ? true : false;
+            const sceneActive =
+              walkingIdx === 1 && i === 0
+                ? true
+                : walkingIdx === 3 && i === 1
+                  ? true
+                  : walkingIdx === 5 && i === 2
+                    ? true
+                    : false;
             return (
               <div key={`${stop.name}-${i}`} className="space-y-4">
                 {transitionText && (
-                  <div className="flex items-center gap-3 max-w-xl mx-auto px-4 animate-fade-in">
-                    <div className="flex-1 h-px bg-gradient-to-r from-transparent via-eve-gold/30 to-transparent" />
-                    <p className="font-serif italic text-sm text-eve-cream/55 leading-snug text-center max-w-md">
+                  <div
+                    className={`flex items-center gap-3 max-w-xl mx-auto px-4 transition-all duration-500 ${
+                      transitionActive ? 'opacity-100 scale-105' : 'opacity-100'
+                    }`}
+                  >
+                    <div className={`flex-1 h-px bg-gradient-to-r from-transparent via-eve-gold/30 to-transparent ${transitionActive ? 'via-eve-gold/70' : ''}`} />
+                    <p
+                      className={`font-serif italic text-base text-eve-cream/75 leading-snug text-center max-w-md transition-colors ${
+                        transitionActive ? 'text-eve-gold' : ''
+                      }`}
+                    >
                       {transitionText}
                     </p>
-                    <div className="flex-1 h-px bg-gradient-to-r from-transparent via-eve-gold/30 to-transparent" />
+                    <div className={`flex-1 h-px bg-gradient-to-r from-transparent via-eve-gold/30 to-transparent ${transitionActive ? 'via-eve-gold/70' : ''}`} />
                   </div>
                 )}
-                <StopCard stop={stop} index={i} city={city} />
+                <StopCard
+                  stop={stop}
+                  index={i}
+                  city={city}
+                  highlighted={highlightedStopIdx === i}
+                  dimmed={walkingIdx >= 0 && highlightedStopIdx >= 0 && highlightedStopIdx !== i}
+                />
                 {sceneText && (
-                  <div className="px-4 max-w-2xl mx-auto animate-fade-in">
-                    <p className="font-serif italic text-base md:text-lg text-eve-cream/80 leading-relaxed text-center">
+                  <div
+                    className={`px-4 max-w-2xl mx-auto transition-all duration-500 ${
+                      sceneActive ? 'scale-105' : ''
+                    }`}
+                  >
+                    <p
+                      className={`font-serif italic text-base md:text-lg text-eve-cream/85 leading-relaxed text-center transition-colors ${
+                        sceneActive ? 'text-eve-gold' : ''
+                      }`}
+                    >
                       {sceneText}
                     </p>
                   </div>
@@ -1457,8 +1542,32 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           )}
         </div>
 
-        {stops.length >= 2 && stops.every((s) => s.status === 'ready') && (
-          <div className="mt-8 flex justify-center gap-3 flex-wrap">
+        {stops.length >= 2 && stops.every((s) => s.status === 'ready' || s.status === 'error') && story && (
+          <div className="mt-8 flex justify-center">
+            {walkingIdx < 0 ? (
+              <button
+                onClick={startWalkthrough}
+                disabled={muted}
+                className="inline-flex items-center gap-2 px-7 py-3.5 rounded-full font-serif italic font-bold text-lg text-eve-ink bg-gradient-to-r from-amber-200 via-eve-gold to-eve-rose hover:from-amber-100 hover:via-yellow-300 hover:to-rose-300 transition-all shadow-[0_0_44px_rgba(245,216,150,0.40)] hover:shadow-[0_0_60px_rgba(232,163,158,0.55)] disabled:opacity-50"
+                title={muted ? 'Unmute Eve to hear her walk you through' : ''}
+              >
+                <Play size={18} />
+                Walk me through this evening
+              </button>
+            ) : (
+              <button
+                onClick={stopWalkthrough}
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-full font-medium text-sm bg-white/10 hover:bg-white/15 border border-white/15 text-eve-cream transition-all"
+              >
+                <Pause size={14} />
+                Stop the walkthrough
+              </button>
+            )}
+          </div>
+        )}
+
+        {stops.length >= 2 && stops.every((s) => s.status === 'ready' || s.status === 'error') && (
+          <div className="mt-5 flex justify-center gap-3 flex-wrap">
             <a
               href={`https://www.google.com/maps/dir/${stops
                 .map((s) => encodeURIComponent(`${s.name} ${city}`))
@@ -1574,7 +1683,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
         </div>
       </main>
 
-      <footer className="text-center py-6 text-[11px] text-white/30 italic font-serif">
+      <footer className="text-center py-6 text-[11px] text-white/55 italic font-serif">
         Gemini 2.5 · Google Search · Cloud TTS · Maps · Cloud Run
       </footer>
     </div>

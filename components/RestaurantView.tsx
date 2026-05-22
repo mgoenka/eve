@@ -11,8 +11,8 @@ import { EveLogo } from './EveLogo';
 // can use as-is or overwrite. Any change snaps the styling back to plain.
 function ghostIf(value: string, suggestion: string): string {
   return value === suggestion
-    ? 'text-eve-cream/45 italic font-serif placeholder:text-eve-cream/30'
-    : 'text-eve-cream placeholder:text-eve-cream/30 placeholder:italic placeholder:font-serif';
+    ? 'text-eve-cream/55 italic font-serif placeholder:text-eve-cream/60'
+    : 'text-eve-cream placeholder:text-eve-cream/60 placeholder:italic placeholder:font-serif';
 }
 
 interface Props {
@@ -351,7 +351,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                 placeholder={DEMO_RESTAURANTS[0].city}
                 className={`w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base ${ghostIf(city, DEMO_RESTAURANTS[0].city)}`}
               />
-              <p className="mt-1 text-[11px] text-eve-cream/45 italic font-serif">
+              <p className="mt-1 text-[11px] text-eve-cream/60 italic font-serif">
                 Helps Eve disambiguate when multiple restaurants share a name.
               </p>
             </div>
@@ -481,8 +481,8 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                 placeholder="Eve will pick from your reviews"
                 className={`w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] ${
                   suggestion && dishName === suggestion.dishName
-                    ? 'text-eve-cream/45 italic font-serif placeholder:text-eve-cream/30'
-                    : 'text-eve-cream placeholder:text-eve-cream/30 placeholder:italic placeholder:font-serif'
+                    ? 'text-eve-cream/55 italic font-serif placeholder:text-eve-cream/60'
+                    : 'text-eve-cream placeholder:text-eve-cream/60 placeholder:italic placeholder:font-serif'
                 }`}
               />
             </div>
@@ -496,8 +496,8 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                 placeholder="e.g. Made with the new spice blend, small batch tonight"
                 className={`w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] ${
                   suggestion && dishDescription === suggestion.dishDescription
-                    ? 'text-eve-cream/45 italic font-serif placeholder:text-eve-cream/30'
-                    : 'text-eve-cream placeholder:text-eve-cream/30 placeholder:italic placeholder:font-serif'
+                    ? 'text-eve-cream/55 italic font-serif placeholder:text-eve-cream/60'
+                    : 'text-eve-cream placeholder:text-eve-cream/60 placeholder:italic placeholder:font-serif'
                 }`}
               />
             </div>
@@ -595,7 +595,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
             </p>
             {suggestion.alternatives?.length > 0 && (
               <div className="mt-4">
-                <p className="text-[10px] tracking-wide text-eve-cream/55 mb-2 italic font-serif">
+                <p className="text-[10px] tracking-wide text-eve-cream/65 mb-2 italic font-serif">
                   Or try
                 </p>
                 <div className="flex flex-wrap gap-2">
@@ -837,7 +837,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
         )}
 
         {pack && (
-          <div className="mt-8 max-w-2xl mx-auto text-center text-[12px] tracking-wide uppercase text-eve-cream/45">
+          <div className="mt-8 max-w-2xl mx-auto text-center text-[12px] tracking-wide uppercase text-eve-cream/60">
             <span className="inline-flex items-center gap-2">
               <RotateCcw size={11} />
               <span>Tomorrow night, drop a new dish — Eve does this again, on brand, in 60 seconds.</span>
@@ -846,7 +846,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
         )}
       </main>
 
-      <footer className="text-center py-6 text-[10px] text-white/25 tracking-[0.3em] uppercase">
+      <footer className="text-center py-6 text-[10px] text-white/55 tracking-[0.3em] uppercase">
         Powered by Gemini 2.5 · Google Cloud · ADK-ready
       </footer>
     </div>
