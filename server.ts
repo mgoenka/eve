@@ -37,10 +37,57 @@ function clean(text: string): string {
     .trim();
 }
 
-function safeParseJson<T = any>(text: string): T | null {
+function extractJson(text: string): string | null {
+  if (!text) return null;
+  const stripped = clean(text);
+
   try {
-    return JSON.parse(clean(text)) as T;
-  } catch {
+    JSON.parse(stripped);
+    return stripped;
+  } catch {}
+
+  const fenceMatch = stripped.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenceMatch && fenceMatch[1]) {
+    const candidate = fenceMatch[1].trim();
+    try {
+      JSON.parse(candidate);
+      return candidate;
+    } catch {}
+  }
+
+  const firstBrace = stripped.indexOf('{');
+  const lastBrace = stripped.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    const candidate = stripped.slice(firstBrace, lastBrace + 1);
+    try {
+      JSON.parse(candidate);
+      return candidate;
+    } catch {}
+  }
+
+  const firstBracket = stripped.indexOf('[');
+  const lastBracket = stripped.lastIndexOf(']');
+  if (firstBracket !== -1 && lastBracket > firstBracket) {
+    const candidate = stripped.slice(firstBracket, lastBracket + 1);
+    try {
+      JSON.parse(candidate);
+      return candidate;
+    } catch {}
+  }
+
+  return null;
+}
+
+function safeParseJson<T = any>(text: string): T | null {
+  const json = extractJson(text);
+  if (!json) {
+    console.warn('safeParseJson: could not extract JSON from response (first 400 chars):', (text || '').slice(0, 400));
+    return null;
+  }
+  try {
+    return JSON.parse(json) as T;
+  } catch (err) {
+    console.warn('safeParseJson: extracted candidate failed final parse:', (json || '').slice(0, 200));
     return null;
   }
 }
@@ -392,9 +439,11 @@ CRITICAL RULES:
 - If an Eve-posted restaurant fits the dinner anchor naturally, USE IT and set isEveOriginal: true. Otherwise generate a plausible specific name and set isEveOriginal: false.
 - Use distinct stop kinds — never repeat the same kind twice in one plan.
 
-Return strict JSON only:
+OUTPUT FORMAT: Return ONE JSON object and NOTHING ELSE. No prose preamble. No "Here is..." No commentary. No markdown fences. First character of your response is \`{\` and last is \`}\`.
+
+Schema:
 {
-  "title": "short evocative title for the night (max 7 words)",
+  "title": "short evocative title for the evening (max 7 words)",
   "stops": [
     {
       "kind": "dinner" | "dessert" | "drink" | "walk" | "live_music" | "view" | "activity",
@@ -772,46 +821,40 @@ app.post('/api/suggest-special', async (req, res) => {
     return jsonError(res, 400, 'restaurantName and city required');
   }
 
-  const prompt = `You are a culinary intelligence agent helping a small restaurant owner pick what to feature tonight on social media. The restaurant is:
+  const prompt = `You are a culinary intelligence agent. The restaurant: ${restaurantName} in ${city}, cuisine ${cuisine}. Signature dishes: ${signatureDishes || 'not provided'}.
 
-Name: ${restaurantName}
-City: ${city}
-Cuisine: ${cuisine}
-Signature dishes (the owner's words): ${signatureDishes || 'not provided'}
+Step 1: Search for RECENT reviews (last 30-90 days) of "${restaurantName}" in "${city}" — Google, Yelp, TripAdvisor, food blogs, Instagram. Look for specific dish praise.
 
-Use Google Search to do these things, in order:
+Step 2: If you found specific dish-level praise (a dish the reviewers actually named and complimented), set mode = "from_reviews" and feature that dish. Cite the praise in rationale.
 
-1. Search for RECENT reviews of "${restaurantName}" in "${city}" — Google reviews, Yelp, TripAdvisor, food blogs, recent Instagram posts. Look for what dishes diners specifically praised in the last 30-90 days.
+Step 3: If no specific dish praise was found, set mode = "from_trending". Search what's trending in ${cuisine} cuisine right now (seasonal, viral, recent food media). Pick a dish that is realistic for this restaurant given their signatures. Also include 2-3 real ${city}-area restaurants known for this trending dish.
 
-2. If you find concrete dish-level praise (e.g. "the paneer was incredible", "their tagliolini al limone is the best in town"), pick the most-praised dish as the featured suggestion. Set mode = "from_reviews" and quote what reviewers said.
+OUTPUT FORMAT — VERY IMPORTANT:
+- Return ONE JSON object and NOTHING ELSE.
+- No prose preamble. No "Here is..." No "Based on my search..." No commentary outside the JSON.
+- No markdown code fences.
+- The very first character of your response must be \`{\` and the very last character must be \`}\`.
+- recommendedRestaurants must be an array (empty array [] if mode = "from_reviews").
 
-3. If you do NOT find specific dish praise (new restaurant, low review count, or reviews focused on service rather than food):
-   - Search for what's trending in ${cuisine} cuisine RIGHT NOW (seasonal, viral on TikTok / Instagram, recent food media).
-   - Pick a dish the restaurant could plausibly make given their cuisine and signatures.
-   - Set mode = "from_trending".
-   - ALSO recommend 2-3 specific real restaurants in or near ${city} known for this dish, so the owner can see who's setting the bar.
-
-4. Always include 2 ALTERNATIVE dish suggestions for variety.
-
-Return strict JSON only, no markdown:
+Schema:
 {
   "mode": "from_reviews" | "from_trending",
-  "dishName": "specific dish name to feature",
-  "dishDescription": "1-2 sentences describing the dish in the brand voice the owner would use, ingredient-led, max 40 words",
-  "rationale": "1-2 sentences explaining why THIS dish for tonight, citing specific review snippets or trend signals you found",
+  "dishName": "specific dish name",
+  "dishDescription": "1-2 sentences in the owner's brand voice, ingredient-led, max 40 words",
+  "rationale": "1-2 sentences citing review snippets (mode=from_reviews) or trend signals (mode=from_trending)",
   "alternatives": [
-    { "dishName": "alt 1", "rationale": "one-sentence why" },
-    { "dishName": "alt 2", "rationale": "one-sentence why" }
+    { "dishName": "alt 1 name", "rationale": "one-sentence why" },
+    { "dishName": "alt 2 name", "rationale": "one-sentence why" }
   ],
   "recommendedRestaurants": [
-    { "name": "real restaurant name", "city": "city", "dish": "dish they're known for", "why": "one sentence on what they do well" }
+    { "name": "real restaurant name", "city": "city", "dish": "dish they are known for", "why": "one sentence" }
   ]
 }
 
-Notes:
-- recommendedRestaurants should ONLY have entries if mode is "from_trending"; empty array if mode is "from_reviews".
-- Be honest. If you cannot verify reviews, say so via mode = "from_trending".
-- Do not invent specific reviewer names. You may quote review-style phrasing as "diners said..." or "reviewers noted..." without attribution.`;
+Constraints:
+- Do not invent specific reviewer names; use "diners said" or "reviewers noted".
+- If you cannot verify reviews, use mode = "from_trending".
+- Output JSON ONLY.`;
 
   try {
     let response: any;
