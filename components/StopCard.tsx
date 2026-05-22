@@ -28,21 +28,21 @@ export function StopCard({ stop, index, city }: Props) {
             {stop.status === 'generating' || stop.status === 'pending' ? (
               <>
                 <Loader2 size={28} className="animate-spin text-eve-rose" />
-                <span className="text-[11px] tracking-widest uppercase text-white/40">
+                <span className="text-[11px] tracking-wide italic font-serif text-white/45">
                   Painting the scene
                 </span>
               </>
             ) : stop.status === 'error' ? (
               <span className="text-xs text-red-300">{stop.error || 'Image failed'}</span>
             ) : (
-              <span className="text-[11px] tracking-widest uppercase text-white/30">
+              <span className="text-[11px] tracking-wide italic font-serif text-white/30">
                 Awaiting
               </span>
             )}
           </div>
         )}
         <div className="absolute top-3 left-3 inline-flex items-center gap-2">
-          <span className="px-2.5 py-1 rounded-full bg-eve-ink/80 backdrop-blur text-[10px] font-bold tracking-[0.25em] uppercase text-eve-gold border border-eve-gold/30">
+          <span className="px-2.5 py-1 rounded-full bg-eve-ink/80 backdrop-blur text-[10px] font-bold tracking-wide text-eve-gold border border-eve-gold/30">
             Stop {index + 1}
           </span>
           {kindMeta && (
@@ -51,7 +51,7 @@ export function StopCard({ stop, index, city }: Props) {
             </span>
           )}
           {stop.isEveOriginal && (
-            <span className="px-2.5 py-1 rounded-full bg-eve-rose/20 border border-eve-rose/50 backdrop-blur text-[10px] font-bold tracking-[0.18em] uppercase text-eve-rose inline-flex items-center gap-1">
+            <span className="px-2.5 py-1 rounded-full bg-eve-rose/20 border border-eve-rose/50 backdrop-blur text-[10px] font-bold tracking-wide text-eve-rose inline-flex items-center gap-1">
               <Sparkles size={10} />
               Eve Original
             </span>
@@ -73,8 +73,8 @@ export function StopCard({ stop, index, city }: Props) {
 
         {stop.signatureItem && (
           <div className="mt-4 pt-4 border-t border-white/10">
-            <p className="text-[10px] tracking-[0.25em] uppercase text-eve-gold/80 mb-1">
-              Order / Try
+            <p className="text-[10px] tracking-wide italic font-serif text-eve-gold/80 mb-1">
+              Order or try
             </p>
             <p className="text-[14px] text-eve-cream font-medium">{stop.signatureItem}</p>
           </div>
@@ -98,7 +98,7 @@ export function StopCard({ stop, index, city }: Props) {
             href={mapsUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-eve-gold/10 hover:bg-eve-gold/20 border border-eve-gold/30 text-eve-gold text-[10px] font-semibold tracking-wide uppercase transition-colors"
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-eve-gold/10 hover:bg-eve-gold/20 border border-eve-gold/30 text-eve-gold text-[10px] font-semibold tracking-wide transition-colors"
           >
             <MapPin size={10} />
             Maps

@@ -707,19 +707,35 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
     }
   }, [voiceListening, voiceTranscript, buildPlan, processTranscript, startSmartSilenceWatcher]);
 
-  // Page-load greeting: 5 sec after mount, attempt to greet. Browsers
-  // may block autoplay before any user gesture; we silently swallow that
-  // and the next user click will trigger Eve's voice anyway.
-  useEffect(() => {
-    if (eveGreeted || muted) return;
+  // Page-load greeting: try after 5 seconds AND on first user interaction
+  // (whichever comes first). Browsers block autoplay before user gesture, so
+  // the 5s timer is purely best-effort; the interaction listener guarantees
+  // playback the moment the user touches anything.
+  const greetingPlayedRef = useRef(false);
+  const playGreetingOnce = useCallback(() => {
+    if (greetingPlayedRef.current || muted) return;
+    greetingPlayedRef.current = true;
+    setEveGreeted(true);
     const greeting =
       "Hi, I'm Eve. Tell me what kind of evening you want, or hit Surprise Me, and I'll plan it for you.";
-    const t = setTimeout(() => {
-      setEveGreeted(true);
-      setEveIntroText(greeting);
-      speakAsEve(greeting);
-    }, 5000);
-    return () => clearTimeout(t);
+    setEveIntroText(greeting);
+    speakAsEve(greeting);
+  }, [muted, speakAsEve]);
+
+  useEffect(() => {
+    if (eveGreeted || muted) return;
+    const t = setTimeout(playGreetingOnce, 5000);
+    const onFirst = () => {
+      // Tiny delay so the click sound doesn't overlap Eve's first word
+      setTimeout(playGreetingOnce, 150);
+    };
+    document.addEventListener('pointerdown', onFirst, { once: true });
+    document.addEventListener('keydown', onFirst, { once: true });
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener('pointerdown', onFirst);
+      document.removeEventListener('keydown', onFirst);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -892,13 +908,23 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           <a href="/" className="inline-flex items-center gap-2 group">
             <EveLogo size={42} withWordmark />
           </a>
-          <button
-            onClick={onSwitchToRestaurant}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-medium bg-white/5 hover:bg-white/10 text-eve-cream/80 hover:text-eve-cream border border-white/10 transition-colors"
-          >
-            <Store size={14} />
-            For restaurants
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setMuted((m) => !m)}
+              className="p-2 rounded-full bg-white/5 hover:bg-white/10 transition-colors text-eve-cream/80"
+              title={muted ? "Unmute Eve's voice" : "Mute Eve's voice"}
+              aria-label={muted ? 'Unmute' : 'Mute'}
+            >
+              {muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+            </button>
+            <button
+              onClick={onSwitchToRestaurant}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-medium bg-white/5 hover:bg-white/10 text-eve-cream/80 hover:text-eve-cream border border-white/10 transition-colors"
+            >
+              <Store size={14} />
+              For restaurants
+            </button>
+          </div>
         </header>
 
         <main className="flex-1 max-w-3xl mx-auto w-full px-6 py-6 md:py-12">
