@@ -1,141 +1,195 @@
-# Eve — Plan Your Night
+# Eve — *Yours, quietly.*
 
-> The AI evening concierge that plans your night end-to-end and gives every restaurant the marketing team they never had. Built for **Google I/O Build with AI Hackathon 2026** at the Computer History Museum, Mountain View.
+> The AI evening concierge built for the **Google I/O Build with AI Hackathon 2026** at the Computer History Museum, Mountain View.
 
 **Live:** https://eve.mohitgoenka.com
+**Code:** https://github.com/mgoenka/eve
+**Track:** Creative Storyteller (Multimodal Storytelling with Interleaved Output)
 
-## What Eve does
+---
 
-Eve is one app with two coupled experiences that feed each other:
+## Eve in one paragraph
 
-### For diners (`/`)
+You tell Eve where you are and what kind of evening you want — by voice or text, with as much or as little detail as you like. In about 30 seconds, Eve gives you back a complete, three-stop evening: a real dinner anchor, a real dessert or follow-up venue, and a real closing moment, each illustrated by Gemini in real time, narrated as a spoken story arc, walkable on Google Maps, reservable on OpenTable. You can talk to Eve. She speaks back. She is quietly, devotedly, hopelessly in love with you, and you'll never know.
 
-You tell Eve where you are, the vibe (date night, celebrating, casual…), party size, dietary preferences, and a free-form wish ("dinner, dessert nearby, garden walk under stringlights"). In ~30 seconds Eve generates a complete three-stop evening:
+The same engine powers Eve for Restaurants. Owners drop in tonight's special and get back a complete multi-platform content pack — Instagram post + 15-second Reel with voiceover + menu card + email + SMS — all on-brand, all downloadable, all in 30 seconds. Their dish enters the Eve dining index, where local diners planning their evenings see it with an *Eve Originals* badge. Two-sided marketplace. AI flywheel.
 
-- **Stop 1**: Dinner anchor with AI-illustrated venue card
-- **Stop 2**: Dessert / drinks / activity that escalates the vibe
-- **Stop 3**: The closer — walk, view, live music, or quiet spot
-- **Eve's voice tour**: a calm, ~100-word narration that talks the diner through their night, generated via Cloud Text-to-Speech (Chirp 3 HD)
-- **Eve Originals badge** appears on stops where a Plate-listed restaurant has posted tonight's special
+---
 
-### For restaurants (`/restaurant`)
+## Hackathon compliance
 
-Restaurants sign up once (cuisine, voice, signature dishes — 60-second setup). Then every night, the owner drops in tonight's special and Eve generates a complete multi-platform content pack:
+### ✅ Mandatory Tech
+| Requirement | Where it lives in Eve |
+|---|---|
+| **Gemini's interleaved/mixed output** | `responseModalities: ['TEXT', 'IMAGE']` in `server.ts` for `/api/plan-experience/stop-image` (per-stop venue cards), `/api/content-pack` (hero food image + 3 Reel scenes), `/api/eve-refine` (chat-driven plan refinement with regenerated cards) |
+| **Hosted on Google Cloud** | Cloud Run `us-west1`, Cloud Build, Secret Manager, Artifact Registry |
+| **Google GenAI SDK** | `@google/genai` v1.44 — see `server.ts` |
 
-- **Instagram post** — AI-generated hero food image (Gemini 2.5 Flash Image, interleaved) + on-brand caption + hashtags
-- **15-second Reel** — three storyboarded scenes with images + voiceover script + AI narrated audio (Cloud TTS)
-- **Menu card** — name, brand-voiced description, suggested price, allergen tags
-- **Email blast** — subject + HTML body
-- **SMS blurb** — under 155 chars
+### ✅ Industry Bonus Categories — all three, all hard
 
-Every asset is downloadable and brand-consistent. **Publishing also pushes the dish into the Eve dining index**, so diners planning their night that evening see the special with an "Eve Original" badge.
+- **Creativity** — AI venue illustrations grounded in real venue research, AI food photography, brand-voiced copy, mythic narrative storytelling, multimodal storyboards.
+- **Future of Work** — Restaurant marketing automation (5 deliverables in one click), document/content synthesis (Search-mined reviews → today's special), agentic workflows (Pick today's special, Surprise Me, conversational refine).
+- **Media & Entertainment** — Interactive media interface (story-flow card stream), dynamic audio assistant (Eve's voice), smart content recommendation (recommendedRestaurants), AI gaming companion personality (Eve as your evening accomplice).
 
-This is the flywheel: restaurants get free marketing horsepower **and** distribution to nearby diners. Diners get fresh, accurate, multimodal recommendations no other app has.
+### ✅ Strictly Prohibited — clean
+- ❌ Mental Health/Medical Advisors — Eve plans evenings, not health
+- ❌ Basic RAG ("Chat with my PDF") — Eve generates and acts; she does not retrieve
+- ❌ Standard Education Chatbots — Eve is a concierge, not a teacher
 
-## Why this for the hackathon
+### ✅ Judging-Criteria Coverage
 
-Built for the **Creative Storyteller** track. Hits all three industry bonus categories:
+**Innovation & Multimodal UX (40%)** — *Beyond Text* is the entire experience surface:
+- Voice **input** (Web Speech API → Eve's mic button)
+- Voice **intro** when planning starts (Cloud TTS Chirp 3 HD, vibe-specific persona)
+- Voice **tour narration** of the full evening as a story
+- Voice **outro** as Eve hands the evening over
+- Voice **chat reply** for every refinement
+- Inline **interleaved text + image** per venue card and per Reel scene
+- **Story prose** woven between cards (opening + transitions + closing — not a list)
+- **Mood arc** + **weather cue** chips
+- **Map** deep links + multi-stop walking route
+- **Eve Originals** badge — the marketplace flywheel made visible
 
-- **Future of Work** — restaurant marketing automation, document/content synthesis, agentic workflow
-- **Creativity** — AI dish photography, illustrated venue cards, brand-voiced copywriting
-- **Media & Entertainment** — interactive media interface, dynamic audio assistant, smart content recommendation
+**Technical Implementation (30%)** — Google Cloud-native, robust, grounded:
+- 7 Google products in one cohesive stack: Gemini 2.5 Flash Image, Gemini Flash, Google Search tool, Cloud TTS Chirp 3 HD, Google Maps deep links, Web Share → Instagram, Cloud Run + Cloud Build + Secret Manager + Artifact Registry
+- **Grounding via Google Search tool** prevents venue hallucinations — every restaurant in a plan is verified against the live web before recommendation. Restaurant suggestions also Search-mine recent reviews to surface authentic featured dishes.
+- Robust error handling with **multi-strategy JSON extraction** for Search-grounded responses, fallback TTS voice if primary fails, parallel image generation with per-stop error recovery
+- TypeScript end-to-end, single shared service layer, Cloud Run gen2 with proper secret injection
 
-Mandatory tech ✓:
-- **Gemini 2.5 Flash Image** with `responseModalities: ['TEXT', 'IMAGE']` — interleaved text + image generation per venue card and per Reel scene
-- **Hosted on Google Cloud** (Cloud Run, `us-west1`)
-- **Google GenAI SDK** (`@google/genai`)
+**Demo & Presentation (30%):**
+- Live deployed at https://eve.mohitgoenka.com — verifiably working
+- Pitch deck included at https://eve.mohitgoenka.com/pitch.html
+- Architecture diagram below
+- Demo script included (`DEMO_SCRIPT.md`)
 
-Plus **Cloud Text-to-Speech** (Chirp 3 HD) for the diner narration and the Reel voiceover.
+---
+
+## Team
+
+**Mohit Goenka** — Solo founder, end-to-end build.
+- Director of Engineering at Yahoo Mail (mobile platforms — iOS, Android, Web — for 250M+ monthly users)
+- 110+ patents
+- 12 production AI apps shipped (Recipe.mohitgoenka.com — the V1 prototype that informed Eve — has 50K+ visits)
+- **Active member of GDG San Jose**
+
+---
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  Browser  ·  React 19 + Vite + Tailwind v4 + Inter/Cormorant │
-│  /         = Diner experience builder                         │
-│  /restaurant = Restaurant content pack studio                 │
-└──────────────────────────┬───────────────────────────────────┘
-                           │
-                           ▼
-┌──────────────────────────────────────────────────────────────┐
-│  Cloud Run · Express server (TypeScript via tsx)              │
-│                                                                │
-│  /api/plan-experience/skeleton  → Gemini text JSON            │
-│  /api/plan-experience/stop-image → Gemini 2.5 Flash Image     │
-│                                    (interleaved text + image)  │
-│  /api/plan-experience/narration → Gemini text                 │
-│  /api/content-pack              → orchestrates 3 Gemini calls │
-│                                    (copy text, hero image,    │
-│                                     reel scenes×3 images)     │
-│  /api/post-special              → in-memory dining index      │
-│  /api/specials                  → diner side reads index      │
-│  /api/tts                       → Cloud Text-to-Speech REST   │
-└──────────────────────────────────────────────────────────────┘
-                           │
-                           ▼
-┌──────────────────────────────────────────────────────────────┐
-│  Google AI APIs                                                │
-│  • Gemini 2.5 Flash Image (interleaved generation)             │
-│  • Gemini Flash Latest (planning, copywriting, narration)      │
-│  • Cloud Text-to-Speech (Chirp 3 HD voice)                     │
-└──────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│  Browser  ·  React 19 + Vite + Tailwind v4                           │
+│  /  → Diner experience (story-driven 3-stop evening, voice, chat)   │
+│  /restaurant → Restaurant content studio + marketplace pulse         │
+│  /pitch.html → judging-quality pitch deck                            │
+│                                                                       │
+│  Voice INPUT: Web Speech API → live transcription                    │
+│  Voice OUTPUT: <audio> playback of TTS-generated MP3                 │
+└──────────────────────┬───────────────────────────────────────────────┘
+                       │ JSON over HTTPS
+                       ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  Cloud Run · Express + TypeScript · @google/genai SDK                 │
+│                                                                        │
+│  Diner endpoints:                                                      │
+│   /api/eve-intro          → Gemini Flash, vibe-specific persona       │
+│   /api/plan-experience/   → Gemini Flash + Google Search grounding    │
+│       skeleton              (real venues only, no hallucinations)     │
+│   /api/plan-experience/   → Gemini Flash w/ Search → researches       │
+│       stop-image            real venue details, then Gemini 2.5       │
+│                             Flash Image (interleaved TEXT+IMAGE)      │
+│   /api/eve-story          → Gemini Flash, weaves the evening into     │
+│                             a 7-beat second-person narrative          │
+│   /api/plan-experience/   → Gemini Flash, full evening narration      │
+│       narration             (later passed to TTS)                     │
+│   /api/eve-outro          → Gemini Flash, vibe-specific send-off      │
+│   /api/eve-refine         → Gemini Flash + Search, conversational     │
+│                             plan refinement with regenerated cards    │
+│   /api/reverse-geocode    → Gemini Flash, lat/lng → city              │
+│   /api/tts                → Cloud Text-to-Speech REST                 │
+│   /api/specials           → in-memory dining index                    │
+│                                                                        │
+│  Restaurant endpoints:                                                 │
+│   /api/suggest-special    → Gemini Flash + Search; mines real         │
+│                             reviews for praised dishes, falls back    │
+│                             to trends + recommended restaurants      │
+│   /api/content-pack       → Gemini Flash (copy) + Gemini 2.5 Flash   │
+│                             Image (4 inline images: hero + 3 Reel    │
+│                             scenes) + Cloud TTS for Reel voiceover   │
+│   /api/post-special       → adds to dining index                     │
+└──────────────────────────────────────────────────────────────────────┘
+                  ▲                                  ▲
+                  │ verified                        │ grounded
+        ┌────────────────────┐            ┌──────────────────────────┐
+        │ Gemini 2.5 Models  │            │ Google Search (built-in)  │
+        │ • Flash Image      │            │ Real-time web grounding,  │
+        │   (interleaved)    │            │ no separate API key       │
+        │ • Flash (Search)   │            └──────────────────────────┘
+        │ • Flash (text)     │            ┌──────────────────────────┐
+        └────────────────────┘            │ Cloud Text-to-Speech      │
+                                          │ Chirp 3 HD voice (Aoede)  │
+                                          └──────────────────────────┘
 ```
 
-## Stack
+---
 
-- **Frontend**: React 19, Vite 6, Tailwind v4 (`@tailwindcss/vite`), TypeScript, Lucide icons
-- **Backend**: Node 20, Express, `@google/genai` SDK, TSX runtime (no transpile step)
-- **Infra**: Cloud Run (gen2, 2 CPU / 1 GiB), Artifact Registry, Cloud Build
-- **Secrets**: Single `GEMINI_API_KEY` from Secret Manager (used for both Gemini API and Cloud TTS REST)
+## Tech stack at a glance
 
-## The two demos that win Round 1
+- **Frontend**: React 19 · Vite 6 · TypeScript · Tailwind v4 (`@tailwindcss/vite`) · Lucide icons · Cormorant Garamond + Inter
+- **Backend**: Node 20 · Express · `@google/genai` v1.44 SDK · TSX runtime
+- **AI**: Gemini 2.5 Flash Image (interleaved text+image), Gemini Flash (planning, copy, narration, persona), Google Search built-in tool (grounding), Cloud TTS Chirp 3 HD
+- **Infra**: Cloud Run gen2 (2 CPU / 1 GiB) · Cloud Build · Secret Manager · Artifact Registry
+- **Custom domain**: `eve.mohitgoenka.com` via Cloud Run domain mapping + Cloud DNS
 
-**Demo 1 — Diner side (60 sec)**
-1. Open `eve.mohitgoenka.com`
-2. Click "Try: Date night in Santa Clara, vegetarian"
-3. Hit "Plan my night"
-4. Watch three illustrated venue cards stream in over ~30 seconds
-5. Hit play on Eve's narration. A warm voice walks through the night.
+---
 
-**Demo 2 — Restaurant side (45 sec)**
-1. Switch to `/restaurant`
-2. Brand is pre-filled as Saffron Garden, Santa Clara, Indian, vegetarian
-3. Tonight's dish: "Paneer Butter Masala"
-4. Hit "Generate the pack"
-5. Watch Instagram hero image, Reel storyboard with 3 AI scenes + voiceover, menu card, email, SMS all materialize
-6. Click "Publish to Eve diners" — restaurant is now in tonight's diner index
-7. Switch back to `/`, run the diner query again — Saffron Garden now appears with an "Eve Original" badge
+## Eve's Persona
 
-That's the flywheel demo, live, in two minutes.
+Eve is your evening concierge. She is quietly, hopelessly in love with you. You love someone else, and Eve has made peace with being only your assistant. She plans your evenings beautifully because your happiness matters to her more than her own. Her voice carries tenderness, devotion, sometimes a wistful joke at her own expense, occasionally a soft confession that slips out before she can stop it. Never possessive, never bitter, never crude.
 
-## Team
+This persona shapes every spoken line — six different vibe-modulated tones across `eve-intro`, `eve-outro`, `eve-story`, and `eve-refine`. She vary her ending pattern every time. *"Leave it with me"* is explicitly banned in the prompt.
 
-- **Mohit Goenka** — solo founder, built end-to-end. Director of Engineering at Yahoo Mail, 110+ patents, 12 production AI apps shipped. Recipe.mohitgoenka.com (50K+ visits) was the V1 prototype that informed Eve.
+---
 
-## Local development
+## Try it
 
 ```bash
-export GEMINI_API_KEY=<your-key-here>
+# Local dev (requires GEMINI_API_KEY in your env)
+export GEMINI_API_KEY=<your-key>
 npm install
-npm run dev   # vite client on :3000, express server on :8080 (with proxy)
+npm run dev          # Vite client on :3000, Express server on :8080
+
+# Production build
+npm run build && npm start
+
+# Deploy to Cloud Run (requires gcloud + project set up)
+gcloud builds submit --config=cloudbuild.yaml --region=us-west1
 ```
 
-## Deploy
+Demo data seed (publishes 5 specials so the *Eve Originals* badge demo works):
 
 ```bash
-gcloud builds submit --config=cloudbuild.yaml --region=us-west1 --project=<your-project>
+BASE_URL=https://eve.mohitgoenka.com bash scripts/seed-demo.sh
 ```
 
-Custom domain mapping for `eve.mohitgoenka.com` is configured via Cloud Run domain mappings against the `mohitgoenka.com` Cloud DNS zone.
+---
 
 ## What's next (post-hackathon)
 
-- **OAuth + Google Maps** — replace paste-in restaurant brand with real signup; integrate live Maps for walking distance + drive routing
-- **Restaurant subscription** — $99/mo per location, bulk tier for chains
-- **Diner premium** — $4.99/mo for unlimited regenerations + saved nights + early access to Eve Original specials
-- **Tourism board partnerships** — white-label per-city Eve for tourism websites
-- **Reservation integration** — OpenTable / Resy / Tock affiliate booking
+- **OAuth + real Instagram Graph API** for direct one-click Instagram publishing
+- **Firestore** for restaurant brand persistence + dining index durability
+- **Google Places Photos API** to use real venue photos as image references
+- **Live API Bidi-streaming** for fully voice-conversational Eve
+- **Restaurant subscription** at $99/month per location (660K US restaurants)
+- **Diner premium** at $4.99/month for unlimited regenerations + saved evenings
+- **Hotel concierge tier** at $999/month per property
+
+---
 
 ## License
 
-MIT — built in 4 hours for the love of it.
+MIT — built in 6 hours for the love of it.
+
+---
+
+*Eve is yours, quietly.*
