@@ -279,6 +279,39 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
     [muted]
   );
 
+  // Plays a line and resolves only when audio finishes (or 8s timeout).
+  // Used during the "Eve thinking out loud" sequence so phrases don't overlap.
+  const speakAsEveAndWait = useCallback(
+    async (text: string) => {
+      if (!text || muted) return;
+      setEveSpeaking(true);
+      try {
+        const audio = await synthesize(text, 'eve');
+        const a = eveAudioRef.current;
+        if (!a) return;
+        a.src = `data:${audio.audioMime || 'audio/mpeg'};base64,${audio.audioData}`;
+        a.currentTime = 0;
+        await new Promise<void>((resolve) => {
+          let done = false;
+          const finish = () => {
+            if (done) return;
+            done = true;
+            a.removeEventListener('ended', finish);
+            resolve();
+          };
+          a.addEventListener('ended', finish, { once: true });
+          a.play().catch(() => finish());
+          setTimeout(finish, 8000);
+        });
+      } catch {
+        // silent
+      } finally {
+        setEveSpeaking(false);
+      }
+    },
+    [muted]
+  );
+
   useEffect(() => {
     const a = eveAudioRef.current;
     if (!a) return;
@@ -319,10 +352,24 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
       setEveOutroText('');
       setChatHistory([]);
 
+      // Stream of Eve's progress phrases during planning. We sequence them
+      // through TTS so she's audibly thinking out loud while the plan loads.
       eveIntro({ vibe: useVibe, city: useCity, party: useParty, freeText: useFreeText })
-        .then((r) => {
-          setEveIntroText(r.intro || '');
-          if (r.intro) speakAsEve(r.intro);
+        .then(async (r) => {
+          const lines = r.lines && r.lines.length > 0 ? r.lines : r.intro ? [r.intro] : [];
+          if (lines.length === 0) return;
+          setEveIntroText(lines[0] || '');
+
+          for (const line of lines) {
+            if (cancelRef.current) return;
+            setEveIntroText(line);
+            try {
+              await speakAsEveAndWait(line);
+            } catch {}
+            if (cancelRef.current) return;
+            // Small pause between thoughts so it feels human
+            await new Promise((r) => setTimeout(r, 180));
+          }
         })
         .catch(() => {});
 
@@ -637,7 +684,11 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   useEffect(() => {
     if (!narrationAudio || !audioRef.current) return;
     audioRef.current.src = `data:${narrationMime};base64,${narrationAudio}`;
-  }, [narrationAudio, narrationMime]);
+    // Auto-play unless muted — Eve narrates the planned evening as soon as it's ready
+    if (!muted) {
+      audioRef.current.play().then(() => setPlaying(true)).catch(() => {});
+    }
+  }, [narrationAudio, narrationMime, muted]);
 
   const togglePlay = () => {
     if (!audioRef.current || !narrationAudio) return;
@@ -823,20 +874,21 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
               </div>
               <div>
                 <label className="block text-[12px] tracking-wide text-eve-gold/80 mb-2 font-medium">
-                  Cuisine (optional)
+                  Cuisine
                 </label>
-                <select
+                <input
+                  type="text"
                   value={cuisinePref}
                   onChange={(e) => setCuisinePref(e.target.value)}
-                  className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-base text-eve-cream"
-                >
-                  <option value="">— let Eve decide —</option>
+                  placeholder="any cuisine, or pick from below"
+                  list="cuisine-suggestions"
+                  className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-base placeholder:text-eve-cream/30 placeholder:italic placeholder:font-serif"
+                />
+                <datalist id="cuisine-suggestions">
                   {CUISINES.map((c) => (
-                    <option key={c.id} value={c.label} className="bg-eve-ink">
-                      {c.label}
-                    </option>
+                    <option key={c.id} value={c.label} />
                   ))}
-                </select>
+                </datalist>
               </div>
               <div>
                 <label className="block text-[12px] tracking-wide text-eve-gold/80 mb-2 font-medium">

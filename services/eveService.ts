@@ -134,14 +134,14 @@ export async function eveIntro(input: {
   city: string;
   party: number;
   freeText: string;
-}): Promise<{ intro: string }> {
+}): Promise<{ intro: string; lines: string[] }> {
   const res = await fetch('/api/eve-intro', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   });
   if (!res.ok) throw new Error(`Intro failed: ${(await res.text()).slice(0, 200)}`);
-  return (await res.json()) as { intro: string };
+  return (await res.json()) as { intro: string; lines: string[] };
 }
 
 export async function eveOutro(input: {

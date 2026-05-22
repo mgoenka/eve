@@ -18,26 +18,26 @@ post_special() {
   echo "  ✓ $name — $dish"
 }
 
-# Santa Clara / South Bay
-post_special "Saffron Garden" "Santa Clara, CA" "indian" \
+# Real Bay Area restaurants (Mountain View / Santa Clara / Palo Alto / Sunnyvale)
+post_special "Sattvik" "Sunnyvale, CA" "indian" \
   "Paneer Butter Masala" \
-  "Tonight: hand-cubed paneer in tomato-cashew gravy with kasuri methi, finished with cream and a swirl of butter. Served with garlic naan."
+  "Tonight: hand-cubed paneer in tomato-cashew gravy with kasuri methi, finished with cream and a swirl of butter."
 
-post_special "Sattvik" "Santa Clara, CA" "indian" \
-  "Chana Masala" \
-  "Tonight: slow-cooked chickpeas in a smoky tomato-onion masala, kissed with kasuri methi. Served with butter naan and a side of pickled onions."
+post_special "Chaat Bhavan" "Mountain View, CA" "indian" \
+  "Pani Puri" \
+  "Tonight: crisp puris ready, mint-tamarind water poured to order, the pop on your tongue is the whole point."
 
-post_special "Verdure" "San Francisco, CA" "italian" \
-  "Tagliolini al Limone" \
-  "Tonight: hand-cut egg tagliolini, Meyer lemon butter, parmigiano, and a single basil leaf. Light and bright."
-
-post_special "Burma Love" "San Francisco, CA" "fusion" \
-  "Tea Leaf Salad" \
-  "Tonight: tossed-tableside tea leaf salad with toasted lentils, peanuts, sesame, jalapeño, garlic and tomato. Crunch and umami in every bite."
+post_special "Cucina Venti" "Mountain View, CA" "italian" \
+  "Lasagna alla Bolognese" \
+  "Tonight: slow-cooked Bolognese, layered with bechamel and house-rolled sheets. Served when it stops bubbling."
 
 post_special "Vina Enoteca" "Palo Alto, CA" "italian" \
-  "Cacio e Pepe" \
-  "Tonight: house tonnarelli, pecorino romano, freshly cracked Tellicherry pepper. Three ingredients, infinite restraint."
+  "Tagliolini al Limone" \
+  "Tonight: hand-cut egg tagliolini, Meyer lemon butter, parmigiano, basil leaf. Light and bright."
+
+post_special "Curry Up Now" "Palo Alto, CA" "fusion" \
+  "Tikka Masala Burrito" \
+  "Tonight: paneer or chicken tikka masala wrapped with basmati and naan. Street-food twist of the week."
 
 echo ""
-echo "Seeded. Run \`curl $BASE_URL/api/specials\` to verify."
+echo "Seeded. Run 'curl $BASE_URL/api/specials' to verify."

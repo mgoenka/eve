@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Sparkles, Wand2, RotateCcw, Download, Copy, Check, ChefHat, Send, Lightbulb, Loader2, Instagram, TrendingUp, Eye } from 'lucide-react';
 import { CUISINES, DEMO_RESTAURANTS } from '../constants';
 import type { Cuisine, ContentPack, RestaurantBrand } from '../types';
@@ -53,16 +53,14 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
   const [brand, setBrand] = useState<RestaurantBrand | null>(loadBrand());
   const [setupOpen, setSetupOpen] = useState(false);
 
-  const [name, setName] = useState(brand?.name || 'Saffron Garden');
-  const [city, setCity] = useState(brand?.city || 'Santa Clara, CA');
-  const [cuisine, setCuisine] = useState<Cuisine>(brand?.cuisine || 'indian');
+  const [name, setName] = useState(brand?.name || DEMO_RESTAURANTS[0].name);
+  const [city, setCity] = useState(brand?.city || DEMO_RESTAURANTS[0].city);
+  const [cuisine, setCuisine] = useState<Cuisine>(brand?.cuisine || DEMO_RESTAURANTS[0].cuisine);
   const [voice, setVoice] = useState(brand?.voice || DEMO_RESTAURANTS[0].voice);
   const [signature, setSignature] = useState(brand?.signatureDishes || DEMO_RESTAURANTS[0].signatureDishes);
 
-  const [dishName, setDishName] = useState('Paneer Butter Masala');
-  const [dishDescription, setDishDescription] = useState(
-    'Tonight: hand-cubed paneer simmered slow in a tomato-cashew gravy with kasuri methi, finished with cream and a swirl of butter. Served with garlic naan.'
-  );
+  const [dishName, setDishName] = useState('');
+  const [dishDescription, setDishDescription] = useState('');
 
   const [generating, setGenerating] = useState(false);
   const [pack, setPack] = useState<ContentPack | null>(null);
@@ -79,17 +77,77 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
     if (!brand) setSetupOpen(true);
   }, [brand]);
 
+  // When the restaurant view loads with a brand set, automatically:
+  //   1. Mine reviews / trends for today's special (suggest-special)
+  //   2. Once we have the dish, auto-generate the full content pack
+  // No "Generate the pack" button needed — Eve does it.
+  const autoFiredRef = useRef(false);
+  useEffect(() => {
+    if (setupOpen) return;
+    if (!brand) return;
+    if (autoFiredRef.current) return;
+    if (suggestion || pack) return;
+    autoFiredRef.current = true;
+
+    (async () => {
+      setError(null);
+      setSuggesting(true);
+      try {
+        const result = await suggestSpecial({
+          restaurantName: name.trim(),
+          city: city.trim(),
+          cuisine,
+          signatureDishes: signature,
+        });
+        setSuggestion(result);
+        setDishName(result.dishName);
+        setDishDescription(result.dishDescription);
+        setSuggesting(false);
+
+        // Now auto-generate the content pack from the suggested dish
+        setGenerating(true);
+        const packResult = await generateContentPack({
+          dishName: result.dishName,
+          dishDescription: result.dishDescription,
+          restaurantName: name.trim(),
+          cuisine,
+          voice,
+          city,
+          signatureDishes: signature,
+        });
+        setPack(packResult);
+        if (packResult.reel.fullVoiceoverScript) {
+          synthesize(packResult.reel.fullVoiceoverScript, 'reel')
+            .then((audio) => setReelAudio(`data:${audio.audioMime};base64,${audio.audioData}`))
+            .catch(() => {});
+        }
+      } catch (err: any) {
+        setError(err?.message || 'Eve could not auto-prepare your evening kit');
+      } finally {
+        setSuggesting(false);
+        setGenerating(false);
+      }
+    })();
+  }, [setupOpen, brand, name, city, cuisine, voice, signature, suggestion, pack]);
+
   const saveBrandFn = () => {
     const b: RestaurantBrand = {
       name: name.trim(),
       city: city.trim(),
-      cuisine,
+      cuisine, // may be empty — server will infer from name + city via Search
       voice: voice.trim(),
       signatureDishes: signature.trim(),
     };
     saveBrand(b);
     setBrand(b);
     setSetupOpen(false);
+    // Reset auto-fire so a new brand triggers a fresh suggest+generate
+    autoFiredRef.current = false;
+    setSuggestion(null);
+    setPack(null);
+    setReelAudio(null);
+    setPosted(false);
+    setEvePulse(null);
   };
 
   const suggestSpecialFn = async () => {
@@ -268,63 +326,69 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base"
+                placeholder={DEMO_RESTAURANTS[0].name}
+                className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base placeholder:text-eve-cream/30 placeholder:italic placeholder:font-serif"
               />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-[11px] tracking-wide text-eve-gold/80 font-medium mb-2">
-                  City / area
-                </label>
-                <input
-                  type="text"
-                  value={city}
-                  onChange={(e) => setCity(e.target.value)}
-                  className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] tracking-wide text-eve-gold/80 font-medium mb-2">
-                  Cuisine
-                </label>
-                <select
-                  value={cuisine}
-                  onChange={(e) => setCuisine(e.target.value as Cuisine)}
-                  className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base text-eve-cream"
-                >
-                  {CUISINES.map((c) => (
-                    <option key={c.id} value={c.id} className="bg-eve-ink">
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
             </div>
 
             <div>
               <label className="block text-[11px] tracking-wide text-eve-gold/80 font-medium mb-2">
-                Brand voice (one-line)
+                City or area
+              </label>
+              <input
+                type="text"
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+                placeholder={DEMO_RESTAURANTS[0].city}
+                className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base placeholder:text-eve-cream/30 placeholder:italic placeholder:font-serif"
+              />
+              <p className="mt-1 text-[11px] text-eve-cream/45 italic font-serif">
+                Helps Eve disambiguate when multiple restaurants share a name.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-[11px] tracking-wide text-eve-gold/80 font-medium mb-2">
+                Cuisine
+              </label>
+              <input
+                type="text"
+                value={cuisine}
+                onChange={(e) => setCuisine(e.target.value as Cuisine)}
+                placeholder="Eve will infer this from your name + city if you skip it"
+                list="restaurant-cuisine-suggestions"
+                className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base placeholder:text-eve-cream/30 placeholder:italic placeholder:font-serif"
+              />
+              <datalist id="restaurant-cuisine-suggestions">
+                {CUISINES.map((c) => (
+                  <option key={c.id} value={c.id} />
+                ))}
+              </datalist>
+            </div>
+
+            <div>
+              <label className="block text-[11px] tracking-wide text-eve-gold/80 font-medium mb-2">
+                Brand voice
               </label>
               <input
                 type="text"
                 value={voice}
                 onChange={(e) => setVoice(e.target.value)}
-                placeholder="e.g. Warm, family-run, recipe-honoring; specifics over hype"
-                className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base"
+                placeholder={DEMO_RESTAURANTS[0].voice}
+                className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base placeholder:text-eve-cream/30 placeholder:italic placeholder:font-serif"
               />
             </div>
 
             <div>
               <label className="block text-[11px] tracking-wide text-eve-gold/80 font-medium mb-2">
-                Signature dishes
+                Signature dishes <span className="opacity-50">(optional — Eve will research)</span>
               </label>
               <textarea
                 rows={3}
                 value={signature}
                 onChange={(e) => setSignature(e.target.value)}
-                placeholder="e.g. Paneer butter masala, dal makhani, garlic naan, mango lassi"
-                className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] leading-relaxed resize-none"
+                placeholder={DEMO_RESTAURANTS[0].signatureDishes}
+                className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] leading-relaxed resize-none placeholder:text-eve-cream/30 placeholder:italic placeholder:font-serif"
               />
             </div>
 
@@ -428,22 +492,32 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
           )}
 
           <div className="mt-6 flex flex-wrap items-center gap-3">
-            <button
-              onClick={suggestSpecialFn}
-              disabled={suggesting || !name.trim()}
-              className="inline-flex items-center gap-2 px-5 py-3 rounded-full font-semibold text-sm border border-eve-gold/40 bg-eve-gold/10 text-eve-gold hover:bg-eve-gold/20 disabled:opacity-30 transition-all"
-            >
-              {suggesting ? <Loader2 size={14} className="animate-spin" /> : <Lightbulb size={14} />}
-              {suggesting ? 'Eve is reading reviews…' : 'Pick today\'s special for me'}
-            </button>
-            <button
-              onClick={generate}
-              disabled={generating || !dishName.trim()}
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-full font-serif italic font-bold text-lg text-eve-ink bg-gradient-to-r from-amber-200 via-eve-gold to-eve-rose disabled:opacity-30 transition-all"
-            >
-              <Wand2 size={18} />
-              {generating ? 'Forging the pack…' : 'Generate the pack'}
-            </button>
+            {(suggesting || generating) && (
+              <div className="inline-flex items-center gap-2 px-5 py-3 rounded-full bg-eve-gold/10 border border-eve-gold/30 text-eve-gold text-sm font-medium italic font-serif">
+                <Loader2 size={14} className="animate-spin" />
+                {suggesting ? 'Eve is reading recent reviews and trends…' : 'Eve is forging your evening kit…'}
+              </div>
+            )}
+            {!suggesting && !generating && pack && (
+              <button
+                onClick={generate}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-medium text-eve-cream/70 hover:text-eve-cream transition-colors"
+                title="Re-generate pack with current dish"
+              >
+                <Wand2 size={12} />
+                Regenerate
+              </button>
+            )}
+            {!suggesting && !generating && (
+              <button
+                onClick={suggestSpecialFn}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-medium text-eve-cream/70 hover:text-eve-cream transition-colors"
+                title="Pick a different dish from reviews / trends"
+              >
+                <Lightbulb size={12} />
+                Different dish
+              </button>
+            )}
             {pack && (
               <button
                 onClick={publishToEve}

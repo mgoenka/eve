@@ -30,37 +30,37 @@ export const VIBES: VibeOption[] = [
     id: 'date_night',
     label: 'Date Night',
     emoji: '★',
-    hint: 'Romantic, intimate, slow-paced',
+    hint: 'Eyes on one person. Quiet pulse, candlelight, slow.',
   },
   {
     id: 'celebrating',
     label: 'Celebrating',
     emoji: '◆',
-    hint: 'Big moment, festive, special',
+    hint: 'A milestone — birthday, anniversary, win. Festive, public joy.',
   },
   {
     id: 'casual',
     label: 'Casual',
     emoji: '◇',
-    hint: 'Easygoing, no fuss',
+    hint: 'No occasion. Just a good evening, minimal fuss.',
   },
   {
     id: 'family',
     label: 'Family',
     emoji: '○',
-    hint: 'Kid-friendly, warm, easy',
+    hint: 'Multi-generational. Warm, kid-aware, easy pacing.',
   },
   {
     id: 'friends',
     label: 'Friends',
     emoji: '△',
-    hint: 'Lively, social, fun',
+    hint: 'A group out together. Loud-bright, social, shareable.',
   },
   {
     id: 'solo',
     label: 'Solo',
     emoji: '·',
-    hint: 'Quiet, unhurried, reflective',
+    hint: 'Just you. Unhurried, contemplative, somewhere you can think.',
   },
 ];
 
@@ -138,25 +138,40 @@ export const SAMPLE_QUERIES: SampleQuery[] = [
   },
 ];
 
+// Real Bay Area restaurants used as defaults so the demo is always honest.
+// Cuisine + signatureDishes are inferred at runtime via Google Search if blank.
 export const DEMO_RESTAURANTS = [
   {
-    id: 'saffron_garden',
-    name: 'Saffron Garden',
-    city: 'Santa Clara, CA',
+    id: 'sattvik',
+    name: 'Sattvik',
+    city: 'Sunnyvale, CA',
     cuisine: 'indian' as Cuisine,
     voice:
-      'Warm, family-run, recipe-honoring, slightly proud. Avoid cliches like "authentic" — let specifics speak.',
-    signatureDishes: 'Paneer butter masala, dal makhani, garlic naan, mango lassi',
+      'Warm, family-run, recipe-honoring, slightly proud. Avoid cliches like "authentic", let specifics speak.',
+    signatureDishes:
+      'Paneer butter masala, dal makhani, gobi manchurian, mango lassi, garlic naan',
     primaryColor: '#c2410c',
   },
   {
-    id: 'verdure',
-    name: 'Verdure',
-    city: 'San Francisco, CA',
+    id: 'cucina_venti',
+    name: 'Cucina Venti',
+    city: 'Mountain View, CA',
     cuisine: 'italian' as Cuisine,
     voice:
-      'Modern, ingredient-led, slow-food but unfussy. Tone is confident and observational.',
-    signatureDishes: 'Burrata with stone fruit, hand-cut tagliolini al limone, tiramisu',
+      'Convivial, neighborhood-Italian, generous portions, family-table feel. Confident without being precious.',
+    signatureDishes:
+      'Spaghetti pomodoro, lasagna, eggplant parmigiana, tiramisu, house-baked focaccia',
     primaryColor: '#16a34a',
+  },
+  {
+    id: 'chaat_bhavan',
+    name: 'Chaat Bhavan',
+    city: 'Mountain View, CA',
+    cuisine: 'indian' as Cuisine,
+    voice:
+      'Casual, street-food joy, loud and proud about chaat heritage. Approachable, not refined.',
+    signatureDishes:
+      'Pani puri, dahi puri, samosa chaat, bhel puri, masala dosa',
+    primaryColor: '#dc2626',
   },
 ];
