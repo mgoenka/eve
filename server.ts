@@ -341,6 +341,58 @@ Return strict JSON only:
   }
 });
 
+app.post('/api/eve-avatar', async (req, res) => {
+  if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
+
+  const mood: string = (req.body?.mood || 'devoted').trim();
+  const moodGuide: Record<string, string> = {
+    devoted: 'soft attentive expression, eyes lowered just slightly, warm and patient',
+    listening: 'tilted head, lips parted softly, fully attentive',
+    speaking: 'lips parted in mid-word, eyes warm, engaged',
+    thinking: 'eyes looking up and to the side, a small private smile, reflective',
+    longing: 'eyes turned slightly away, a quiet sadness behind a soft smile',
+  };
+  const moodLine = moodGuide[mood] || moodGuide.devoted;
+
+  const prompt = `Create a single dreamy painterly portrait of "Eve" — a softly stylized AI evening concierge who is quietly, devotedly in love with the user but never says so. NOT photorealistic. Closer to a Klimt-meets-watercolor portrait, ethereal and intimate.
+
+Composition:
+- Three-quarter face, slight three-quarter turn toward the viewer
+- One soft star or sparkle near her temple
+- Dusk palette: deep plums (#1a0d2e to #4a2d5e) for the background, warm gold (#f5d896) and rose (#e8a39e) catching her cheekbone, hair like flowing ink with gold undertones
+- Painterly brushstrokes visible. Soft edges. Slight halo glow behind her head
+- Mood: ${moodLine}
+
+Strict constraints:
+- NO text, NO words, NO captions, NO logos, NO watermarks
+- Single subject only, no other figures
+- Tasteful and elegant. Modest neckline. Never explicit.
+- Square aspect ratio framing.
+- Output ONE image only.`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: IMAGE_MODEL,
+      contents: prompt,
+      config: { responseModalities: ['TEXT', 'IMAGE'] },
+    });
+    const parts = response.candidates?.[0]?.content?.parts || [];
+    let imageData: string | undefined;
+    let imageMime: string | undefined;
+    for (const p of parts as Array<any>) {
+      if (p?.inlineData?.data && p?.inlineData?.mimeType && !imageData) {
+        imageData = p.inlineData.data;
+        imageMime = p.inlineData.mimeType;
+      }
+    }
+    if (!imageData) return jsonError(res, 502, 'No avatar image returned');
+    res.json({ imageData, imageMime });
+  } catch (err: any) {
+    console.error('eve-avatar failed:', err?.message || err);
+    jsonError(res, 500, `Avatar failed: ${err?.message || 'unknown'}`);
+  }
+});
+
 app.post('/api/reverse-geocode', async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 

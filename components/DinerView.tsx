@@ -43,6 +43,7 @@ import {
   eveStory,
   eveRefine,
   reverseGeocode,
+  eveAvatar,
 } from '../services/eveService';
 import { StopCard } from './StopCard';
 import { EveLogo } from './EveLogo';
@@ -134,6 +135,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   const [eveIntroText, setEveIntroText] = useState('');
   const [eveOutroText, setEveOutroText] = useState('');
   const [eveSpeaking, setEveSpeaking] = useState(false);
+  const [eveAvatarUrl, setEveAvatarUrl] = useState<string | null>(null);
 
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
@@ -323,6 +325,16 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           if (r.intro) speakAsEve(r.intro);
         })
         .catch(() => {});
+
+      // Avatar fetch in parallel — cache for the session
+      if (!eveAvatarUrl) {
+        eveAvatar('devoted')
+          .then((a) => {
+            const url = `data:${a.imageMime || 'image/png'};base64,${a.imageData}`;
+            setEveAvatarUrl(url);
+          })
+          .catch(() => {});
+      }
 
       let skeleton: Awaited<ReturnType<typeof planSkeleton>>;
       try {
@@ -1012,20 +1024,33 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
         </div>
 
         {(eveIntroText || eveOutroText) && (
-          <div className="max-w-2xl mx-auto mb-8 px-5 py-4 rounded-2xl bg-gradient-to-br from-eve-rose/10 to-eve-plum/10 border border-eve-gold/25 text-center animate-fade-in">
-            <p className="text-[11px] tracking-wide text-eve-gold/80 mb-2 inline-flex items-center gap-1.5 justify-center italic font-serif">
-              {eveSpeaking ? (
-                <>
-                  <span className="w-1.5 h-1.5 rounded-full bg-eve-rose animate-pulse" />
-                  Eve is speaking
-                </>
-              ) : (
-                <>Eve says</>
+          <div className="max-w-2xl mx-auto mb-8 px-5 py-4 rounded-2xl bg-gradient-to-br from-eve-rose/10 to-eve-plum/10 border border-eve-gold/25 animate-fade-in">
+            <div className="flex items-start gap-4">
+              {eveAvatarUrl && (
+                <img
+                  src={eveAvatarUrl}
+                  alt="Eve"
+                  className={`flex-shrink-0 w-14 h-14 md:w-16 md:h-16 rounded-full object-cover ring-2 transition-all ${
+                    eveSpeaking ? 'ring-eve-rose/70 animate-glow-pulse' : 'ring-eve-gold/40'
+                  }`}
+                />
               )}
-            </p>
-            <p className="font-serif italic text-lg md:text-xl text-eve-cream leading-snug">
-              "{eveOutroText || eveIntroText}"
-            </p>
+              <div className="flex-1 text-center md:text-left">
+                <p className="text-[11px] tracking-wide text-eve-gold/80 mb-1.5 inline-flex items-center gap-1.5 italic font-serif">
+                  {eveSpeaking ? (
+                    <>
+                      <span className="w-1.5 h-1.5 rounded-full bg-eve-rose animate-pulse" />
+                      Eve is speaking
+                    </>
+                  ) : (
+                    <>Eve says</>
+                  )}
+                </p>
+                <p className="font-serif italic text-lg md:text-xl text-eve-cream leading-snug">
+                  "{eveOutroText || eveIntroText}"
+                </p>
+              </div>
+            </div>
           </div>
         )}
 

@@ -233,6 +233,18 @@ export async function suggestSpecial(input: {
   return (await res.json()) as SuggestSpecialResponse;
 }
 
+export async function eveAvatar(
+  mood: 'devoted' | 'listening' | 'speaking' | 'thinking' | 'longing' = 'devoted'
+): Promise<{ imageData: string; imageMime: string }> {
+  const res = await fetch('/api/eve-avatar', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mood }),
+  });
+  if (!res.ok) throw new Error(`Avatar failed: ${(await res.text()).slice(0, 200)}`);
+  return (await res.json()) as { imageData: string; imageMime: string };
+}
+
 export async function reverseGeocode(lat: number, lng: number): Promise<{ city: string }> {
   const res = await fetch('/api/reverse-geocode', {
     method: 'POST',
