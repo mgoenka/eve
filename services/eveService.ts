@@ -126,3 +126,76 @@ export async function listSpecials(city?: string): Promise<{ specials: PostedSpe
   if (!res.ok) throw new Error(`List specials failed: ${(await res.text()).slice(0, 200)}`);
   return (await res.json()) as { specials: PostedSpecial[] };
 }
+
+export async function eveIntro(input: {
+  vibe: string;
+  city: string;
+  party: number;
+  freeText: string;
+}): Promise<{ intro: string }> {
+  const res = await fetch('/api/eve-intro', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(`Intro failed: ${(await res.text()).slice(0, 200)}`);
+  return (await res.json()) as { intro: string };
+}
+
+export async function eveOutro(input: {
+  vibe: string;
+  city: string;
+  stops: Array<{ name: string; kind: string }>;
+}): Promise<{ outro: string }> {
+  const res = await fetch('/api/eve-outro', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(`Outro failed: ${(await res.text()).slice(0, 200)}`);
+  return (await res.json()) as { outro: string };
+}
+
+export interface EveRefineResponse {
+  spokenReply: string;
+  title: string;
+  stops: Array<{
+    kind: string;
+    name: string;
+    oneLineVibe: string;
+    whyThisFits: string;
+    approxArrival: string;
+    durationMinutes: number;
+    walkMinutesFromPrev: number;
+    signatureItem?: string;
+    isEveOriginal?: boolean;
+  }>;
+}
+
+export async function eveRefine(input: {
+  message: string;
+  previousPlan: { stops: Array<{ name: string; kind: string; oneLineVibe?: string }> };
+  vibe: string;
+  city: string;
+  dietary: string[];
+  party: number;
+  budgetUSD: number;
+}): Promise<EveRefineResponse> {
+  const res = await fetch('/api/eve-refine', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(`Refine failed: ${(await res.text()).slice(0, 200)}`);
+  return (await res.json()) as EveRefineResponse;
+}
+
+export async function reverseGeocode(lat: number, lng: number): Promise<{ city: string }> {
+  const res = await fetch('/api/reverse-geocode', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lat, lng }),
+  });
+  if (!res.ok) throw new Error(`Geocode failed: ${(await res.text()).slice(0, 200)}`);
+  return (await res.json()) as { city: string };
+}

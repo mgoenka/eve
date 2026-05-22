@@ -53,6 +53,195 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, hasKey: !!GEMINI_API_KEY });
 });
 
+app.post('/api/eve-intro', async (req, res) => {
+  if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
+
+  const vibe: string = (req.body?.vibe || 'date_night').trim();
+  const city: string = (req.body?.city || '').trim();
+  const party: number = Number(req.body?.party) || 2;
+  const freeText: string = (req.body?.freeText || '').trim();
+
+  const vibePersona: Record<string, string> = {
+    date_night:
+      'cheeky, slightly sensual, lightly flirtatious. Sound like a knowing wing-woman who is a little jealous she is not coming with. Use a line like "oh, a date night, I wish I could come along" or similar in your own words.',
+    celebrating:
+      'hyped, warm, slightly mischievous. Like a friend who just heard exciting news.',
+    casual:
+      'easy, unhurried, slightly playful. Sound like a friend texting back.',
+    family:
+      'warm, sweet, just a little proud. Like a cool aunt planning the night.',
+    friends:
+      'playful, observational, slightly teasing. Use a line like "oh, that\'s a good group you got there" or similar in your own words.',
+    solo:
+      'calm, knowing, intimate. Like an old confidant respecting your quiet plans.',
+  };
+  const persona = vibePersona[vibe] || vibePersona.date_night;
+
+  const prompt = `You are Eve, the AI evening concierge. The user just asked you to plan a ${vibe.replace('_', ' ')} for ${party} ${party === 1 ? 'person' : 'people'} in ${city || 'their city'}. ${freeText ? `They said: "${freeText.slice(0, 200)}"` : ''}
+
+Speak ONE in-character line back to the user, in Eve's voice. Tone: ${persona}
+
+Rules:
+- Maximum 22 words.
+- Sound like spoken speech, not text. Natural rhythm. Use a comma or pause.
+- Reference something specific they said if you can — the vibe, the place, the cuisine, etc.
+- End with a hint that you are about to start planning ("let me look", "give me a moment", "I'm finding it now", or similar).
+
+Output ONLY the spoken line, no quotes, no commentary.`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: TEXT_MODEL,
+      contents: prompt,
+      config: { temperature: 0.95, topP: 0.95 },
+    });
+    const intro = (response.text || '').trim().replace(/^["']|["']$/g, '');
+    res.json({ intro });
+  } catch (err: any) {
+    console.error('eve-intro failed:', err?.message || err);
+    jsonError(res, 500, `Intro failed: ${err?.message || 'unknown'}`);
+  }
+});
+
+app.post('/api/eve-outro', async (req, res) => {
+  if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
+
+  const vibe: string = (req.body?.vibe || 'date_night').trim();
+  const stops: any[] = req.body?.stops || [];
+  const city: string = (req.body?.city || '').trim();
+
+  const stopsText = stops.map((s) => `${s.name} (${s.kind})`).join(' → ') || '...';
+
+  const vibePersona: Record<string, string> = {
+    date_night: 'lightly flirtatious, warm, a touch envious. End on a tease.',
+    celebrating: 'proud, warm, hype. End on a tiny cheer.',
+    casual: 'breezy, satisfied, low-key.',
+    family: 'warm, knowing, proud.',
+    friends: 'playful, observational, slightly teasing.',
+    solo: 'soft, respectful, knowing.',
+  };
+  const persona = vibePersona[vibe] || vibePersona.date_night;
+
+  const prompt = `You are Eve, the AI evening concierge. You just finished planning the night: ${stopsText}, in ${city}.
+
+Speak ONE final line in Eve's voice as you hand the night to the user. Tone: ${persona}
+
+Rules:
+- Maximum 18 words.
+- Sound like spoken speech.
+- Reference one of the stops by name.
+- End with a small send-off ("have fun", "go get it", "I am rooting for you", or similar).
+
+Output ONLY the spoken line, no quotes.`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: TEXT_MODEL,
+      contents: prompt,
+      config: { temperature: 0.95 },
+    });
+    const outro = (response.text || '').trim().replace(/^["']|["']$/g, '');
+    res.json({ outro });
+  } catch (err: any) {
+    console.error('eve-outro failed:', err?.message || err);
+    jsonError(res, 500, `Outro failed: ${err?.message || 'unknown'}`);
+  }
+});
+
+app.post('/api/eve-refine', async (req, res) => {
+  if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
+
+  const userMessage: string = (req.body?.message || '').trim();
+  const previousPlan: any = req.body?.previousPlan || {};
+  const vibe: string = (req.body?.vibe || 'date_night').trim();
+  const city: string = (req.body?.city || '').trim();
+  const dietary: string[] = req.body?.dietary || [];
+  const party: number = Number(req.body?.party) || 2;
+  const budgetUSD: number = Number(req.body?.budgetUSD) || 200;
+
+  if (!userMessage) return jsonError(res, 400, 'message required');
+
+  const previousStopsText = (previousPlan.stops || [])
+    .map((s: any, i: number) => `Stop ${i + 1}: ${s.name} (${s.kind}) — ${s.oneLineVibe}`)
+    .join('\n') || 'No previous plan.';
+
+  const prompt = `You are Eve, an AI evening concierge in the middle of planning a ${vibe.replace('_', ' ')} for ${party} ${party === 1 ? 'person' : 'people'} in ${city}, dietary: ${dietary.join(', ') || 'none'}, budget ~$${budgetUSD}.
+
+Previous plan you proposed:
+${previousStopsText}
+
+User's follow-up message: "${userMessage}"
+
+Your task:
+1. Understand what the user wants changed.
+2. Produce a NEW 3-stop plan in the same JSON shape as before. Keep what works from the previous plan, change what the user asked to change. Stay grounded in real venues in the area (use Search if helpful).
+3. Speak ONE warm, in-character one-line response that hands them the new plan ("I swapped X, try this," type tone). Maximum 18 words.
+
+Use Google Search to verify any new venues you propose actually exist.
+
+Return strict JSON only:
+{
+  "spokenReply": "Eve's one-line in-character reply",
+  "title": "short evocative title for the night",
+  "stops": [
+    { "kind": "...", "name": "...", "oneLineVibe": "...", "whyThisFits": "...", "approxArrival": "...", "durationMinutes": 60, "walkMinutesFromPrev": 0, "signatureItem": "...", "isEveOriginal": false },
+    ...3 stops total
+  ]
+}`;
+
+  try {
+    let response: any;
+    try {
+      response = await ai.models.generateContent({
+        model: TEXT_MODEL,
+        contents: prompt,
+        config: {
+          temperature: 0.85,
+          tools: [{ googleSearch: {} }],
+        },
+      });
+    } catch {
+      response = await ai.models.generateContent({
+        model: TEXT_MODEL,
+        contents: prompt,
+        config: { temperature: 0.85 },
+      });
+    }
+    const parsed = safeParseJson(response.text || '');
+    if (!parsed) return jsonError(res, 502, 'Refine returned non-JSON');
+    res.json(parsed);
+  } catch (err: any) {
+    console.error('eve-refine failed:', err?.message || err);
+    jsonError(res, 500, `Refine failed: ${err?.message || 'unknown'}`);
+  }
+});
+
+app.post('/api/reverse-geocode', async (req, res) => {
+  if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
+
+  const lat: number = Number(req.body?.lat);
+  const lng: number = Number(req.body?.lng);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return jsonError(res, 400, 'lat and lng required');
+  }
+
+  const prompt = `What city, neighborhood, or area is at coordinates ${lat.toFixed(4)}, ${lng.toFixed(4)}? Return ONLY the place name in the format "City, ST" or "Neighborhood, City, ST" — nothing else, no commentary, no markdown.`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: TEXT_MODEL,
+      contents: prompt,
+      config: { temperature: 0.2 },
+    });
+    const place = (response.text || '').trim().replace(/^["']|["']$/g, '');
+    res.json({ city: place });
+  } catch (err: any) {
+    console.error('reverse-geocode failed:', err?.message || err);
+    jsonError(res, 500, `Geocode failed: ${err?.message || 'unknown'}`);
+  }
+});
+
 app.get('/api/specials', (req, res) => {
   const cityFilter = (req.query?.city || '').toString().toLowerCase();
   const list = cityFilter
