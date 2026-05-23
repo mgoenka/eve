@@ -67,9 +67,9 @@ The same engine powers Eve for Restaurants. Owners drop in tonight's special and
 ## Team
 
 **Mohit Goenka** — Solo founder, end-to-end build.
-- Director of Engineering at Yahoo Mail (mobile platforms — iOS, Android, Web — for 250M+ monthly users)
-- 110+ patents
-- 12 production AI apps shipped (Recipe.mohitgoenka.com — the V1 prototype that informed Eve — has 50K+ visits)
+- Hacker. Builder. Problem-solver.
+- 120+ patents
+- 12 production AI apps shipped this year
 - **Active member of GDG San Jose**
 
 ---
