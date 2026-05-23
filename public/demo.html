@@ -253,6 +253,70 @@
 
     <hr />
 
+    <h2>Technical Q&amp;A — likely judge questions</h2>
+
+    <div class="qa">
+      <p class="q">Q: Show me where you use Gemini's interleaved output.</p>
+      <p class="a">Three places. (1) <code>/api/plan-experience/stop-image</code> — TEXT+IMAGE in one call per venue. (2) <code>/api/content-pack</code> — hero food image + 3 Reel scenes interleaved with voiceover lines. (3) <code>/api/eve-avatar</code> — Eve's portrait. All on <code>gemini-2.5-flash-image</code> with <code>responseModalities: ['TEXT','IMAGE']</code>.</p>
+    </div>
+
+    <div class="qa">
+      <p class="q">Q: How does barge-in work?</p>
+      <p class="a">Web Speech API streams interim transcripts. On <code>onresult</code>, if <code>eveSpeakingRef.current</code> is true and ≥3 new chars, we call <code>audio.pause()</code>. <code>speakAsEveAndWait</code> resolves on <code>pause</code> as well as <code>ended</code> — that was the key fix. Also set <code>walkingCancelRef = true</code> so the walkthrough for-loop breaks. ~200 ms from first chars to silence.</p>
+    </div>
+
+    <div class="qa">
+      <p class="q">Q: How do you avoid hallucinated restaurants?</p>
+      <p class="a">Every venue lookup uses Gemini Flash with <code>tools: [{ googleSearch: {} }]</code>. The skeleton returns <code>groundedSources[]</code> URLs as proof. <code>safeParseJson</code> uses 3 strategies (direct, markdown-fence strip, last-balanced-brace scan) because Search-grounded responses sometimes prepend prose.</p>
+    </div>
+
+    <div class="qa">
+      <p class="q">Q: ADK or ADK-pattern?</p>
+      <p class="a">Pattern. <code>agent.ts</code> defines <code>AgentRuntime</code>, <code>Tool</code>, <code>Agent</code> in TypeScript that mirror ADK's API. Three tools registered: <code>placesSearch</code>, <code>sceneCard</code>, <code>voiceLine</code>. Exposed at <code>/api/agent/run</code>. ADK's official SDK is Python-first; we're TypeScript end-to-end. Native ADK swap is a 1-day post-hackathon move.</p>
+    </div>
+
+    <div class="qa">
+      <p class="q">Q: How does the system handle errors?</p>
+      <p class="a">Per-stop fault tolerance — 3 image calls are <code>Promise.all</code>, each in its own try/catch. A failing stop renders an apology card; other two still show. TTS falls back to <code>en-US-Standard-C</code> on synth error. JSON parsing is multi-strategy. Geolocation has a 7s timeout with a graceful "Eve asks where you are" fallback.</p>
+    </div>
+
+    <div class="qa">
+      <p class="q">Q: What's your latency budget?</p>
+      <p class="a">&lt;15s on a warm Cloud Run instance. ~700ms parse-intent + ~3s grounded skeleton + ~8-10s parallel image generation + ~1s auto-walk handoff. Eve fills the wait with vibe-tinted filler talk so perceived latency feels &lt;8s.</p>
+    </div>
+
+    <div class="qa">
+      <p class="q">Q: Where does state live? How do you scale?</p>
+      <p class="a">Cloud Run gen2 (2 CPU / 1 GiB), in-memory dining index for the marketplace demo, localStorage for restaurant brand. To scale: Firestore for the index (half a day), Memorystore for skeleton-cache de-dup on vibe+city, CDN for the avatar. Cloud Run autoscales horizontally.</p>
+    </div>
+
+    <div class="qa">
+      <p class="q">Q: Why Web Speech API instead of Gemini Live?</p>
+      <p class="a">Speed of build. Live API needs WebSocket plumbing. Web Speech API runs in the browser, free, cross-platform on Chrome/Edge/Safari. Trade-off is the 1.6s silence threshold. Live API migration is on the roadmap — would cut parse-intent latency ~60%.</p>
+    </div>
+
+    <div class="qa">
+      <p class="q">Q: How do you avoid stale closures in the silence watcher?</p>
+      <p class="a">Refs, not state. <code>voiceListeningRef</code>, <code>voiceTranscriptRef</code>, <code>conversationActiveRef</code>, <code>userMutedRef</code>, <code>eveSpeakingRef</code>, <code>phaseRef</code> are <code>useRef</code> mirrors of state, kept in sync via dedicated <code>useEffect</code>s. The <code>setInterval</code> reads only the refs.</p>
+    </div>
+
+    <div class="qa">
+      <p class="q">Q: How do you make the AI voice feel sensual, not robotic?</p>
+      <p class="a">Voice: <code>en-US-Neural2-F</code> over Studio-O because Neural2 supports SSML and Studio felt flat. Wrapper: <code>&lt;prosody pitch="-2st" volume="soft"&gt;</code> + programmatic breath pauses (180ms after periods, 220ms after ellipses, 140ms after em-dashes). <code>speakingRate: 0.98</code>. Persona is also baked into the prompts — explicit "never say absolutely / leave it with me / vary endings" rules.</p>
+    </div>
+
+    <div class="qa">
+      <p class="q">Q: Cost per plan?</p>
+      <p class="a">~$0.04 per plan (1 Flash intent + 1 Flash+Search skeleton + 3 Flash Image + 2 Flash text + 5 TTS). Diner $4.99/mo × 30 plans = $1.20 cost vs $4.99 revenue. Restaurant $99/mo for daily content pack = ~$1.80 cost vs $99 revenue. 70%+ gross margins on both sides.</p>
+    </div>
+
+    <div class="qa">
+      <p class="q">Q: Prompt-injection story?</p>
+      <p class="a">User input lands in 3 prompts (<code>eve-parse-intent</code>, <code>eve-refine</code>, <code>plan-skeleton</code> freeText). None have privileged tool access. Worst case: weird venue names that still get Search-verified. No DB, no PII, no auth tokens. v1.1 adds a safety classifier pre-parse.</p>
+    </div>
+
+    <hr />
+
     <h2>If something fails live</h2>
     <ul>
       <li><strong>Mic doesn't catch:</strong> use the text box. Same plan, just slower.</li>
