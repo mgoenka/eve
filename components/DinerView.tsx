@@ -328,12 +328,19 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
 
       // Interruption: if Eve is speaking and the user starts talking
       // (3+ chars of new speech), pause Eve so the user can take the floor.
+      // Also break out of any active walkthrough so Eve doesn't march to the
+      // next beat while the user is mid-sentence.
       if (eveSpeakingRef.current && trimmed.length > 3) {
+        console.log('[Eve] barge-in detected:', trimmed.slice(0, 60));
         const a = eveAudioRef.current;
         try {
           a?.pause();
         } catch {}
         setEveSpeaking(false);
+        eveSpeakingRef.current = false;
+        // Cancel walkthrough so the for-loop in startWalkthrough breaks.
+        walkingCancelRef.current = true;
+        setWalkingIdx(-1);
       }
     };
     rec.onend = () => setVoiceListening(false);
@@ -440,14 +447,23 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
             if (done) return;
             done = true;
             a.removeEventListener('ended', finish);
+            a.removeEventListener('pause', onPause);
             resolve();
           };
+          // KEY: resolve on pause too. When the user barge-ins, rec.onresult
+          // calls a.pause() — without this, the await sat for the full 12s
+          // timeout and Eve marched on through the rest of the walkthrough.
+          const onPause = () => {
+            if (a.ended) return;
+            finish();
+          };
           a.addEventListener('ended', finish, { once: true });
+          a.addEventListener('pause', onPause);
           a.play().catch((err) => {
             console.error('[Eve] play() rejected (wait):', err);
             finish();
           });
-          setTimeout(finish, 12000);
+          setTimeout(finish, 18000);
         });
       } catch (err) {
         console.error('[Eve] synth failed (wait):', err);

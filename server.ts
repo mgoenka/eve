@@ -1160,25 +1160,56 @@ app.post('/api/tts', async (req, res) => {
   const voiceMode: string = (req.body?.voiceMode || 'eve').trim();
   if (!text) return jsonError(res, 400, 'text required');
 
-  // Studio voices are Google's most natural / expressive female TTS.
-  // Studio-O reads warm, slightly breathy, conversational — much less robotic
-  // than Chirp 3 HD which can land flat for emotional copy. Reel mode uses
-  // Chirp 3 HD because Studio is restricted to short utterances.
+  // For Eve's main voice we use Neural2-F (warm female) with SSML prosody so
+  // we can actually control pace, pitch, and pause timing — Studio voices
+  // sounded natural but emotionally flat ("reading a book"). Neural2-F lets
+  // us add breath, slow her down, and lower her register on demand to land
+  // the flirty, intimate read the persona calls for. Reel mode keeps Chirp
+  // 3 HD because it handles longer utterances better.
   const voiceName =
-    voiceMode === 'reel' ? 'en-US-Chirp3-HD-Aoede' : 'en-US-Studio-O';
+    voiceMode === 'reel' ? 'en-US-Chirp3-HD-Aoede' : 'en-US-Neural2-F';
 
-  const ttsBody = {
-    input: { text: text.slice(0, 4500) },
-    voice: { languageCode: 'en-US', name: voiceName },
-    audioConfig: {
-      audioEncoding: 'MP3',
-      // Slower speech = more sensual, more thoughtful. Keep her unhurried.
-      speakingRate: voiceMode === 'reel' ? 1.05 : 0.88,
-      // Studio voices respect pitch; Chirp 3 HD ignores it. -1.5 deepens her
-      // a touch toward a warm, lower register without sounding off.
-      pitch: voiceMode === 'reel' ? 0 : -1.5,
-    },
+  // For Eve mode, wrap the text in SSML prosody so she sounds breathy and
+  // unhurried. Insert short breath-pauses after commas and slow her overall.
+  // Replace plain commas/periods with ssml breaks for a thoughtful cadence.
+  const buildSSML = (raw: string): string => {
+    const escaped = raw
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
+    // Add breath after commas and ellipses; longer pauses after periods.
+    const cadenced = escaped
+      .replace(/\.\.\./g, '<break time="380ms"/>')
+      .replace(/—/g, '<break time="240ms"/>')
+      .replace(/,\s+/g, ',<break time="200ms"/> ')
+      .replace(/\.\s+/g, '.<break time="320ms"/> ')
+      .replace(/\?\s+/g, '?<break time="320ms"/> ');
+    // Slow rate and lower pitch land an intimate, leaning-in register.
+    return `<speak><prosody rate="slow" pitch="-2st" volume="soft">${cadenced}</prosody></speak>`;
   };
+
+  const isEveMode = voiceMode !== 'reel';
+  const ttsBody = isEveMode
+    ? {
+        input: { ssml: buildSSML(text.slice(0, 4500)) },
+        voice: { languageCode: 'en-US', name: voiceName },
+        audioConfig: {
+          audioEncoding: 'MP3',
+          speakingRate: 0.92,
+          pitch: 0,
+        },
+      }
+    : {
+        input: { text: text.slice(0, 4500) },
+        voice: { languageCode: 'en-US', name: voiceName },
+        audioConfig: {
+          audioEncoding: 'MP3',
+          speakingRate: 1.05,
+          pitch: 0,
+        },
+      };
 
   try {
     const ttsRes = await fetch(
