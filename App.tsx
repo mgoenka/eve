@@ -18,6 +18,11 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 
+  useEffect(() => {
+    document.title =
+      route === 'restaurant' ? 'Eve · For Restaurants' : 'Eve · Yours, quietly';
+  }, [route]);
+
   const navigate = (to: Route) => {
     const url = to === 'restaurant' ? '/restaurant' : '/';
     window.history.pushState({}, '', url);
