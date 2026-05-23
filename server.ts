@@ -1158,16 +1158,23 @@ app.post('/api/tts', async (req, res) => {
   const voiceMode: string = (req.body?.voiceMode || 'eve').trim();
   if (!text) return jsonError(res, 400, 'text required');
 
+  // Studio voices are Google's most natural / expressive female TTS.
+  // Studio-O reads warm, slightly breathy, conversational — much less robotic
+  // than Chirp 3 HD which can land flat for emotional copy. Reel mode uses
+  // Chirp 3 HD because Studio is restricted to short utterances.
   const voiceName =
-    voiceMode === 'reel' ? 'en-US-Chirp3-HD-Aoede' : 'en-US-Chirp3-HD-Aoede';
+    voiceMode === 'reel' ? 'en-US-Chirp3-HD-Aoede' : 'en-US-Studio-O';
 
   const ttsBody = {
     input: { text: text.slice(0, 4500) },
     voice: { languageCode: 'en-US', name: voiceName },
     audioConfig: {
       audioEncoding: 'MP3',
-      speakingRate: voiceMode === 'reel' ? 1.05 : 0.95,
-      pitch: -0.5,
+      // Slower speech = more sensual, more thoughtful. Keep her unhurried.
+      speakingRate: voiceMode === 'reel' ? 1.05 : 0.88,
+      // Studio voices respect pitch; Chirp 3 HD ignores it. -1.5 deepens her
+      // a touch toward a warm, lower register without sounding off.
+      pitch: voiceMode === 'reel' ? 0 : -1.5,
     },
   };
 

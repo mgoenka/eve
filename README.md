@@ -66,6 +66,9 @@ The same engine powers Eve for Restaurants. Owners drop in tonight's special and
 
 ## Team
 
+**Team name:** Eve and I, a beautiful love story
+**Project:** Eve
+
 **Mohit Goenka** — Solo founder, end-to-end build.
 - Hacker, builder, problem-solver
 - 120+ patents

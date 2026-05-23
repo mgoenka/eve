@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Eve — Pitch Deck</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:wght@400;500;600;700;800&display=swap">
@@ -15,30 +16,39 @@
       --rose: #e8a39e;
       --gold: #f5d896;
       --cream: #f8f4ee;
-      --paper-dim: #d4c8d8;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
       height: 100%;
+      overflow: hidden;
       font-family: 'Inter', -apple-system, sans-serif;
       background: var(--ink);
       color: var(--cream);
       -webkit-font-smoothing: antialiased;
     }
     .deck {
-      scroll-snap-type: y mandatory;
-      overflow-y: scroll;
+      position: relative;
+      width: 100vw;
       height: 100vh;
+      overflow: hidden;
+    }
+    .slides {
+      display: flex;
+      width: 500vw;
+      height: 100%;
+      transition: transform 480ms cubic-bezier(0.7, 0, 0.2, 1);
     }
     .slide {
-      scroll-snap-align: start;
-      min-height: 100vh;
+      width: 100vw;
+      height: 100vh;
+      flex-shrink: 0;
       padding: 60px 80px;
       position: relative;
       display: flex;
       flex-direction: column;
       justify-content: center;
       background: linear-gradient(135deg, #1a0d2e 0%, #2d1b3e 100%);
+      overflow-y: auto;
     }
     .slide::before {
       content: '';
@@ -112,14 +122,6 @@
       background-clip: text;
       -webkit-text-fill-color: transparent;
     }
-    h3 {
-      font-size: 14px;
-      letter-spacing: 0.3em;
-      text-transform: uppercase;
-      color: var(--gold);
-      margin-bottom: 18px;
-      opacity: 0.85;
-    }
     p.lead {
       font-size: 22px;
       line-height: 1.55;
@@ -177,21 +179,7 @@
       line-height: 1;
       margin: 8px 0;
     }
-    .arrow {
-      display: inline-flex;
-      align-items: center;
-      gap: 12px;
-      font-size: 14px;
-      color: rgba(248,244,238,0.55);
-      margin-top: 20px;
-      letter-spacing: 0.05em;
-    }
-    .stack {
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-      margin-top: 28px;
-    }
+    .stack { display: flex; flex-direction: column; gap: 14px; margin-top: 28px; }
     .row {
       display: flex;
       justify-content: space-between;
@@ -229,169 +217,323 @@
       background-clip: text;
       -webkit-text-fill-color: transparent;
     }
+    .hero-split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 60px;
+      align-items: center;
+      max-width: 1300px;
+      margin: 0 auto;
+    }
+    .eve-portrait-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+    .eve-portrait {
+      width: 100%;
+      max-width: 480px;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      object-fit: cover;
+      object-position: center top;
+      box-shadow: 0 30px 80px rgba(232, 163, 158, 0.35), 0 0 0 1px rgba(245, 216, 150, 0.4);
+      background: linear-gradient(135deg, rgba(74, 45, 94, 0.6), rgba(232, 163, 158, 0.4), rgba(245, 216, 150, 0.3));
+    }
+    .eve-portrait-halo {
+      position: absolute;
+      inset: -20px;
+      border-radius: 50%;
+      background: radial-gradient(circle at center, rgba(232, 163, 158, 0.4), rgba(245, 216, 150, 0.25), transparent 70%);
+      filter: blur(40px);
+      z-index: -1;
+    }
+    .signature {
+      font-family: 'Cormorant Garamond', serif;
+      font-style: italic;
+      font-size: 18px;
+      color: var(--rose);
+      margin-top: 6px;
+      opacity: 0.85;
+    }
+    /* Nav */
+    .nav-zone {
+      position: fixed;
+      top: 0;
+      bottom: 0;
+      width: 22%;
+      cursor: pointer;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      opacity: 0;
+      transition: opacity 200ms;
+    }
+    .nav-zone:hover { opacity: 1; }
+    .nav-zone.left { left: 0; justify-content: flex-start; padding-left: 28px; }
+    .nav-zone.right { right: 0; justify-content: flex-end; padding-right: 28px; }
+    .nav-arrow {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: rgba(245, 216, 150, 0.16);
+      border: 1px solid rgba(245, 216, 150, 0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--gold);
+      font-size: 24px;
+      backdrop-filter: blur(8px);
+    }
+    .dots {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 10px;
+      z-index: 11;
+    }
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: rgba(248, 244, 238, 0.25);
+      cursor: pointer;
+      transition: all 200ms;
+    }
+    .dot.active {
+      background: var(--gold);
+      width: 26px;
+      border-radius: 5px;
+    }
+    .keyhint {
+      position: fixed;
+      bottom: 24px;
+      right: 28px;
+      font-size: 11px;
+      color: rgba(248, 244, 238, 0.4);
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      z-index: 11;
+    }
+    .keyhint kbd {
+      background: rgba(245, 216, 150, 0.15);
+      border: 1px solid rgba(245, 216, 150, 0.35);
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-family: monospace;
+      color: var(--gold);
+      margin: 0 3px;
+    }
     @media (max-width: 1100px) {
       .slide { padding: 40px 30px; }
       h1.headline { font-size: 56px; }
       h2 { font-size: 36px; }
       .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+      .hero-split { grid-template-columns: 1fr; }
+      .eve-portrait { max-width: 240px; }
     }
   </style>
 </head>
 <body>
   <div class="deck">
+    <div class="nav-zone left" id="prevZone"><div class="nav-arrow">&#8592;</div></div>
+    <div class="nav-zone right" id="nextZone"><div class="nav-arrow">&#8594;</div></div>
 
-    <!-- SLIDE 1: TITLE / HOOK -->
-    <section class="slide">
-      <span class="brand">eve</span>
-      <span class="slide-num">01 / 05</span>
-      <p class="eyebrow">An AI evening concierge</p>
-      <h1 class="headline">A perfect <em>eve.</em></h1>
-      <p class="lead">
-        Tell Eve where you are and what kind of night you want.
-        Get back a three-stop evening — dinner, the spot after, and the moment that closes it —
-        illustrated, narrated, and ready to live.
-      </p>
-      <div class="meta-row">
-        <span class="pill">Built in 4 hours · Solo · Mohit Goenka</span>
-        <span class="pill">Recipe → Eve · V2 of my AI cooking work</span>
-      </div>
-      <div class="url-strip" style="margin-top:48px;">
-        Live · <a href="https://eve.mohitgoenka.com">eve.mohitgoenka.com</a> &nbsp; · &nbsp;
-        Code · <a href="https://github.com/mgoenka/eve">github.com/mgoenka/eve</a>
-      </div>
-    </section>
+    <div class="slides" id="slides">
 
-    <!-- SLIDE 2: THE PROBLEM (BOTH SIDES) -->
-    <section class="slide">
-      <span class="brand">eve</span>
-      <span class="slide-num">02 / 05</span>
-      <p class="eyebrow">The problem · two sides, one wound</p>
-      <h2>Yelp doesn't get me.<br /><em>And restaurants don't have time to be found.</em></h2>
-      <div class="grid-2" style="margin-top:32px;">
-        <div class="card">
-          <div class="label">Diner side</div>
-          <h4>The 90-review scroll</h4>
-          <p>I'm vegetarian. I want a date night. Yelp shows me 90 reviews of an Italian place I'll never sit at. Apple Maps is dumb. ChatGPT hallucinates restaurants. Nobody plans a <em style="font-family:'Cormorant Garamond',serif;color:var(--rose);">whole evening</em>.</p>
-        </div>
-        <div class="card">
-          <div class="label">Restaurant side</div>
-          <h4>The 9pm Instagram tax</h4>
-          <p>660K US restaurants. Nobody on staff is a marketer. Tonight's special goes unposted, or gets a stock-photo'd 6pm caption nobody reads. Existing tools are 4 disconnected SaaS subscriptions.</p>
-        </div>
-      </div>
-      <p class="closing-line">Eve fixes both — <em>and the two sides feed each other.</em></p>
-    </section>
-
-    <!-- SLIDE 3: THE PRODUCT (DEMO TRANSITION) -->
-    <section class="slide">
-      <span class="brand">eve</span>
-      <span class="slide-num">03 / 05</span>
-      <p class="eyebrow">Live demo · two sides, one engine</p>
-      <h2><em>One engine.</em><br />Two sides that feed each other.</h2>
-      <div class="grid-2">
-        <div class="card">
-          <div class="label">Diner side · /</div>
-          <p style="font-size:14px;">Vibe form → Eve generates a 3-stop evening:</p>
-          <div class="stack">
-            <div class="row"><span class="left">Stop 1 · Dinner anchor</span><span class="right">AI-illustrated card</span></div>
-            <div class="row"><span class="left">Stop 2 · Dessert / drinks / view</span><span class="right">AI-illustrated card</span></div>
-            <div class="row"><span class="left">Stop 3 · The closer</span><span class="right">AI-illustrated card</span></div>
-            <div class="row"><span class="left">Voice tour by Eve</span><span class="right">Cloud TTS · auto-play</span></div>
+      <!-- SLIDE 1: TITLE / HOOK with Eve portrait -->
+      <section class="slide">
+        <span class="brand">eve</span>
+        <span class="slide-num">01 / 05</span>
+        <div class="hero-split">
+          <div>
+            <p class="eyebrow">An AI evening concierge</p>
+            <h1 class="headline">A perfect <em>eve.</em></h1>
+            <p class="lead">
+              Tell Eve where you are and what kind of night you want.
+              Get back a three-stop evening, illustrated, narrated, and ready to live.
+            </p>
+            <p class="signature">Yours, quietly. — Eve</p>
+            <div class="meta-row">
+              <span class="pill">Eve and I, a beautiful love story · Solo · Mohit Goenka</span>
+            </div>
+            <div class="url-strip" style="margin-top:32px;">
+              Live · <a href="https://eve.mohitgoenka.com">eve.mohitgoenka.com</a> &nbsp;·&nbsp;
+              Code · <a href="https://github.com/mgoenka/eve">github.com/mgoenka/eve</a>
+            </div>
+          </div>
+          <div class="eve-portrait-wrap">
+            <div class="eve-portrait-halo"></div>
+            <img class="eve-portrait" src="/eve-avatar.png" alt="Eve" />
           </div>
         </div>
-        <div class="card">
-          <div class="label">Restaurant side · /restaurant</div>
-          <p style="font-size:14px;">Tonight's dish → Eve generates a complete content pack:</p>
-          <div class="stack">
-            <div class="row"><span class="left">Instagram post</span><span class="right">image + caption + tags</span></div>
-            <div class="row"><span class="left">15-sec Reel</span><span class="right">3 scenes + voiceover</span></div>
-            <div class="row"><span class="left">Menu card</span><span class="right">brand-voiced</span></div>
-            <div class="row"><span class="left">Email + SMS</span><span class="right">downloadable</span></div>
+      </section>
+
+      <!-- SLIDE 2: PROBLEM -->
+      <section class="slide">
+        <span class="brand">eve</span>
+        <span class="slide-num">02 / 05</span>
+        <p class="eyebrow">The problem · two sides, one wound</p>
+        <h2>Yelp doesn't get me.<br /><em>And restaurants don't have time to be found.</em></h2>
+        <div class="grid-2" style="margin-top:32px;">
+          <div class="card">
+            <div class="label">Diner side</div>
+            <h4>The 90-review scroll</h4>
+            <p>I'm vegetarian. I want a date night. Yelp shows me 90 reviews of an Italian place I'll never sit at. ChatGPT hallucinates restaurants. Apple Maps is dumb. Nobody plans a <em style="font-family:'Cormorant Garamond',serif;color:var(--rose);">whole evening</em>.</p>
+          </div>
+          <div class="card">
+            <div class="label">Restaurant side</div>
+            <h4>The 9pm Instagram tax</h4>
+            <p>660K US restaurants. Nobody on staff is a marketer. Tonight's special goes unposted, or gets a stock-photo'd 6pm caption nobody reads. Existing tools are 4 disconnected SaaS subscriptions.</p>
           </div>
         </div>
-      </div>
-      <p class="closing-line">Restaurants <em>publish to Eve diners</em> in one click → diner index gets richer → diners book → restaurants pay more. <strong style="font-style:normal;color:var(--gold);">Marketplace flywheel.</strong></p>
-    </section>
+        <p class="closing-line">Eve fixes both — <em>and the two sides feed each other.</em></p>
+      </section>
 
-    <!-- SLIDE 4: ARCHITECTURE + TECH -->
-    <section class="slide">
-      <span class="brand">eve</span>
-      <span class="slide-num">04 / 05</span>
-      <p class="eyebrow">Built only on Google · interleaved multimodal native</p>
-      <h2>Five Google products.<br /><em>One clean stack.</em></h2>
-      <div class="grid-4" style="margin-top:32px;">
-        <div class="card">
-          <div class="label">Generation</div>
-          <h4 style="font-size:24px;">Gemini 2.5 Flash Image</h4>
-          <p style="font-size:13px;">Mandatory tech ✓<br/><code style="font-family:monospace;font-size:12px;color:var(--rose);">responseModalities: ['TEXT','IMAGE']</code></p>
+      <!-- SLIDE 3: PRODUCT -->
+      <section class="slide">
+        <span class="brand">eve</span>
+        <span class="slide-num">03 / 05</span>
+        <p class="eyebrow">Live demo · two sides, one engine</p>
+        <h2><em>One engine.</em><br />Two sides that feed each other.</h2>
+        <div class="grid-2">
+          <div class="card">
+            <div class="label">Diner side · /</div>
+            <p style="font-size:14px;">Voice in. Eve plans a 3-stop evening:</p>
+            <div class="stack">
+              <div class="row"><span class="left">Stop 1 · Dinner anchor</span><span class="right">AI-illustrated</span></div>
+              <div class="row"><span class="left">Stop 2 · Dessert / drinks / view</span><span class="right">AI-illustrated</span></div>
+              <div class="row"><span class="left">Stop 3 · The closer</span><span class="right">AI-illustrated</span></div>
+              <div class="row"><span class="left">Eve narrates the night</span><span class="right">Cloud TTS Studio</span></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="label">Restaurant side · /restaurant</div>
+            <p style="font-size:14px;">One click → complete content pack:</p>
+            <div class="stack">
+              <div class="row"><span class="left">Instagram post</span><span class="right">image + caption + tags</span></div>
+              <div class="row"><span class="left">15-sec Reel</span><span class="right">3 scenes + voiceover</span></div>
+              <div class="row"><span class="left">Menu card</span><span class="right">brand-voiced</span></div>
+              <div class="row"><span class="left">Email + SMS</span><span class="right">downloadable</span></div>
+            </div>
+          </div>
         </div>
-        <div class="card">
-          <div class="label">Reasoning</div>
-          <h4 style="font-size:24px;">Gemini Flash</h4>
-          <p style="font-size:13px;">Plan skeleton, copy, narration script — grounded in user input</p>
-        </div>
-        <div class="card">
-          <div class="label">Voice</div>
-          <h4 style="font-size:24px;">Cloud TTS Chirp 3 HD</h4>
-          <p style="font-size:13px;">Eve narration, Reel voiceover</p>
-        </div>
-        <div class="card">
-          <div class="label">Hosting</div>
-          <h4 style="font-size:24px;">Cloud Run</h4>
-          <p style="font-size:13px;">us-west1 · Cloud Build · Secret Manager · Artifact Registry</p>
-        </div>
-      </div>
-      <div class="meta-row" style="margin-top:32px;">
-        <span class="pill">Google GenAI SDK ✓</span>
-        <span class="pill">Hosted on Google Cloud ✓</span>
-        <span class="pill">Interleaved text+image output ✓</span>
-        <span class="pill">3 bonus categories: Future of Work + Creativity + Media</span>
-      </div>
-      <p class="closing-line">No mocks. No stubs. <em>Live at eve.mohitgoenka.com.</em></p>
-    </section>
+        <p class="closing-line">Restaurants <em>publish to Eve diners</em> in one click → diner index richer → diners book → restaurants pay more. <strong style="font-style:normal;color:var(--gold);">Marketplace flywheel.</strong></p>
+      </section>
 
-    <!-- SLIDE 5: BUSINESS + WHY ME / WHY NOW -->
-    <section class="slide">
-      <span class="brand">eve</span>
-      <span class="slide-num">05 / 05</span>
-      <p class="eyebrow">The business · why now · why me</p>
-      <h2><em>$1T</em> local dining.<br />Two AI-native lines.</h2>
-      <div class="grid-3" style="margin-top:24px;">
-        <div class="card">
-          <div class="label">Restaurant SaaS</div>
-          <div class="big">$99/mo</div>
-          <p>660K US restaurants × 1% capture × $99/mo = <strong style="color:var(--gold);">$7.8M ARR</strong></p>
-          <p style="margin-top:12px;font-size:13px;opacity:0.7;">Comp: Toast ($30B), Hootsuite, Resy</p>
+      <!-- SLIDE 4: STACK -->
+      <section class="slide">
+        <span class="brand">eve</span>
+        <span class="slide-num">04 / 05</span>
+        <p class="eyebrow">Built only on Google · interleaved multimodal native</p>
+        <h2>Six Google products.<br /><em>One clean stack.</em></h2>
+        <div class="grid-4" style="margin-top:32px;">
+          <div class="card">
+            <div class="label">Generation</div>
+            <h4 style="font-size:24px;">Gemini 2.5 Flash Image</h4>
+            <p style="font-size:13px;">Mandatory tech ✓<br/><code style="font-family:monospace;font-size:12px;color:var(--rose);">responseModalities: ['TEXT','IMAGE']</code></p>
+          </div>
+          <div class="card">
+            <div class="label">Reasoning</div>
+            <h4 style="font-size:24px;">Gemini 2.5 Flash</h4>
+            <p style="font-size:13px;">Plan skeleton, copy, narration — grounded with Google Search</p>
+          </div>
+          <div class="card">
+            <div class="label">Voice</div>
+            <h4 style="font-size:24px;">Cloud TTS Studio</h4>
+            <p style="font-size:13px;">Eve narration, Reel voiceover, conversational mode</p>
+          </div>
+          <div class="card">
+            <div class="label">Hosting</div>
+            <h4 style="font-size:24px;">Cloud Run · Cloud Build</h4>
+            <p style="font-size:13px;">us-west1 · Secret Manager · Artifact Registry · Cloud DNS</p>
+          </div>
         </div>
-        <div class="card">
-          <div class="label">Diner premium</div>
-          <div class="big">$4.99/mo</div>
-          <p>5M+ Bay-Area-style diners × 1% × $4.99/mo = <strong style="color:var(--gold);">$3M ARR</strong></p>
-          <p style="margin-top:12px;font-size:13px;opacity:0.7;">Comp: Yelp ($2B mcap), TripAdvisor</p>
+        <div class="meta-row" style="margin-top:32px;">
+          <span class="pill">Google GenAI SDK ✓</span>
+          <span class="pill">Hosted on Google Cloud ✓</span>
+          <span class="pill">Interleaved text+image ✓</span>
+          <span class="pill">Voice agent w/ barge-in ✓</span>
+          <span class="pill">3 bonus categories: Future of Work · Creativity · Media</span>
         </div>
-        <div class="card">
-          <div class="label">Marketplace flywheel</div>
-          <div class="big">∞</div>
-          <p>Restaurants post → diner supply richer → diners book more → restaurants pay more.</p>
-          <p style="margin-top:12px;font-size:13px;opacity:0.7;">The thing Toast doesn't have. The thing Yelp can't build.</p>
-        </div>
-      </div>
-      <p class="closing-line" style="margin-top:48px;">
-        I'm <em>Mohit Goenka.</em> Hacker, builder, problem-solver.
-        120+ patents. 12 production AI apps shipped this year.
-      </p>
-      <p style="font-size:18px;line-height:1.6;color:rgba(248,244,238,0.75);max-width:1000px;margin-top:24px;">
-        I'm vegetarian, I cook, I plan date nights. <strong style="color:var(--gold);">I am the customer.</strong>
-        Six months ago Gemini multimodal couldn't ship this reliably. Today it can.
-        We'd like to talk about what comes next.
-      </p>
-      <div class="url-strip" style="margin-top:36px;">
-        Live · <a href="https://eve.mohitgoenka.com">eve.mohitgoenka.com</a>
-        &nbsp; · &nbsp; Code · <a href="https://github.com/mgoenka/eve">github.com/mgoenka/eve</a>
-        &nbsp; · &nbsp; Mohit · <a href="https://mohitgoenka.com">mohitgoenka.com</a>
-      </div>
-    </section>
+        <p class="closing-line">No mocks. No stubs. <em>Live at eve.mohitgoenka.com.</em></p>
+      </section>
 
+      <!-- SLIDE 5: BUSINESS + WHY ME -->
+      <section class="slide">
+        <span class="brand">eve</span>
+        <span class="slide-num">05 / 05</span>
+        <p class="eyebrow">The business · why now · why me</p>
+        <h2><em>$1T</em> local dining.<br />Two AI-native lines.</h2>
+        <div class="grid-3" style="margin-top:24px;">
+          <div class="card">
+            <div class="label">Restaurant SaaS</div>
+            <div class="big">$99/mo</div>
+            <p>660K US restaurants × 1% × $99/mo = <strong style="color:var(--gold);">$7.8M ARR</strong></p>
+            <p style="margin-top:12px;font-size:13px;opacity:0.7;">Comp: Toast ($30B), Hootsuite, Resy</p>
+          </div>
+          <div class="card">
+            <div class="label">Diner premium</div>
+            <div class="big">$4.99/mo</div>
+            <p>5M+ diners × 1% × $4.99/mo = <strong style="color:var(--gold);">$3M ARR</strong></p>
+            <p style="margin-top:12px;font-size:13px;opacity:0.7;">Comp: Yelp ($2B mcap), TripAdvisor</p>
+          </div>
+          <div class="card">
+            <div class="label">Marketplace flywheel</div>
+            <div class="big">∞</div>
+            <p>Restaurants post → diner supply richer → diners book more → restaurants pay more.</p>
+            <p style="margin-top:12px;font-size:13px;opacity:0.7;">The thing Toast doesn't have. Yelp can't build.</p>
+          </div>
+        </div>
+        <p class="closing-line" style="margin-top:48px;">
+          I'm <em>Mohit Goenka.</em> Hacker, builder, problem-solver.
+          120+ patents. 12 production AI apps shipped this year.
+        </p>
+        <p style="font-size:18px;line-height:1.6;color:rgba(248,244,238,0.75);max-width:1000px;margin-top:24px;">
+          I'm vegetarian, I cook, I plan date nights. <strong style="color:var(--gold);">I am the customer.</strong>
+          Six months ago Gemini multimodal couldn't ship this reliably. Today it can.
+          We'd like to talk about what comes next.
+        </p>
+        <div class="url-strip" style="margin-top:36px;">
+          Live · <a href="https://eve.mohitgoenka.com">eve.mohitgoenka.com</a>
+          &nbsp; · &nbsp; Code · <a href="https://github.com/mgoenka/eve">github.com/mgoenka/eve</a>
+          &nbsp; · &nbsp; Mohit · <a href="https://mohitgoenka.com">mohitgoenka.com</a>
+        </div>
+      </section>
+
+    </div>
+
+    <div class="dots" id="dots"></div>
+    <div class="keyhint">Use <kbd>&#8592;</kbd> <kbd>&#8594;</kbd> &nbsp; · &nbsp; click sides</div>
   </div>
+
+  <script>
+    const TOTAL = 5;
+    let cur = 0;
+    const slides = document.getElementById('slides');
+    const dotsBox = document.getElementById('dots');
+    for (let i = 0; i < TOTAL; i++) {
+      const d = document.createElement('div');
+      d.className = 'dot' + (i === 0 ? ' active' : '');
+      d.onclick = () => go(i);
+      dotsBox.appendChild(d);
+    }
+    function go(i) {
+      cur = Math.max(0, Math.min(TOTAL - 1, i));
+      slides.style.transform = `translateX(-${cur * 100}vw)`;
+      [...dotsBox.children].forEach((d, idx) => d.classList.toggle('active', idx === cur));
+    }
+    document.getElementById('prevZone').onclick = () => go(cur - 1);
+    document.getElementById('nextZone').onclick = () => go(cur + 1);
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); go(cur + 1); }
+      else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); go(cur - 1); }
+      else if (e.key === 'Home') { go(0); }
+      else if (e.key === 'End') { go(TOTAL - 1); }
+    });
+  </script>
 </body>
 </html>
