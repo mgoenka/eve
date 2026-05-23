@@ -564,8 +564,37 @@ app.post('/api/plan-experience/skeleton', async (req, res) => {
   const freeText: string = (req.body?.freeText || '').trim();
   const cuisinePref: string = (req.body?.cuisinePref || '').trim();
   const whenISO: string = (req.body?.whenISO || '').trim();
+  // Start time of the evening as 24-hour "HH:MM" (e.g. "19:30"). Optional.
+  const startTime: string = (req.body?.startTime || '').trim();
+  // Total length of the evening, in hours. Drives stop count.
+  const durationHoursRaw = Number(req.body?.durationHours);
+  const durationHours = Number.isFinite(durationHoursRaw) && durationHoursRaw > 0
+    ? Math.min(8, Math.max(1.5, durationHoursRaw))
+    : 4;
 
   if (!city) return jsonError(res, 400, 'city required');
+
+  // Map duration -> number of stops. Each stop ~75 minutes effective
+  // (60 min on-site + 15 min walk/transition).
+  const stopCount = (() => {
+    if (durationHours <= 2) return 2;
+    if (durationHours <= 3) return 3;
+    if (durationHours <= 4.5) return 4;
+    if (durationHours <= 6) return 5;
+    return 6;
+  })();
+
+  // Format start time for the prompt and for arrival-time anchoring.
+  let startTimeLabel = '';
+  let startTimeLine = '';
+  if (startTime && /^\d{1,2}:\d{2}$/.test(startTime)) {
+    const [hh, mm] = startTime.split(':').map((n) => parseInt(n, 10));
+    const h12 = ((hh + 11) % 12) + 1;
+    const ampm = hh >= 12 ? 'PM' : 'AM';
+    startTimeLabel = `${h12}:${mm.toString().padStart(2, '0')} ${ampm}`;
+    startTimeLine = `Start time: ${startTimeLabel}. Stop 1's approxArrival MUST be ${startTimeLabel}. Each subsequent stop's approxArrival should advance by roughly its predecessor's durationMinutes plus walkMinutesFromPrev.`;
+  }
+  const durationLine = `Total evening length: about ${durationHours} hours. Plan exactly ${stopCount} stops so the schedule fills that window without rushing or padding.`;
 
   const dietaryStr = dietary.length ? dietary.join(', ') : 'no specific restrictions';
   const vibeMeta = VIBES.find((v) => v.id === vibe) || VIBES[0];
@@ -595,7 +624,7 @@ app.post('/api/plan-experience/skeleton', async (req, res) => {
     )
     .join('\n');
 
-  const prompt = `You are Eve, an AI evening concierge. Plan a complete 3-stop evening experience for the user.
+  const prompt = `You are Eve, an AI evening concierge. Plan a complete multi-stop evening experience for the user.
 
 City / area: ${city}
 Vibe: ${vibeMeta.label} — ${vibeMeta.hint}
@@ -605,10 +634,12 @@ Budget: ~$${budgetPerPersonUSD} per person (~$${totalBudget} total for ${party})
 User's freeform wish: "${freeText}"
 ${cuisineLine}
 ${whenLine}
+${startTimeLine}
+${durationLine}
 
 ${specialsHints ? `Restaurants currently posted on Eve in this area you should consider as the dinner anchor when they fit:\n${specialsHints}\n` : ''}
 
-Plan exactly 3 stops that flow naturally for this vibe. The first stop is always the dinner anchor. Stops 2 and 3 should escalate the experience: dessert, drinks, a walk, a view, live music, an activity, etc. — whatever fits the vibe.
+Plan exactly ${stopCount} stops that flow naturally for this vibe. The first stop is always the dinner anchor. Subsequent stops should escalate the experience: dessert, drinks, a walk, a view, live music, an activity, etc. — whatever fits the vibe and the timing.
 
 CRITICAL RULES:
 - Stops must be in the same neighborhood / walkable distance OR a short drive.
@@ -616,7 +647,9 @@ CRITICAL RULES:
 - Stay within budget.
 - For each venue, use a plausible, specific name appropriate to the city. Do NOT make up addresses or hours.
 - If an Eve-posted restaurant fits the dinner anchor naturally, USE IT and set isEveOriginal: true. Otherwise generate a plausible specific name and set isEveOriginal: false.
-- Use distinct stop kinds — never repeat the same kind twice in one plan.
+- Use distinct stop kinds — never repeat the same kind twice in one plan unless the duration is long enough to justify it.
+- approxArrival must be a real wall-clock time string like "7:30 PM", aligned with the start time and progressive across stops.
+- The sum of (durationMinutes + walkMinutesFromPrev) across all stops should approximately equal ${Math.round(durationHours * 60)} minutes.
 
 OUTPUT FORMAT: Return ONE JSON object and NOTHING ELSE. No prose preamble. No "Here is..." No commentary. No markdown fences. First character of your response is \`{\` and last is \`}\`.
 
@@ -635,7 +668,7 @@ Schema:
       "signatureItem": "specific dish, drink, or thing to order/do here",
       "isEveOriginal": false
     },
-    ...3 stops total
+    ...${stopCount} stops total
   ]
 }`;
 

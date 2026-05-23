@@ -18,6 +18,8 @@ export interface PlanSkeletonRequest {
   freeText: string;
   cuisinePref?: string;
   whenISO?: string;
+  startTime?: string;       // 24-hour "HH:MM", e.g. "19:30"
+  durationHours?: number;    // total hours the evening should run
 }
 
 export interface PlanSkeletonResponse {

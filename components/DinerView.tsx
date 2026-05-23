@@ -139,6 +139,11 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   const [budgetPerPerson, setBudgetPerPerson] = useState<number>(initial?.budgetPerPerson || 100);
   const [cuisinePref, setCuisinePref] = useState(initial?.cuisinePref || '');
   const [whenISO, setWhenISO] = useState(initial?.whenISO || todayISO());
+  // Start time of the evening (24-hour). 19:30 = 7:30pm by default.
+  const [startTime, setStartTime] = useState<string>(initial?.startTime || '19:30');
+  // Total length of the evening, in hours. 4 hours is the default sweet spot
+  // for a multi-stop date night (dinner + after).
+  const [durationHours, setDurationHours] = useState<number>(initial?.durationHours || 4);
   const [freeText, setFreeText] = useState(initial?.freeText || '');
   const [error, setError] = useState<string | null>(null);
 
@@ -643,6 +648,8 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           freeText: useFreeText || 'Eve, surprise me.',
           cuisinePref,
           whenISO,
+          startTime,
+          durationHours,
         });
       } catch (err: any) {
         setError(err?.message || 'Eve could not plan your evening.');
@@ -752,7 +759,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
         setEveOutroText(o.outro || '');
       } catch {}
     },
-    [city, vibe, party, dietary, budgetPerPerson, freeText, cuisinePref, whenISO, speakAsEve]
+    [city, vibe, party, dietary, budgetPerPerson, freeText, cuisinePref, whenISO, startTime, durationHours, speakAsEve]
   );
 
   const toggleVoiceListening = useCallback(() => {
@@ -1735,6 +1742,46 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                 <p className="mt-1 text-[11px] text-eve-cream/55 italic font-serif">
                   {formatDate(whenISO)}
                 </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[12px] tracking-wide text-eve-gold/80 mb-2 font-medium">
+                  Start time
+                </label>
+                <div className="relative">
+                  <div className="absolute left-2 top-1/2 -translate-y-1/2 p-2 rounded-xl bg-eve-gold/15 text-eve-gold pointer-events-none z-10">
+                    <ClockIcon size={16} />
+                  </div>
+                  <input
+                    type="time"
+                    value={startTime}
+                    onChange={(e) => setStartTime(e.target.value)}
+                    className="w-full pl-12 pr-4 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-base text-eve-cream"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[12px] tracking-wide text-eve-gold/80 mb-2 font-medium">
+                  Duration · {durationHours}h
+                </label>
+                <div className="relative">
+                  <input
+                    type="range"
+                    min={1.5}
+                    max={8}
+                    step={0.5}
+                    value={durationHours}
+                    onChange={(e) => setDurationHours(parseFloat(e.target.value))}
+                    className="w-full mt-3 accent-eve-gold"
+                  />
+                  <div className="flex justify-between text-[11px] text-eve-cream/55 italic font-serif mt-1">
+                    <span>1.5h</span>
+                    <span>4h</span>
+                    <span>8h</span>
+                  </div>
+                </div>
               </div>
             </div>
 
