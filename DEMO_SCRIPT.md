@@ -41,7 +41,7 @@ Wait for AI illustrations to stream in (~15s). Point to each as it lands:
 
 When the narration audio button appears, **press play.** The voice plays.
 
-> *"And Eve's voice walks me through the whole night — Cloud TTS Chirp 3 HD."*
+> *"And Eve's voice walks me through the whole night — Cloud TTS Studio voice, slowed and pitched, sounds like she's leaning in close."*
 
 **Point to the Eve Original badge on Saffron Garden** (it should be there because of the pre-step):
 
@@ -75,7 +75,7 @@ Click "Publish to Eve diners":
 
 Switch to pitch deck tab, slide 4.
 
-> *"Five Google products. Gemini 2.5 Flash Image for interleaved generation. Gemini Flash for structured planning. Cloud TTS Chirp 3 HD for voice. Cloud Run, Secret Manager, Artifact Registry. Live, deployed, no mocks."*
+> *"Six Google products. Gemini 2.5 Flash Image for interleaved generation. Gemini 2.5 Flash for structured planning, with Search grounding so no restaurant is hallucinated. Cloud TTS Studio voice. Cloud Run, Cloud Build, Secret Manager, Artifact Registry. Live, deployed, no mocks."*
 
 Slide 5.
 

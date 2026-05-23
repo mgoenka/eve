@@ -330,7 +330,7 @@
             <!-- Cloud TTS -->
             <rect x="600" y="468" width="240" height="120" rx="8" fill="#161122" stroke="#3a2c4d" stroke-width="1.5"/>
             <text x="620" y="492" font-family="Inter" font-size="13" font-weight="600" fill="#f5efe6">Cloud Text-to-Speech</text>
-            <text x="620" y="513" font-family="JetBrains Mono, monospace" font-size="11" fill="#e8a39e">en-US-Chirp3-HD-Aoede</text>
+            <text x="620" y="513" font-family="JetBrains Mono, monospace" font-size="11" fill="#e8a39e">en-US-Studio-O · 0.88x · pitch −1.5</text>
             <text x="620" y="538" font-family="Inter" font-size="11" fill="#8c8696">Eve's voice — intro,</text>
             <text x="620" y="554" font-family="Inter" font-size="11" fill="#8c8696">walkthrough, conversational</text>
             <text x="620" y="570" font-family="Inter" font-size="11" fill="#8c8696">replies, Reel voiceover</text>
@@ -360,7 +360,7 @@
           <tr><td class="product">Gemini 2.5 Flash Image</td><td class="role">Multimodal generation</td><td>Interleaved <code>responseModalities: ['TEXT','IMAGE']</code> — venue cards, hero food shot, three Reel scenes, Eve's avatar</td></tr>
           <tr><td class="product">Gemini Flash</td><td class="role">Reasoning</td><td>Plan skeleton, brand-voiced copy, evening narrative arc, intent parser, conversational persona replies</td></tr>
           <tr><td class="product">Google Search tool</td><td class="role">Grounding</td><td>Built-in <code>tools: [{ googleSearch: {} }]</code> — verifies real venues, mines reviews for featured-dish, infers restaurant cuisine</td></tr>
-          <tr><td class="product">Cloud Text-to-Speech</td><td class="role">Voice synthesis</td><td>Chirp 3 HD <code>Aoede</code> voice carries Eve's persona across intro, walkthrough, and conversational replies</td></tr>
+          <tr><td class="product">Cloud Text-to-Speech</td><td class="role">Voice synthesis</td><td>Studio-O voice (slowed to 0.88x, pitch −1.5) carries Eve's sensual persona across intro, filler talk, walkthrough, and conversational replies. Falls back to en-US-Standard-C if Studio fails.</td></tr>
           <tr><td class="product">Google Maps</td><td class="role">Map surface</td><td>Per-stop deep links and the whole-evening multi-stop walking-route URL</td></tr>
           <tr><td class="product">Cloud Run gen2</td><td class="role">Hosting</td><td>Single TypeScript service, autoscaling, gen2 runtime, Cloud Build CI</td></tr>
           <tr><td class="product">Secret Manager + Artifact Registry</td><td class="role">Infra</td><td><code>GEMINI_API_KEY</code> injected at runtime; container images versioned per build</td></tr>
@@ -421,7 +421,7 @@
         </div>
         <div class="endpoint">
           <div class="row1"><span class="method">POST</span><span class="path">/api/tts</span></div>
-          <div class="desc">Cloud Text-to-Speech Chirp 3 HD passthrough. Returns base64 MP3.</div>
+          <div class="desc">Cloud Text-to-Speech Studio-O passthrough (slowed, pitched). Reel mode falls through to Chirp 3 HD Aoede. Returns base64 MP3.</div>
         </div>
       </div>
     </section>
@@ -435,7 +435,7 @@
         <li><code>onresult</code> fires on every partial. <code>lastSpeechAt</code> is tracked on a <code>useRef</code> (state would be stale inside the silence interval).</li>
         <li>If 2.5s elapse with no new partial AND the transcript is non-empty, the recognizer stops and the transcript is POSTed to <code>/api/eve-parse-intent</code>.</li>
         <li>Server-side, Gemini Flash extracts <code>{location, vibe, party, dietary, budget, cuisine, freeText}</code>, decides whether to plan or to ask, and writes a one-line spoken reply.</li>
-        <li>Reply is synthesized via Cloud TTS Chirp 3 HD, played through the <code>&lt;audio&gt;</code> element. Audio context was unlocked on the user's first <code>pointerdown</code>, so <code>play()</code> succeeds.</li>
+        <li>Reply is synthesized via Cloud TTS Studio-O voice, played through the <code>&lt;audio&gt;</code> element. Audio context was unlocked on the user's first <code>pointerdown</code>, so <code>play()</code> succeeds.</li>
         <li>If <code>isComplete</code> → execute the plan in parallel (3 stop-image calls + 1 narration + 1 outro). Otherwise the mic re-opens for the user's follow-up. Conversation loops.</li>
         <li>The user can interrupt Eve mid-speech. <code>onresult</code> with fresh transcript pauses Eve's audio, captures the user's input, and continues the loop.</li>
       </ol>
