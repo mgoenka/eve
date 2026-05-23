@@ -1,5 +1,31 @@
 import type { Cuisine, Vibe, DietaryPreference, StopKind } from './types';
 
+// Inline button trivia / Eve-musings shown while the plan is being built.
+// Themed to evenings, dining, romance, cities — the world Eve lives in.
+// Cycled inside the "Plan my evening" / "Surprise me" buttons.
+export const LOADING_MESSAGES: string[] = [
+  'The best Bordeaux pairings are decided in the first three minutes ◇',
+  'Most bartenders open the night with a Negroni for the regulars ★',
+  'A four-stop evening peaks somewhere in the second hour, every time ◆',
+  'Italians believe a meal without dessert ends mid-sentence ◇',
+  'Candlelight at 4 to 6 inches above the table is the most flattering ★',
+  'Tokyo has 200,000+ restaurants — more than NYC, Paris, and London combined',
+  'A chef will remember a regular’s order before they remember a name ○',
+  'In Spain, dinner before 9 pm is considered a tourist hour ◆',
+  'Every cocktail menu has at least one drink the bartender quietly hates',
+  'Walking 10 minutes between stops makes the second one taste sharper ★',
+  'The first 30 seconds of any first date set the rest of the night ◇',
+  'Most Michelin reviewers visit a restaurant three times before scoring',
+  'Dessert is best ordered before the first course is fully cleared ◆',
+  'A small candle outperforms an overhead light by every measure of romance ★',
+  'Indian thalis are calibrated so each bite balances the last ◇',
+  'In France, dinner without wine is a working lunch ★',
+  'The most ordered item on a date night menu is rarely the best one ◇',
+  'Wine bars are loneliest at 5:30 and busiest at 9:15 ○',
+  'A walk after dinner is the most underrated cocktail in the world ★',
+  'Two people sharing one dessert decide more about the relationship than the entrée',
+];
+
 export interface CuisineOption {
   id: Cuisine;
   label: string;

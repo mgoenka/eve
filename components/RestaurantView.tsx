@@ -472,7 +472,11 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
               <button
                 onClick={generate}
                 disabled={!name.trim() || !city.trim() || generating}
-                className="inline-flex items-center gap-2 px-7 py-3.5 rounded-full font-serif italic font-bold text-lg text-eve-ink bg-gradient-to-r from-amber-200 via-eve-gold to-eve-rose disabled:opacity-30 transition-all shadow-[0_0_44px_rgba(245,216,150,0.40)]"
+                className={`inline-flex items-center gap-2 px-7 py-3.5 rounded-xl font-bold text-base transition-all border outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink hover:scale-[1.02] active:scale-[0.98] ${
+                  generating
+                    ? 'bg-eve-ink-soft text-eve-gold cursor-wait border-eve-gold/30'
+                    : 'bg-eve-ink-soft text-eve-gold border-eve-gold/25 hover:bg-[#1a1a1e] hover:border-eve-gold/45 disabled:bg-eve-ink disabled:text-eve-cream/35 disabled:border-white/10 disabled:cursor-not-allowed shadow-lg shadow-eve-gold/15'
+                }`}
               >
                 {generating ? <Loader2 size={16} className="animate-spin" /> : <ChefHat size={18} />}
                 {generating ? 'Eve is making your kit…' : pack ? 'Regenerate tonight\u2019s look' : 'Generate tonight\u2019s look'}

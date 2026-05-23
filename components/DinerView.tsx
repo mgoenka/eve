@@ -27,6 +27,7 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import {
+  LOADING_MESSAGES,
   VIBES,
   DIETARY_PREFERENCES,
   CUISINES,
@@ -199,7 +200,41 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   const userMutedRef = useRef(true);
   const eveSpeakingRef = useRef(false);
 
-  const [formExpanded, setFormExpanded] = useState(false);
+  // Form is expanded by default. Users can collapse it to "just talk to Eve".
+  const [formExpanded, setFormExpanded] = useState(true);
+  // Cycling trivia message shown inside the primary buttons while a plan
+  // is being built. Mirrors the Recipe / Buzzer "loading-tip" pattern.
+  const [loadingMessage, setLoadingMessage] = useState<string>('');
+  const loadingShownRef = useRef<number[]>([]);
+  const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const isLoading = phase === 'forging';
+    if (isLoading) {
+      const pick = (pool: string[]) => {
+        if (loadingShownRef.current.length >= pool.length) loadingShownRef.current = [];
+        const available = pool.map((_, i) => i).filter((i) => !loadingShownRef.current.includes(i));
+        const idx = available[Math.floor(Math.random() * available.length)];
+        loadingShownRef.current.push(idx);
+        return pool[idx];
+      };
+      const first = pick(LOADING_MESSAGES);
+      setLoadingMessage(first);
+      const scheduleNext = () => {
+        const msg = pick(LOADING_MESSAGES);
+        setLoadingMessage(msg);
+        loadingTimerRef.current = setTimeout(scheduleNext, Math.max(3500, Math.min(8000, msg.length * 70)));
+      };
+      loadingTimerRef.current = setTimeout(scheduleNext, Math.max(3500, Math.min(8000, first.length * 70)));
+    } else if (loadingTimerRef.current) {
+      clearTimeout(loadingTimerRef.current);
+      loadingTimerRef.current = null;
+      setLoadingMessage('');
+    }
+    return () => {
+      if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
+    };
+  }, [phase]);
   const [eveGreeted, setEveGreeted] = useState(false);
   const [parsing, setParsing] = useState(false);
 
@@ -1607,10 +1642,10 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
             )}
             <button
               onClick={surpriseMe}
-              className="group inline-flex items-center gap-2.5 px-7 py-3.5 rounded-full font-serif italic font-bold text-lg text-eve-ink bg-gradient-to-r from-amber-200 via-eve-gold to-eve-rose hover:from-amber-100 hover:via-yellow-300 hover:to-rose-300 transition-all shadow-[0_0_44px_rgba(245,216,150,0.40)] hover:shadow-[0_0_60px_rgba(232,163,158,0.55)]"
+              className="group inline-flex items-center gap-2 px-7 py-3.5 rounded-xl font-bold text-base transition-all border outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink hover:scale-[1.02] active:scale-[0.98] bg-eve-ink-soft text-eve-gold border-eve-gold/25 hover:bg-[#1a1a1e] hover:border-eve-gold/45 shadow-lg shadow-eve-gold/10"
             >
               <Shuffle size={18} />
-              Surprise Me
+              Surprise me
             </button>
           </div>
 
@@ -1655,7 +1690,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
               className="inline-flex items-center gap-1.5 text-[12px] tracking-wider text-eve-cream/50 hover:text-eve-cream italic font-serif transition-colors"
             >
               <ChevronDown size={11} className={`transition-transform ${formExpanded ? 'rotate-180' : ''}`} />
-              {formExpanded ? 'or just talk to Eve' : "I'd rather pick the details myself"}
+              {formExpanded ? 'Hide details, just talk to Eve' : 'Show all the details'}
             </button>
           </div>
 
@@ -1908,11 +1943,11 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
               </div>
             )}
 
-            <div className="flex justify-center pt-2">
+            <div className="pt-2">
               <button
                 onClick={() => buildPlan()}
                 disabled={!city.trim()}
-                className="group inline-flex items-center gap-3 px-9 py-4 rounded-full font-serif italic font-bold text-xl text-eve-ink bg-gradient-to-r from-amber-200 via-eve-gold to-eve-rose hover:from-amber-100 hover:via-yellow-300 hover:to-rose-300 disabled:opacity-30 disabled:cursor-not-allowed transition-all shadow-[0_0_56px_rgba(245,216,150,0.40)] hover:shadow-[0_0_72px_rgba(232,163,158,0.55)]"
+                className="w-full group inline-flex items-center justify-center gap-3 px-8 py-4 rounded-xl font-bold text-lg transition-all border outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink hover:scale-[1.01] active:scale-[0.99] bg-eve-ink-soft text-eve-gold border-eve-gold/25 hover:bg-[#1a1a1e] hover:border-eve-gold/45 disabled:bg-eve-ink disabled:text-eve-cream/35 disabled:border-white/10 disabled:cursor-not-allowed shadow-lg shadow-eve-gold/15"
               >
                 <Wand2 size={20} />
                 Plan my evening
@@ -1990,6 +2025,14 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           <p className="mt-2 text-eve-cream/55 text-sm italic font-serif">
             {city} · {formatDate(whenISO)}
           </p>
+          {phase === 'forging' && loadingMessage && (
+            <div className="mt-4 mx-auto inline-flex items-center gap-2.5 px-5 py-2.5 rounded-xl bg-eve-ink-soft border border-eve-gold/25 text-eve-gold shadow-lg shadow-eve-gold/10 max-w-2xl">
+              <Loader2 size={16} className="animate-spin flex-shrink-0" />
+              <span role="status" aria-live="polite" className="text-sm font-normal text-eve-cream/85">
+                {loadingMessage}
+              </span>
+            </div>
+          )}
           <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
             {groundedSearchUsed && (
               <span className="text-[10px] tracking-wide text-eve-rose/85 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-eve-rose/10 border border-eve-rose/20">
