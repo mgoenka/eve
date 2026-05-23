@@ -35,8 +35,8 @@ export function EveLogo({ size = 36, className = '', withWordmark = false }: Pro
         <rect width="64" height="64" rx="14" fill="#1a0d2e" />
         <circle cx="32" cy="26" r="22" fill="url(#eve-glow-icon)" />
 
-        {/* Feminine bust silhouette — head, flowing hair, off-shoulder neckline.
-            Drawn as a single closed path filled with the warm gradient. */}
+        {/* Feminine bust silhouette as an OUTLINE drawing — clean line work,
+            not a filled solid. Reads as a sketched portrait. */}
         <path
           d="
             M 32 13
@@ -57,17 +57,30 @@ export function EveLogo({ size = 36, className = '', withWordmark = false }: Pro
             C 42 17 38 13 32 13
             Z
           "
-          fill="url(#eve-grad-icon)"
+          stroke="url(#eve-grad-icon)"
+          strokeWidth="2.2"
+          strokeLinejoin="round"
+          fill="none"
         />
 
-        {/* A soft stray hair curl on her right side — adds warmth */}
+        {/* A soft stray hair curl */}
         <path
           d="M 42 23 Q 47 22 49 27 Q 49 30 46 30"
           stroke="url(#eve-grad-icon)"
-          strokeWidth="1.5"
+          strokeWidth="1.6"
           strokeLinecap="round"
           fill="none"
           opacity="0.85"
+        />
+
+        {/* A simple collarbone line for elegance */}
+        <path
+          d="M 22 41 Q 32 44 42 41"
+          stroke="url(#eve-grad-icon)"
+          strokeWidth="1.2"
+          strokeLinecap="round"
+          fill="none"
+          opacity="0.55"
         />
 
         {/* Earring sparkle */}
@@ -106,7 +119,7 @@ export function EveLogo({ size = 36, className = '', withWordmark = false }: Pro
         </linearGradient>
       </defs>
 
-      {/* Silhouette of head + shoulders, scaled to wordmark height */}
+      {/* Silhouette outline of head + shoulders */}
       <g transform="translate(2 4)">
         <path
           d="
@@ -128,7 +141,10 @@ export function EveLogo({ size = 36, className = '', withWordmark = false }: Pro
             C 35 10 31 6 26 6
             Z
           "
-          fill="url(#eve-grad-word)"
+          stroke="url(#eve-grad-word)"
+          strokeWidth="2"
+          strokeLinejoin="round"
+          fill="none"
         />
         <path
           d="M 35 16 Q 40 15 42 19 Q 42 22 39 22"
@@ -137,6 +153,14 @@ export function EveLogo({ size = 36, className = '', withWordmark = false }: Pro
           strokeLinecap="round"
           fill="none"
           opacity="0.85"
+        />
+        <path
+          d="M 17 35 Q 26 38 35 35"
+          stroke="url(#eve-grad-word)"
+          strokeWidth="1.1"
+          strokeLinecap="round"
+          fill="none"
+          opacity="0.55"
         />
         <circle cx="33.5" cy="21" r="1.1" fill="#fef3c7" opacity="0.9" />
       </g>

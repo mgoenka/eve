@@ -759,9 +759,100 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   // Helper to actually parse the transcript and act on the result.
   // Either fills out enough of the form to execute (and starts the plan),
   // or speaks back asking for the one missing thing and re-opens the mic.
+  // If a plan already exists (we're in walkthrough or post-plan chat),
+  // route the transcript to eve-refine instead — the user is asking for a
+  // tweak, not a new plan from scratch.
   const processTranscript = useCallback(
     async (transcript: string) => {
       if (!transcript.trim()) return;
+
+      // Walkthrough barge-in / post-plan voice: refine, don't replan.
+      if (stops.length > 0 && phaseRef.current === 'ready') {
+        // Stop the walkthrough so we can react to what they said.
+        walkingCancelRef.current = true;
+        setWalkingIdx(-1);
+        stopAllAudio();
+        setRefining(true);
+        try {
+          const result = await eveRefine({
+            message: transcript,
+            previousPlan: { stops: stops.map((s) => ({ name: s.name, kind: s.kind, oneLineVibe: s.oneLineVibe })) },
+            vibe,
+            city,
+            dietary,
+            party,
+            budgetUSD: budgetPerPerson * party,
+          });
+          if (result.spokenReply) {
+            setEveIntroText(result.spokenReply);
+            await speakAsEveAndWait(result.spokenReply);
+          }
+          if (result.stops?.length) {
+            setPlanTitle(result.title || planTitle);
+            const newStops: ExperienceStop[] = result.stops.map((s) => ({
+              kind: s.kind as any,
+              name: s.name,
+              oneLineVibe: s.oneLineVibe,
+              whyThisFits: s.whyThisFits,
+              approxArrival: s.approxArrival,
+              durationMinutes: s.durationMinutes || 60,
+              walkMinutesFromPrev: s.walkMinutesFromPrev || 0,
+              signatureItem: s.signatureItem,
+              isEveOriginal: !!s.isEveOriginal,
+              status: 'pending',
+            }));
+            setStops(newStops);
+            // Reset auto-walk so the refreshed plan auto-narrates.
+            autoWalkedRef.current = false;
+            // Refresh story for the new plan
+            eveStory({
+              title: result.title || planTitle,
+              stops: newStops.map((s) => ({ name: s.name, kind: s.kind, oneLineVibe: s.oneLineVibe, signatureItem: s.signatureItem })),
+              vibe,
+              city,
+              party,
+            }).then(setStory).catch(() => {});
+            // Regenerate stop images in parallel
+            setStops((prev) => prev.map((st) => ({ ...st, status: 'generating' })));
+            await Promise.all(
+              newStops.map(async (stop, i) => {
+                try {
+                  const img = await stopImage({
+                    name: stop.name,
+                    kind: stop.kind,
+                    oneLineVibe: stop.oneLineVibe,
+                    city,
+                    vibe,
+                  });
+                  setStops((prev) => prev.map((st, idx) => idx === i ? { ...st, imageData: img.imageData, imageMime: img.imageMime, status: 'ready' } : st));
+                } catch (err: any) {
+                  setStops((prev) => prev.map((st, idx) => idx === i ? { ...st, status: 'error', error: err?.message || 'Image failed' } : st));
+                }
+              })
+            );
+          }
+        } catch (err: any) {
+          console.error('refine-by-voice failed:', err);
+        } finally {
+          setRefining(false);
+        }
+        // Keep the mic open for the next ask.
+        try {
+          const rec = recognitionRef.current;
+          if (rec && !voiceListeningRef.current && !userMutedRef.current) {
+            baseTextRef.current = '';
+            setVoiceTranscript('');
+            voiceTranscriptRef.current = '';
+            rec.start();
+            setVoiceListening(true);
+            voiceListeningRef.current = true;
+            lastSpeechAtRef.current = Date.now();
+            startSmartSilenceWatcher();
+          }
+        } catch {}
+        return;
+      }
+
       setParsing(true);
       try {
         const result = await eveParseIntent(transcript, {
@@ -1202,13 +1293,33 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   }, [chatInput, refining, stops, vibe, city, dietary, party, budgetPerPerson, planTitle, speakAsEve]);
 
   // Walks through the evening: highlights each stop in sequence as Eve
-  // speaks the corresponding story beat. Adds the "someone narrating it
-  // for you" feel.
+  // speaks the corresponding story beat. The mic stays open the entire time
+  // so the user can interrupt — barge-in pauses Eve and routes the user's
+  // line to eve-refine, which swaps stops and resumes the walkthrough.
   const startWalkthrough = useCallback(async () => {
+    console.log('[Eve] startWalkthrough invoked, story present:', !!story);
     if (!story) return;
     walkingCancelRef.current = false;
-    // Override any audio currently playing (plan narration, eve outro, etc.)
     stopAllAudio();
+
+    // Keep the mic listening through the whole walkthrough so true barge-in
+    // is possible. If the recognizer isn't already running, start it.
+    try {
+      const rec = recognitionRef.current;
+      if (rec && !voiceListeningRef.current) {
+        baseTextRef.current = '';
+        setVoiceTranscript('');
+        voiceTranscriptRef.current = '';
+        setConversationActive(true);
+        conversationActiveRef.current = true;
+        rec.start();
+        setVoiceListening(true);
+        voiceListeningRef.current = true;
+        lastSpeechAtRef.current = Date.now();
+        startSmartSilenceWatcher();
+      }
+    } catch {}
+
     const beats: { idx: number; text: string }[] = [
       { idx: 0, text: story.opening },
       { idx: 1, text: story.atStop1 },
@@ -1223,7 +1334,6 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
       if (walkingCancelRef.current) break;
       setWalkingIdx(beat.idx);
       await speakAsEveAndWait(beat.text);
-      // a small breath between beats
       await new Promise((r) => setTimeout(r, 250));
     }
     if (!walkingCancelRef.current) setWalkingIdx(-1);
@@ -1231,19 +1341,22 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
 
   // Auto-trigger the walkthrough once the plan is fully loaded. Eve walks
   // the user through the evening on her own — no button click needed.
+  // We do NOT respect walkingCancelRef here; we forcibly clear it and start.
   useEffect(() => {
     if (autoWalkedRef.current) return;
-    if (muted || userMuted) return;
+    if (muted) return;
     if (!story) return;
     if (stops.length < 2) return;
     if (!stops.every((s) => s.status === 'ready' || s.status === 'error')) return;
     autoWalkedRef.current = true;
+    console.log('[Eve] auto-walk: scheduling startWalkthrough in 900ms');
     const t = setTimeout(() => {
-      if (walkingCancelRef.current) return;
+      console.log('[Eve] auto-walk: firing startWalkthrough now');
+      walkingCancelRef.current = false;
       startWalkthrough();
     }, 900);
     return () => clearTimeout(t);
-  }, [story, stops, muted, userMuted, startWalkthrough]);
+  }, [story, stops, muted, startWalkthrough]);
 
   const stopWalkthrough = useCallback(() => {
     walkingCancelRef.current = true;

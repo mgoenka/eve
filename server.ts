@@ -483,14 +483,16 @@ Subject:
 Composition:
 - Painterly brushstrokes visible, slightly impressionistic
 - Soft edges, low contrast, gentle halo glow behind her head
-- Dusk palette: deep plums (#1a0d2e to #4a2d5e) for the background, warm gold (#f5d896) and rose (#e8a39e) catching her cheekbone
+- Background: FULLY OPAQUE deep plum at ALL FOUR EDGES of the frame, fading from #1a0d2e in the corners toward #4a2d5e behind her shoulders. Absolutely no white, no cream, no pale beige, no studio backdrop. Background must reach all four corners with rich plum saturation.
+- Warm gold (#f5d896) and rose (#e8a39e) only appear as small accents on her cheekbone and earring sparkle, never on the background
 - Mood: ${moodLine}
 
 Strict constraints:
 - NO text, NO words, NO captions, NO logos, NO watermarks
+- NO white background, NO cream background, NO pale wash anywhere in the frame
 - Single subject only, no other figures, no jewelry except a tiny sparkle near her temple
 - Tasteful and elegant, modest neckline, never explicit
-- Square aspect ratio framing
+- Square aspect ratio framing, subject vertically centered with deep plum at top and bottom edges
 - Output ONE image only`;
 
   try {
