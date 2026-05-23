@@ -6,16 +6,18 @@ export interface CuisineOption {
 }
 
 export const CUISINES: CuisineOption[] = [
-  { id: 'indian', label: 'Indian' },
-  { id: 'italian', label: 'Italian' },
-  { id: 'thai', label: 'Thai' },
-  { id: 'japanese', label: 'Japanese' },
-  { id: 'mexican', label: 'Mexican' },
-  { id: 'chinese', label: 'Chinese' },
-  { id: 'mediterranean', label: 'Mediterranean' },
-  { id: 'american', label: 'American' },
-  { id: 'fusion', label: 'Fusion' },
-  { id: 'cafe', label: 'Cafe' },
+  { id: 'Indian', label: 'Indian' },
+  { id: 'Italian', label: 'Italian' },
+  { id: 'Thai', label: 'Thai' },
+  { id: 'Japanese', label: 'Japanese' },
+  { id: 'Mexican', label: 'Mexican' },
+  { id: 'Chinese', label: 'Chinese' },
+  { id: 'Mediterranean', label: 'Mediterranean' },
+  { id: 'American', label: 'American' },
+  { id: 'Vietnamese', label: 'Vietnamese' },
+  { id: 'Korean', label: 'Korean' },
+  { id: 'Fusion', label: 'Fusion' },
+  { id: 'Cafe', label: 'Cafe' },
 ];
 
 export interface VibeOption {
@@ -139,13 +141,14 @@ export const SAMPLE_QUERIES: SampleQuery[] = [
 ];
 
 // Real Bay Area restaurants used as defaults so the demo is always honest.
-// Cuisine + signatureDishes are inferred at runtime via Google Search if blank.
+// Cuisine + signatureDishes + voice are inferred at runtime via Google Search
+// if the owner skips them. Display labels are TitleCase.
 export const DEMO_RESTAURANTS = [
   {
     id: 'sattvik',
     name: 'Sattvik',
     city: 'Sunnyvale, CA',
-    cuisine: 'indian' as Cuisine,
+    cuisine: 'Indian' as Cuisine,
     voice:
       'Warm, family-run, recipe-honoring, slightly proud. Avoid cliches like "authentic", let specifics speak.',
     signatureDishes:
@@ -156,7 +159,7 @@ export const DEMO_RESTAURANTS = [
     id: 'cucina_venti',
     name: 'Cucina Venti',
     city: 'Mountain View, CA',
-    cuisine: 'italian' as Cuisine,
+    cuisine: 'Italian' as Cuisine,
     voice:
       'Convivial, neighborhood-Italian, generous portions, family-table feel. Confident without being precious.',
     signatureDishes:
@@ -167,11 +170,44 @@ export const DEMO_RESTAURANTS = [
     id: 'chaat_bhavan',
     name: 'Chaat Bhavan',
     city: 'Mountain View, CA',
-    cuisine: 'indian' as Cuisine,
+    cuisine: 'Indian' as Cuisine,
     voice:
       'Casual, street-food joy, loud and proud about chaat heritage. Approachable, not refined.',
     signatureDishes:
       'Pani puri, dahi puri, samosa chaat, bhel puri, masala dosa',
     primaryColor: '#dc2626',
+  },
+  {
+    id: 'tamarine',
+    name: 'Tamarine',
+    city: 'Palo Alto, CA',
+    cuisine: 'Fusion' as Cuisine,
+    voice:
+      'Refined modern Vietnamese, art-gallery elegant. Quietly confident, ingredient-forward.',
+    signatureDishes:
+      'Caramelized lemongrass tofu, shaking beef, summer rolls, lychee martini',
+    primaryColor: '#7c3aed',
+  },
+  {
+    id: 'vina_enoteca',
+    name: 'Vina Enoteca',
+    city: 'Palo Alto, CA',
+    cuisine: 'Italian' as Cuisine,
+    voice:
+      'Slow-food, ingredient-led, tasting-menu energy without pretension. Confident and observational.',
+    signatureDishes:
+      'Burrata with stone fruit, hand-cut tagliolini al limone, branzino, tiramisu',
+    primaryColor: '#0891b2',
+  },
+  {
+    id: 'saravana_bhavan',
+    name: 'Saravana Bhavan',
+    city: 'Sunnyvale, CA',
+    cuisine: 'Indian' as Cuisine,
+    voice:
+      'Iconic South Indian, generations-deep, no-fuss. Pride lives in the rava and the sambar.',
+    signatureDishes:
+      'Masala dosa, ghee roast, idli vada, rasam vadai, kesari',
+    primaryColor: '#ea580c',
   },
 ];

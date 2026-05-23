@@ -420,15 +420,20 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
               ))}
             </div>
 
-            <div className="flex justify-end pt-2">
-              <button
-                onClick={saveBrandFn}
-                disabled={!name.trim() || !city.trim()}
-                className="inline-flex items-center gap-2 px-7 py-3.5 rounded-full font-serif italic font-bold text-lg text-eve-ink bg-gradient-to-r from-amber-200 via-eve-gold to-eve-rose disabled:opacity-30 transition-all"
-              >
-                <ChefHat size={18} />
-                Continue
-              </button>
+            <div className="pt-2 border-t border-white/10">
+              <p className="text-[12px] text-eve-cream/60 italic font-serif mb-3 text-center">
+                Skip everything else and Eve will figure out tonight's special from your reviews and current trends.
+              </p>
+              <div className="flex justify-center">
+                <button
+                  onClick={saveBrandFn}
+                  disabled={!name.trim() || !city.trim()}
+                  className="inline-flex items-center gap-2 px-7 py-3.5 rounded-full font-serif italic font-bold text-lg text-eve-ink bg-gradient-to-r from-amber-200 via-eve-gold to-eve-rose disabled:opacity-30 transition-all shadow-[0_0_44px_rgba(245,216,150,0.40)]"
+                >
+                  <ChefHat size={18} />
+                  Generate tonight's look
+                </button>
+              </div>
             </div>
           </div>
         </main>

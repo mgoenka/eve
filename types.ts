@@ -1,14 +1,6 @@
-export type Cuisine =
-  | 'indian'
-  | 'italian'
-  | 'thai'
-  | 'mexican'
-  | 'japanese'
-  | 'chinese'
-  | 'mediterranean'
-  | 'american'
-  | 'fusion'
-  | 'cafe';
+// Cuisine is now stored as a free-form string so users can type custom cuisines
+// and so display reads as TitleCase (Italian, Indian) rather than lowercase.
+export type Cuisine = string;
 
 export type Vibe =
   | 'date_night'
