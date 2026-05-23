@@ -81,6 +81,7 @@ The same engine powers Eve for Restaurants. Owners need only their name and city
 
 **Demo & Presentation (30%)** — judge-facing artifacts ready to inspect:
 - **Live deployment** at https://eve.mohitgoenka.com — verifiably working, no mocks
+- **Recorded demo video** at [`demo-video/eve-demo.mp4`](./demo-video/eve-demo.mp4) — 86s scripted walkthrough of both diner and restaurant sides on the live deployment, recorded via Playwright against the production URL (re-record any time with `node scripts/record-demo.mjs`)
 - **Pitch deck** at https://eve.mohitgoenka.com/pitch.html (5 slides, ← → arrow nav, Eve portrait on slide 1)
 - **Architecture page** at https://eve.mohitgoenka.com/architecture.html (technical SVG flowchart, ADK runtime block, full endpoint reference)
 - **Architecture diagram** in this README (below)

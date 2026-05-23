@@ -4,12 +4,11 @@ interface Props {
   withWordmark?: boolean;
 }
 
-// The Eve mark: a feminine silhouette (head + hair + shoulder line)
-// next to the italic "eve" wordmark. The silhouette is what the user
-// connects to — the wordmark just names her.
+// The Eve mark: a side-profile silhouette of a woman with long flowing hair.
+// Outline only, drawn in the warm gold-rose-plum gradient. Reads as a
+// quiet, painted figure. The wordmark version puts her next to "eve".
 export function EveLogo({ size = 36, className = '', withWordmark = false }: Props) {
   if (!withWordmark) {
-    // ICON-ONLY (favicon, top-left header) — feminine bust silhouette.
     return (
       <svg
         width={size}
@@ -32,29 +31,40 @@ export function EveLogo({ size = 36, className = '', withWordmark = false }: Pro
             <stop offset="100%" stopColor="#f5d896" stopOpacity="0" />
           </radialGradient>
         </defs>
-        <rect width="64" height="64" rx="14" fill="#1a0d2e" />
-        <circle cx="32" cy="26" r="22" fill="url(#eve-glow-icon)" />
 
-        {/* Feminine bust silhouette as an OUTLINE drawing — clean line work,
-            not a filled solid. Reads as a sketched portrait. */}
+        <rect width="64" height="64" rx="14" fill="#1a0d2e" />
+        <circle cx="32" cy="28" r="22" fill="url(#eve-glow-icon)" />
+
+        {/*
+          Side-profile, looking right. Outline only.
+          Path traces:
+          - top of forehead
+          - bridge of nose, tip, philtrum
+          - upper + lower lip
+          - chin
+          - neck down to the front collarbone
+          - bottom-front edge dips off-frame
+          - long hair flowing down the back from crown
+          - back of head curving up to crown
+        */}
         <path
           d="
-            M 32 13
-            C 26 13 22 17 22 23
-            C 22 25 22.5 27 23.5 28.5
-            L 22 30
-            C 19 31 17 33 17 36
-            L 17 38
-            C 14 41 11 46 10 53
-            L 10 58
-            L 54 58
-            L 54 53
-            C 53 46 50 41 47 38
-            L 47 36
-            C 47 33 45 31 42 30
-            L 40.5 28.5
-            C 41.5 27 42 25 42 23
-            C 42 17 38 13 32 13
+            M 30 12
+            C 23 12 19 17 19 24
+            C 19 28 21 32 23 35
+            L 26 38
+            L 31 39
+            L 38 39
+            L 39 41
+            L 39 44
+            L 41 47
+            L 44 50
+            L 46 56
+            L 8 56
+            L 8 50
+            C 9 42 10 36 12 30
+            C 13 26 14 21 17 17
+            C 19 14 23 12 30 12
             Z
           "
           stroke="url(#eve-grad-icon)"
@@ -63,19 +73,25 @@ export function EveLogo({ size = 36, className = '', withWordmark = false }: Pro
           fill="none"
         />
 
-        {/* A soft stray hair curl */}
+        {/* Hair locks falling — three flowing curves down the back */}
         <path
-          d="M 42 23 Q 47 22 49 27 Q 49 30 46 30"
+          d="M 14 28 Q 10 38 13 50"
           stroke="url(#eve-grad-icon)"
-          strokeWidth="1.6"
+          strokeWidth="1.4"
           strokeLinecap="round"
           fill="none"
           opacity="0.85"
         />
-
-        {/* A simple collarbone line for elegance */}
         <path
-          d="M 22 41 Q 32 44 42 41"
+          d="M 18 26 Q 16 40 21 54"
+          stroke="url(#eve-grad-icon)"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          fill="none"
+          opacity="0.7"
+        />
+        <path
+          d="M 22 30 Q 24 42 28 56"
           stroke="url(#eve-grad-icon)"
           strokeWidth="1.2"
           strokeLinecap="round"
@@ -83,8 +99,18 @@ export function EveLogo({ size = 36, className = '', withWordmark = false }: Pro
           opacity="0.55"
         />
 
+        {/* Eyelash hint — a tiny stroke where her eye would be */}
+        <path
+          d="M 30 26 Q 32 25 34 26"
+          stroke="url(#eve-grad-icon)"
+          strokeWidth="1.2"
+          strokeLinecap="round"
+          fill="none"
+          opacity="0.7"
+        />
+
         {/* Earring sparkle */}
-        <circle cx="40.5" cy="28" r="1.2" fill="#fef3c7" opacity="0.9" />
+        <circle cx="27" cy="32" r="1.1" fill="#fef3c7" opacity="0.95" />
 
         {/* Quiet wink star */}
         <g transform="translate(50 14)">
@@ -98,7 +124,7 @@ export function EveLogo({ size = 36, className = '', withWordmark = false }: Pro
     );
   }
 
-  // WORDMARK — silhouette + italic "eve". Transparent background.
+  // WORDMARK — profile silhouette + italic "eve". Transparent background.
   const w = Math.round(size * 3.4);
   return (
     <svg
@@ -119,50 +145,58 @@ export function EveLogo({ size = 36, className = '', withWordmark = false }: Pro
         </linearGradient>
       </defs>
 
-      {/* Silhouette outline of head + shoulders */}
+      {/* Profile silhouette, scaled to wordmark height */}
       <g transform="translate(2 4)">
         <path
           d="
-            M 26 6
-            C 21 6 17 10 17 16
-            C 17 18 17.5 20 18.5 21.5
-            L 17 23
-            C 14 24 12 26 12 29
-            L 12 31
-            C 9 34 6 39 5 46
-            L 5 51
-            L 47 51
-            L 47 46
-            C 46 39 43 34 40 31
-            L 40 29
-            C 40 26 38 24 35 23
-            L 33.5 21.5
-            C 34.5 20 35 18 35 16
-            C 35 10 31 6 26 6
+            M 25 6
+            C 19 6 16 10 16 17
+            C 16 21 17 25 19 28
+            L 21 31
+            L 25 32
+            L 31 32
+            L 32 34
+            L 32 36
+            L 34 39
+            L 36 42
+            L 38 49
+            L 5 49
+            L 5 43
+            C 6 35 7 30 9 25
+            C 10 21 11 17 13 13
+            C 15 10 18 6 25 6
             Z
           "
           stroke="url(#eve-grad-word)"
-          strokeWidth="2"
+          strokeWidth="1.9"
           strokeLinejoin="round"
           fill="none"
         />
         <path
-          d="M 35 16 Q 40 15 42 19 Q 42 22 39 22"
+          d="M 11 22 Q 8 32 11 45"
           stroke="url(#eve-grad-word)"
-          strokeWidth="1.5"
+          strokeWidth="1.2"
           strokeLinecap="round"
           fill="none"
-          opacity="0.85"
+          opacity="0.8"
         />
         <path
-          d="M 17 35 Q 26 38 35 35"
+          d="M 15 21 Q 13 33 18 47"
+          stroke="url(#eve-grad-word)"
+          strokeWidth="1.2"
+          strokeLinecap="round"
+          fill="none"
+          opacity="0.6"
+        />
+        <path
+          d="M 25 21 Q 27 26 28 28"
           stroke="url(#eve-grad-word)"
           strokeWidth="1.1"
           strokeLinecap="round"
           fill="none"
-          opacity="0.55"
+          opacity="0.7"
         />
-        <circle cx="33.5" cy="21" r="1.1" fill="#fef3c7" opacity="0.9" />
+        <circle cx="22" cy="26" r="1" fill="#fef3c7" opacity="0.9" />
       </g>
 
       <text
