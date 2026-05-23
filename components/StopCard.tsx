@@ -10,18 +10,9 @@ interface Props {
   dimmed?: boolean;
 }
 
-// Per-kind placeholder image (royalty-free Unsplash) shown while Eve's
-// AI image renders. Stays in place until the real image fades in over it.
-const KIND_PLACEHOLDERS: Record<StopKind, string> = {
-  dinner: 'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=720&q=70&auto=format&fit=crop',
-  dessert: 'https://images.unsplash.com/photo-1551024601-bec78aea704b?w=720&q=70&auto=format&fit=crop',
-  drink: 'https://images.unsplash.com/photo-1551751299-1b51cab2694c?w=720&q=70&auto=format&fit=crop',
-  walk: 'https://images.unsplash.com/photo-1545486332-9e0999c535b2?w=720&q=70&auto=format&fit=crop',
-  live_music: 'https://images.unsplash.com/photo-1507676184212-d03ab07a01bf?w=720&q=70&auto=format&fit=crop',
-  view: 'https://images.unsplash.com/photo-1502786129293-79981df4e689?w=720&q=70&auto=format&fit=crop',
-  activity: 'https://images.unsplash.com/photo-1521587760476-6c12a4b040da?w=720&q=70&auto=format&fit=crop',
-};
-
+// Kind-tinted gradient is the only placeholder. Photographic placeholders
+// were misleading users into thinking the displayed image was Eve's
+// generated dish (e.g. a stock pizza behind a "gnocchi" caption). Never again.
 const KIND_GRADIENTS: Record<StopKind, { from: string; via: string; to: string }> = {
   dinner: { from: 'from-amber-500/30', via: 'via-rose-500/25', to: 'to-orange-700/35' },
   dessert: { from: 'from-pink-400/30', via: 'via-rose-300/25', to: 'to-amber-300/30' },
@@ -51,18 +42,14 @@ export function StopCard({ stop, index, city, highlighted, dimmed }: Props) {
       style={{ animationDelay: `${index * 120}ms` }}
     >
       <div className="aspect-square relative overflow-hidden bg-eve-ink">
-        {/* Per-kind real photograph as placeholder — visible immediately,
-            stays under the AI image, replaced by it on fade-in */}
-        <img
-          src={KIND_PLACEHOLDERS[stop.kind] || KIND_PLACEHOLDERS.dinner}
-          alt=""
-          aria-hidden="true"
-          className="absolute inset-0 w-full h-full object-cover"
-          loading="lazy"
-        />
-
-        {/* Subtle dusk tint over the placeholder so it blends with Eve's palette */}
-        <div className={`absolute inset-0 bg-gradient-to-br ${grad.from} ${grad.via} ${grad.to} ${showSkeleton ? 'opacity-90 animate-pulse mix-blend-overlay' : 'opacity-30 mix-blend-overlay'}`} />
+        {/* Kind-tinted gradient as the only placeholder. Animated while waiting,
+            stays as a soft backdrop under the AI image once it arrives. */}
+        <div className={`absolute inset-0 bg-gradient-to-br ${grad.from} ${grad.via} ${grad.to} ${showSkeleton ? 'animate-pulse' : ''}`} />
+        {showSkeleton && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Sparkles size={32} className="text-eve-gold/35 animate-pulse" />
+          </div>
+        )}
 
         {/* Graceful error state — never expose raw error JSON */}
         {hasError && !stop.imageData && (

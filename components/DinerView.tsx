@@ -756,6 +756,41 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           setFreeText(result.extracted.freeText);
         }
 
+        // Geolocation fallback: if Eve thinks the location is missing,
+        // try the browser's geolocation before asking the user. This avoids
+        // an awkward "where are you?" turn when we can just ask the device.
+        const locationMissing =
+          !result.extracted.location &&
+          (!nextLocation || nextLocation === SUGGESTED_CITY);
+        if (locationMissing && !result.isComplete) {
+          try {
+            const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+              if (!('geolocation' in navigator)) {
+                reject(new Error('no geolocation'));
+                return;
+              }
+              navigator.geolocation.getCurrentPosition(resolve, reject, {
+                enableHighAccuracy: false,
+                timeout: 7000,
+                maximumAge: 5 * 60 * 1000,
+              });
+            });
+            const { city: resolved } = await reverseGeocode(
+              pos.coords.latitude,
+              pos.coords.longitude
+            );
+            if (resolved && resolved.length < 80) {
+              nextLocation = resolved;
+              setCity(resolved);
+              result.isComplete = true;
+              result.spokenReply = `Got you near ${resolved}. Pulling tonight together now.`;
+            }
+          } catch {
+            // Permission denied / unavailable — fall through to the
+            // existing "Eve asks where you are" turn.
+          }
+        }
+
         // Eve speaks her response
         if (result.spokenReply) {
           setEveIntroText(result.spokenReply);
@@ -1234,6 +1269,37 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
 
         <main className="flex-1 max-w-3xl mx-auto w-full px-6 py-6 md:py-12">
           <div className="text-center mb-8 md:mb-10">
+            {eveAvatarUrl && (
+              <div className="flex justify-center mb-5">
+                <div className="relative">
+                  {/* Soft warm halo when Eve is speaking — no white edges */}
+                  <div
+                    className={`absolute inset-0 rounded-full blur-2xl transition-opacity duration-500 ${
+                      eveSpeaking ? 'bg-gradient-to-br from-eve-rose/60 via-eve-gold/45 to-eve-plum/55 opacity-90 animate-pulse' : 'opacity-0'
+                    }`}
+                  />
+                  <div
+                    className={`relative w-28 h-28 md:w-32 md:h-32 rounded-full overflow-hidden bg-gradient-to-br from-eve-plum/60 via-eve-rose/40 to-eve-gold/35 transition-all duration-500 ${
+                      eveSpeaking
+                        ? 'ring-2 ring-eve-rose/80 shadow-[0_0_60px_rgba(224,134,134,0.55)] scale-105'
+                        : 'ring-1 ring-eve-gold/35 opacity-95'
+                    }`}
+                  >
+                    <img
+                      src={eveAvatarUrl}
+                      alt="Eve"
+                      className="w-full h-full object-cover scale-110"
+                    />
+                  </div>
+                  {eveSpeaking && (
+                    <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 px-2.5 py-0.5 rounded-full bg-eve-rose/90 text-eve-ink text-[10px] font-bold tracking-wide font-serif italic inline-flex items-center gap-1 shadow-md">
+                      <span className="w-1 h-1 rounded-full bg-eve-ink animate-pulse" />
+                      speaking
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
             <p className="text-[12px] tracking-wider text-eve-gold/85 mb-3 italic font-serif">
               Hi, I'm <span className="text-shimmer not-italic font-semibold">Eve</span>.
             </p>
@@ -1645,13 +1711,17 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           <div className="max-w-2xl mx-auto mb-8 px-5 py-4 rounded-2xl bg-gradient-to-br from-eve-rose/10 to-eve-plum/10 border border-eve-gold/25 animate-fade-in">
             <div className="flex items-start gap-4">
               {eveAvatarUrl && (
-                <img
-                  src={eveAvatarUrl}
-                  alt="Eve"
-                  className={`flex-shrink-0 w-14 h-14 md:w-16 md:h-16 rounded-full object-cover ring-2 transition-all ${
-                    eveSpeaking ? 'ring-eve-rose/70 animate-glow-pulse' : 'ring-eve-gold/40'
+                <div
+                  className={`flex-shrink-0 w-16 h-16 md:w-20 md:h-20 rounded-full overflow-hidden ring-2 transition-all bg-gradient-to-br from-eve-plum/55 via-eve-rose/35 to-eve-gold/30 ${
+                    eveSpeaking ? 'ring-eve-rose/80 animate-glow-pulse' : 'ring-eve-gold/45'
                   }`}
-                />
+                >
+                  <img
+                    src={eveAvatarUrl}
+                    alt="Eve"
+                    className="w-full h-full object-cover scale-110"
+                  />
+                </div>
               )}
               <div className="flex-1 text-center md:text-left">
                 <p className="text-[11px] tracking-wide text-eve-gold/80 mb-1.5 inline-flex items-center gap-1.5 italic font-serif">

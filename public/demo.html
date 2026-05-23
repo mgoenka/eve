@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Eve — 5-min Pitch Script</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <style>
+      :root {
+        --ink: #0e0a18;
+        --plum: #2a1233;
+        --gold: #f5d896;
+        --rose: #e08686;
+        --cream: #f4ead9;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; }
+      body {
+        background:
+          radial-gradient(1200px 800px at 80% -10%, rgba(245,216,150,0.10), transparent 60%),
+          radial-gradient(1000px 700px at -10% 110%, rgba(224,134,134,0.10), transparent 55%),
+          var(--ink);
+        color: var(--cream);
+        font-family: 'Georgia', 'Cormorant Garamond', serif;
+        line-height: 1.65;
+        min-height: 100vh;
+      }
+      .wrap {
+        max-width: 880px;
+        margin: 0 auto;
+        padding: 48px 32px 80px;
+      }
+      header {
+        text-align: center;
+        padding-bottom: 24px;
+        border-bottom: 1px solid rgba(245,216,150,0.18);
+      }
+      .eyebrow {
+        font-size: 12px;
+        letter-spacing: 0.18em;
+        color: var(--gold);
+        text-transform: uppercase;
+        font-style: italic;
+      }
+      h1 {
+        font-family: 'Georgia', serif;
+        font-style: italic;
+        font-weight: 700;
+        font-size: 52px;
+        line-height: 1.05;
+        margin: 12px 0 6px;
+        background: linear-gradient(135deg, #fff5d8, var(--gold), var(--rose));
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+      h2 {
+        font-family: 'Georgia', serif;
+        font-style: italic;
+        font-size: 28px;
+        margin: 48px 0 12px;
+        color: var(--gold);
+        border-left: 3px solid var(--rose);
+        padding-left: 14px;
+      }
+      h3 {
+        font-family: 'Georgia', serif;
+        font-style: italic;
+        font-size: 20px;
+        margin: 28px 0 8px;
+        color: var(--cream);
+      }
+      p { margin: 10px 0; }
+      .lede {
+        font-style: italic;
+        color: rgba(244,234,217,0.78);
+        font-size: 17px;
+      }
+      blockquote {
+        margin: 14px 0;
+        padding: 14px 18px;
+        background: linear-gradient(135deg, rgba(245,216,150,0.06), rgba(224,134,134,0.05));
+        border-left: 2px solid var(--gold);
+        border-radius: 6px;
+        color: var(--cream);
+        font-style: italic;
+        font-size: 16px;
+      }
+      blockquote em { color: var(--rose); font-style: italic; }
+      ul { padding-left: 22px; }
+      li { margin: 6px 0; }
+      strong { color: var(--gold); font-weight: 700; }
+      hr {
+        border: none;
+        border-top: 1px solid rgba(245,216,150,0.18);
+        margin: 36px 0;
+      }
+      .pill {
+        display: inline-block;
+        background: rgba(245,216,150,0.12);
+        color: var(--gold);
+        padding: 3px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-style: italic;
+        letter-spacing: 0.05em;
+        margin-right: 6px;
+      }
+      .qa {
+        background: rgba(255,255,255,0.025);
+        border: 1px solid rgba(245,216,150,0.18);
+        border-radius: 10px;
+        padding: 14px 18px;
+        margin: 12px 0;
+      }
+      .qa .q {
+        color: var(--gold);
+        font-weight: 700;
+        font-style: italic;
+      }
+      .qa .a {
+        color: rgba(244,234,217,0.86);
+        margin-top: 4px;
+      }
+      .links {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        justify-content: center;
+        margin-top: 18px;
+      }
+      .links a {
+        text-decoration: none;
+        color: var(--gold);
+        background: rgba(245,216,150,0.08);
+        border: 1px solid rgba(245,216,150,0.35);
+        padding: 8px 14px;
+        border-radius: 999px;
+        font-size: 13px;
+        font-style: italic;
+        transition: all 0.2s;
+      }
+      .links a:hover {
+        background: rgba(245,216,150,0.18);
+        color: var(--cream);
+      }
+      .timing-box {
+        background: linear-gradient(135deg, rgba(42,18,51,0.65), rgba(14,10,24,0.65));
+        border: 1px solid rgba(245,216,150,0.25);
+        border-radius: 14px;
+        padding: 18px 22px;
+        margin: 16px 0;
+      }
+      .timing-box .timing {
+        color: var(--rose);
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        font-style: italic;
+      }
+      footer {
+        text-align: center;
+        margin-top: 60px;
+        padding-top: 24px;
+        border-top: 1px solid rgba(245,216,150,0.18);
+        font-size: 12px;
+        font-style: italic;
+        color: rgba(244,234,217,0.55);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <div class="eyebrow">Pitch Runbook</div>
+        <h1>Eve — 5-min Pitch Script</h1>
+        <p class="lede">Round 1 judging cheat sheet. Read top to bottom.</p>
+        <div class="links">
+          <a href="/">Diner</a>
+          <a href="/restaurant">Restaurant</a>
+          <a href="/pitch.html">Pitch deck</a>
+          <a href="/architecture.html">Architecture</a>
+        </div>
+      </header>
+
+      <h2>Stage setup</h2>
+      <p>Browser open with three tabs:</p>
+      <ul>
+        <li><strong>Tab 1:</strong> <code>eve.mohitgoenka.com</code> — Diner side</li>
+        <li><strong>Tab 2:</strong> <code>eve.mohitgoenka.com/restaurant</code> — Restaurant side</li>
+        <li><strong>Tab 3:</strong> <code>eve.mohitgoenka.com/pitch.html</code> — Pitch deck</li>
+      </ul>
+      <p>Bonus: <code>/architecture.html</code> in a 4th tab if judges go technical.</p>
+
+      <div class="timing-box">
+        <div class="timing">Pre-step (60 sec before judges arrive)</div>
+        <ol>
+          <li>Open Restaurant tab. Brand pre-set. Hit <strong>"Generate tonight's look"</strong>. Wait ~30s.</li>
+          <li>Click <strong>"Publish to Eve diners"</strong> — seeds the dining index.</li>
+          <li>Switch to Diner tab. Reset to fresh form.</li>
+        </ol>
+      </div>
+
+      <hr />
+
+      <h2>0:00 – 0:30 — Hook</h2>
+      <blockquote>
+        <em>"I'm Mohit Goenka. Hacker, builder, problem-solver. 120+ patents. And every Saturday night I have the same problem you do."</em>
+      </blockquote>
+      <blockquote>
+        <em>"My wife says 'plan something.' Yelp gives me 90 reviews. ChatGPT hallucinates restaurants. Apple Maps is dumb. I'm vegetarian, so 80% of recommendations are useless. There's no AI that plans my whole night."</em>
+      </blockquote>
+      <blockquote>
+        <em>"And on the other side, my favorite restaurant — the one that actually makes good vegetarian Indian food — has zero presence on Instagram. Because they have no marketing team."</em>
+      </blockquote>
+      <blockquote>
+        <em>"Eve fixes both. Same engine. Two sides that feed each other. Watch."</em>
+      </blockquote>
+
+      <h2>0:30 – 2:00 — Diner side</h2>
+      <p>Click the <strong>"Try: Date night in Mountain View, vegetarian"</strong> button — form auto-fills.</p>
+      <p>Hit <strong>"Plan my evening."</strong></p>
+      <blockquote><em>"I just told Eve: vegetarian date night, Mountain View, two of us, two hundred bucks, want a garden walk."</em></blockquote>
+      <p>While the skeleton loads (~10s):</p>
+      <blockquote><em>"Behind this is Gemini Flash generating a structured plan, grounded in real Bay Area places. No hallucinated restaurants — Eve checks against an index restaurants populate themselves."</em></blockquote>
+      <p>When the three cards arrive:</p>
+      <blockquote><em>"Three stops. A real restaurant. A real dessert spot. A walk to close it."</em></blockquote>
+      <p>Wait for AI illustrations to stream in (~15s):</p>
+      <blockquote><em>"Each scene generated live. Gemini 2.5 Flash Image, interleaved text and image, in the same API call. That's the mandatory tech for this track and it's the entire experience."</em></blockquote>
+      <p>Hit <strong>"Walk me through this evening."</strong> — Eve narrates each stop.</p>
+      <blockquote><em>"And Eve's voice walks me through the whole night — Cloud TTS Chirp 3 HD."</em></blockquote>
+      <p>Point to the <strong>Eve Original</strong> badge on the seeded restaurant:</p>
+      <blockquote><em>"And here — see this badge? An Eve Original. Real veg place. The owner posted tonight's special on the other side of Eve thirty seconds ago. That's the flywheel."</em></blockquote>
+
+      <h2>2:00 – 3:30 — Restaurant side</h2>
+      <p>Switch to restaurant tab — content pack already generated from pre-step.</p>
+      <blockquote><em>"This is the other side. The owner. She typed her dish name and got back four things, all on-brand."</em></blockquote>
+      <p>Point to the Instagram card:</p>
+      <blockquote><em>"Instagram post. Hero image AI-generated by Gemini 2.5 Flash Image — that's the same dish, photographed by AI in her brand voice. Caption written in her tone. Hashtags localized."</em></blockquote>
+      <p>Point to the Reel card:</p>
+      <blockquote><em>"Fifteen-second Reel. Three scenes, three AI images, voiceover script written, audio synthesized — playable right now."</em></blockquote>
+      <p>Point to menu card and email:</p>
+      <blockquote><em>"Menu card with brand-voiced description. Email blast. SMS for the loyalty list. Forty bucks of marketing — for free, in sixty seconds."</em></blockquote>
+
+      <h2>3:30 – 4:30 — Architecture + business</h2>
+      <p>Switch to pitch deck tab.</p>
+      <blockquote><em>"Six Google products. Gemini 2.5 Flash Image for interleaved generation. Gemini Flash for structured planning, with Search grounding. Cloud TTS Chirp 3 HD for voice. Cloud Run, Cloud Build, Secret Manager, Artifact Registry. Live, deployed, no mocks."</em></blockquote>
+      <blockquote><em>"Restaurant SaaS — 660K US restaurants at $99/mo. Diner premium at $4.99/mo. Marketplace flywheel between them — that's the thing Toast doesn't have, the thing Yelp can't build."</em></blockquote>
+      <blockquote><em>"$1T local dining market. Yelp at $2B, Toast at $30B, Hootsuite for restaurants — Eve does what would take three subscriptions."</em></blockquote>
+
+      <h2>4:30 – 5:00 — Why now / why me / ask</h2>
+      <blockquote><em>"Six months ago Gemini multimodal couldn't ship this reliably. Today it can. That's why now."</em></blockquote>
+      <blockquote><em>"Twelve AI apps shipped this year. 120+ patents. I am the customer — I'm vegetarian, I cook, I plan date nights, I pay nothing for tools that don't work."</em></blockquote>
+      <blockquote><em>"We'd like to talk about what comes next."</em></blockquote>
+      <p>Slide back to Slide 1 with live URL prominent.</p>
+
+      <hr />
+
+      <h2>Q&amp;A primer</h2>
+
+      <div class="qa">
+        <div class="q">Q: How is this not Yelp + Hootsuite?</div>
+        <div class="a">Both products are 15 years old, neither is multimodal, neither generates content, neither plans whole evenings. Eve is the AI-native rebuild of both at once with the marketplace flywheel between them.</div>
+      </div>
+
+      <div class="qa">
+        <div class="q">Q: How do you bootstrap the diner side without restaurant supply?</div>
+        <div class="a">Day-one diner queries don't require any restaurant supply — Eve generates plans grounded in Gemini's knowledge of the Bay Area. The Eve Original badge is the upgrade that kicks in once supply is there. Restaurants get a free trial — Eve-quality content packs are the carrot.</div>
+      </div>
+
+      <div class="qa">
+        <div class="q">Q: What about Toast?</div>
+        <div class="a">Toast is a POS company that bolted on marketing as an upsell. Their content tools are template-based and nobody uses them. We're a marketing-first product that integrates with Toast/Square/Resy as data sources, not a competitor on POS.</div>
+      </div>
+
+      <div class="qa">
+        <div class="q">Q: How do you handle hallucinated restaurants?</div>
+        <div class="a">Skeleton generation is grounded with Gemini's Google Search tool. We surface published restaurants (Eve Originals) with priority. v1.1 wires in Google Places API for ground-truth verification.</div>
+      </div>
+
+      <div class="qa">
+        <div class="q">Q: Why solo? Will you raise?</div>
+        <div class="a">Yes. 12 AI apps shipped as side projects this year alone. 120+ patents. I know how to ship and scale. Series Seed to bring on a brand designer, an SF restaurant partnerships lead, and an iOS engineer.</div>
+      </div>
+
+      <div class="qa">
+        <div class="q">Q: Defensibility?</div>
+        <div class="a">Vertical prompt corpus tuned by a vegetarian foodie founder; restaurant brand memory (cuisine, voice, signature dishes) creates lock-in; the marketplace flywheel makes the index grow with every published special. None of these compound for a horizontal AI tool.</div>
+      </div>
+
+      <hr />
+
+      <h2>Timing notes</h2>
+      <ul>
+        <li>Pre-step takes ~45 sec. Do it during the previous team's pitch.</li>
+        <li>5 minutes is <strong>tight</strong>. Practice the transitions (form-fill → button click → wait → narrate while loading).</li>
+        <li>The voice playback at 1:30 is the most powerful moment. Make sure speakers are loud enough.</li>
+        <li>If something fails live: keep narrating the tab next to it. Never apologize. The pitch deck is the architecture/business fallback.</li>
+      </ul>
+
+      <h2>Backup if live demo fails</h2>
+      <p>Open the pitch deck. Walk through slides 1 → 2 → 3. Then slides 4 → 5. Total time still under 5 min.</p>
+
+      <footer>
+        <p>Eve · A perfect Evening · <a href="https://eve.mohitgoenka.com" style="color: var(--gold); text-decoration: none;">eve.mohitgoenka.com</a></p>
+      </footer>
+    </div>
+  </body>
+</html>
