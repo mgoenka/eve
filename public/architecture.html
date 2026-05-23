@@ -192,12 +192,12 @@
           </defs>
           <rect width="64" height="64" rx="14" fill="#1a0d2e"/>
           <circle cx="32" cy="28" r="22" fill="url(#brand-glow)"/>
-          <path d="M 30 12 C 23 12 19 17 19 24 C 19 28 21 32 23 35 L 26 38 L 31 39 L 38 39 L 39 41 L 39 44 L 41 47 L 44 50 L 46 56 L 8 56 L 8 50 C 9 42 10 36 12 30 C 13 26 14 21 17 17 C 19 14 23 12 30 12 Z" stroke="url(#brand-grad)" stroke-width="2.2" stroke-linejoin="round" fill="none"/>
-          <path d="M 14 28 Q 10 38 13 50" stroke="url(#brand-grad)" stroke-width="1.4" stroke-linecap="round" fill="none" opacity="0.85"/>
-          <path d="M 18 26 Q 16 40 21 54" stroke="url(#brand-grad)" stroke-width="1.4" stroke-linecap="round" fill="none" opacity="0.7"/>
-          <path d="M 22 30 Q 24 42 28 56" stroke="url(#brand-grad)" stroke-width="1.2" stroke-linecap="round" fill="none" opacity="0.55"/>
-          <path d="M 30 26 Q 32 25 34 26" stroke="url(#brand-grad)" stroke-width="1.2" stroke-linecap="round" fill="none" opacity="0.7"/>
-          <circle cx="27" cy="32" r="1.1" fill="#fef3c7" opacity="0.95"/>
+          <path d="M 30 10 C 36 10 41 14 42 19 L 43 23 Q 42 26 41 27 L 44 30 L 49 35 L 43 38 L 45 40 L 43 41 L 45 43 L 43 45 L 40 47 C 36 49 32 49 30 48 L 30 60 L 6 60 C 4 50 4 36 8 26 L 12 18 C 16 10 22 8 30 10 Z" stroke="url(#brand-grad)" stroke-width="2.2" stroke-linejoin="round" fill="none"/>
+          <path d="M 14 22 Q 9 36 12 56" stroke="url(#brand-grad)" stroke-width="1.3" stroke-linecap="round" fill="none" opacity="0.85"/>
+          <path d="M 18 22 Q 14 38 18 58" stroke="url(#brand-grad)" stroke-width="1.3" stroke-linecap="round" fill="none" opacity="0.7"/>
+          <path d="M 24 24 Q 22 42 26 58" stroke="url(#brand-grad)" stroke-width="1.1" stroke-linecap="round" fill="none" opacity="0.55"/>
+          <path d="M 38 28 Q 40 27 42 28" stroke="url(#brand-grad)" stroke-width="1.2" stroke-linecap="round" fill="none" opacity="0.85"/>
+          <circle cx="34" cy="40" r="1" fill="#fef3c7" opacity="0.95"/>
         </svg>
         <span class="brand-text">eve</span>
       </a>
@@ -356,6 +356,303 @@
           </g>
         </svg>
       </div>
+    </section>
+
+    <!-- Engineer-grade detailed flow chart -->
+    <section>
+      <p class="section-num">01b / ENGINEER DETAIL</p>
+      <h2>End-to-end pipeline (engineer view)</h2>
+      <p>Below is the system at the resolution an SRE would actually want. Four pipelines run inside the same Cloud Run service, each with its own fan-out, fan-in, and recovery path. State machines, parallel calls, refs vs. state, and barge-in cancellation are all surfaced.</p>
+
+      <div class="flow-chart">
+        <svg viewBox="0 0 1100 1480" xmlns="http://www.w3.org/2000/svg" style="width: 100%; height: auto;">
+          <defs>
+            <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#8c8696"/>
+            </marker>
+            <marker id="arr-gold" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#f5d896"/>
+            </marker>
+            <marker id="arr-rose" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#e8a39e"/>
+            </marker>
+            <marker id="arr-em" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#a855f7"/>
+            </marker>
+          </defs>
+
+          <!-- ====== PANEL 1: VOICE STATE MACHINE ====== -->
+          <text x="20" y="28" font-family="JetBrains Mono, monospace" font-size="12" fill="#f5d896" letter-spacing="2">PIPELINE 1 · VOICE CONVERSATION STATE MACHINE</text>
+          <text x="20" y="48" font-family="Inter" font-size="12" fill="#8c8696">Web Speech API → silence-detect → eve-parse-intent → branch (refine vs full plan)</text>
+
+          <!-- States -->
+          <g>
+            <rect x="20" y="68" width="170" height="60" rx="30" fill="#161122" stroke="#a855f7" stroke-width="2"/>
+            <text x="105" y="92" text-anchor="middle" font-family="Inter" font-size="13" font-weight="700" fill="#fef3c7">idle</text>
+            <text x="105" y="110" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#8c8696">conversationActive=false</text>
+
+            <rect x="220" y="68" width="170" height="60" rx="30" fill="#161122" stroke="#f5d896" stroke-width="2"/>
+            <text x="305" y="92" text-anchor="middle" font-family="Inter" font-size="13" font-weight="700" fill="#fef3c7">listening</text>
+            <text x="305" y="110" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#8c8696">voiceListening=true</text>
+
+            <rect x="420" y="68" width="170" height="60" rx="30" fill="#161122" stroke="#e8a39e" stroke-width="2"/>
+            <text x="505" y="92" text-anchor="middle" font-family="Inter" font-size="13" font-weight="700" fill="#fef3c7">parsing</text>
+            <text x="505" y="110" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#8c8696">parsing=true</text>
+
+            <rect x="620" y="68" width="170" height="60" rx="30" fill="#161122" stroke="#f5d896" stroke-width="2"/>
+            <text x="705" y="92" text-anchor="middle" font-family="Inter" font-size="13" font-weight="700" fill="#fef3c7">planning</text>
+            <text x="705" y="110" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#8c8696">phase=forging</text>
+
+            <rect x="820" y="68" width="180" height="60" rx="30" fill="#161122" stroke="#e8a39e" stroke-width="2"/>
+            <text x="910" y="92" text-anchor="middle" font-family="Inter" font-size="13" font-weight="700" fill="#fef3c7">walkthrough</text>
+            <text x="910" y="110" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#8c8696">walkingIdx≥0 + mic open</text>
+          </g>
+
+          <!-- Transitions -->
+          <path d="M 190 98 L 220 98" stroke="#8c8696" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+          <text x="195" y="92" font-family="JetBrains Mono, monospace" font-size="9" fill="#8c8696">tap mic / first speech</text>
+
+          <path d="M 390 98 L 420 98" stroke="#8c8696" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+          <text x="395" y="92" font-family="JetBrains Mono, monospace" font-size="9" fill="#8c8696">3s silence</text>
+
+          <path d="M 590 98 L 620 98" stroke="#f5d896" stroke-width="1.5" fill="none" marker-end="url(#arr-gold)"/>
+          <text x="595" y="92" font-family="JetBrains Mono, monospace" font-size="9" fill="#f5d896">isComplete:true</text>
+
+          <path d="M 800 98 L 820 98" stroke="#e8a39e" stroke-width="1.5" fill="none" marker-end="url(#arr-rose)"/>
+          <text x="800" y="92" font-family="JetBrains Mono, monospace" font-size="9" fill="#e8a39e">stops ready</text>
+
+          <!-- Refs vs state mirror -->
+          <rect x="20" y="148" width="980" height="46" rx="6" fill="#0d0a14" stroke="#3a2c4d" stroke-dasharray="4,3"/>
+          <text x="34" y="170" font-family="JetBrains Mono, monospace" font-size="11" fill="#a855f7">refs (live values for setInterval closures)</text>
+          <text x="34" y="186" font-family="JetBrains Mono, monospace" font-size="10" fill="#f5efe6">eveSpeakingRef · voiceListeningRef · voiceTranscriptRef · conversationActiveRef · phaseRef · userMutedRef · walkingCancelRef · autoWalkedRef</text>
+
+          <!-- Loop-back arrow listening → idle on user mute -->
+          <path d="M 305 128 L 305 170 L 105 170 L 105 128" stroke="#8c8696" stroke-width="1" stroke-dasharray="3,3" fill="none" marker-end="url(#arr)"/>
+          <text x="115" y="167" font-family="JetBrains Mono, monospace" font-size="9" fill="#8c8696">user mute</text>
+
+          <!-- Barge-in self-loop walkthrough → parsing -->
+          <path d="M 910 128 Q 910 220 505 220 L 505 128" stroke="#a855f7" stroke-width="1.5" stroke-dasharray="4,3" fill="none" marker-end="url(#arr-em)"/>
+          <text x="700" y="218" font-family="JetBrains Mono, monospace" font-size="10" fill="#a855f7">barge-in (rec.onresult sets walkingCancelRef=true, audio.pause)</text>
+
+          <!-- ====== PANEL 2: PLAN GENERATION FAN-OUT ====== -->
+          <text x="20" y="280" font-family="JetBrains Mono, monospace" font-size="12" fill="#f5d896" letter-spacing="2">PIPELINE 2 · PLAN GENERATION (PARALLEL FAN-OUT)</text>
+          <text x="20" y="300" font-family="Inter" font-size="12" fill="#8c8696">After eve-parse-intent yields isComplete=true, /api/plan-experience/skeleton fires once, then five concurrent calls fan out</text>
+
+          <rect x="20" y="320" width="220" height="60" rx="8" fill="#161122" stroke="#3a2c4d"/>
+          <text x="34" y="342" font-family="JetBrains Mono, monospace" font-size="11" fill="#f5d896">POST /skeleton</text>
+          <text x="34" y="360" font-family="Inter" font-size="11" fill="#f5efe6">Gemini Flash + googleSearch</text>
+          <text x="34" y="375" font-family="JetBrains Mono, monospace" font-size="10" fill="#8c8696">→ {title, stops[3], grounded}</text>
+
+          <path d="M 240 350 L 280 350" stroke="#f5d896" stroke-width="1.5" fill="none" marker-end="url(#arr-gold)"/>
+
+          <!-- Five parallel branches -->
+          <g>
+            <rect x="280" y="320" width="240" height="44" rx="6" fill="#0d0a14" stroke="#3a2c4d"/>
+            <text x="294" y="338" font-family="JetBrains Mono, monospace" font-size="10" fill="#e8a39e">eveStory()</text>
+            <text x="294" y="354" font-family="Inter" font-size="10" fill="#8c8696">7-beat narrative arc · Gemini Flash</text>
+
+            <rect x="280" y="372" width="240" height="44" rx="6" fill="#0d0a14" stroke="#3a2c4d"/>
+            <text x="294" y="390" font-family="JetBrains Mono, monospace" font-size="10" fill="#e8a39e">stopImage(stop[0])</text>
+            <text x="294" y="406" font-family="Inter" font-size="10" fill="#8c8696">Gemini Flash Image · interleaved</text>
+
+            <rect x="540" y="320" width="240" height="44" rx="6" fill="#0d0a14" stroke="#3a2c4d"/>
+            <text x="554" y="338" font-family="JetBrains Mono, monospace" font-size="10" fill="#e8a39e">stopImage(stop[1])</text>
+            <text x="554" y="354" font-family="Inter" font-size="10" fill="#8c8696">researchVenueDetails → image</text>
+
+            <rect x="540" y="372" width="240" height="44" rx="6" fill="#0d0a14" stroke="#3a2c4d"/>
+            <text x="554" y="390" font-family="JetBrains Mono, monospace" font-size="10" fill="#e8a39e">stopImage(stop[2])</text>
+            <text x="554" y="406" font-family="Inter" font-size="10" fill="#8c8696">researchVenueDetails → image</text>
+
+            <rect x="800" y="320" width="220" height="44" rx="6" fill="#0d0a14" stroke="#3a2c4d"/>
+            <text x="814" y="338" font-family="JetBrains Mono, monospace" font-size="10" fill="#e8a39e">eveAvatar()</text>
+            <text x="814" y="354" font-family="Inter" font-size="10" fill="#8c8696">cached per session</text>
+
+            <rect x="800" y="372" width="220" height="44" rx="6" fill="#0d0a14" stroke="#3a2c4d"/>
+            <text x="814" y="390" font-family="JetBrains Mono, monospace" font-size="10" fill="#e8a39e">eveOutro()</text>
+            <text x="814" y="406" font-family="Inter" font-size="10" fill="#8c8696">vibe-modulated send-off</text>
+          </g>
+
+          <!-- Filler talk loop — runs concurrently with the fan-out -->
+          <rect x="20" y="430" width="500" height="58" rx="6" fill="#0d0a14" stroke="#a855f7" stroke-dasharray="4,3"/>
+          <text x="34" y="450" font-family="JetBrains Mono, monospace" font-size="11" fill="#a855f7">while (phaseRef==='forging' &amp;&amp; !cancelRef)</text>
+          <text x="34" y="466" font-family="Inter" font-size="11" fill="#f5efe6">eveIntro lines + vibe-tinted filler talk via TTS so Eve never goes silent during the 8–12s wait</text>
+          <text x="34" y="482" font-family="JetBrains Mono, monospace" font-size="10" fill="#8c8696">FILLERS_BY_VIBE[useVibe] · speakAsEveAndWait · 220ms breath between lines</text>
+
+          <!-- Promise.all gathers, phase → ready -->
+          <rect x="540" y="430" width="480" height="58" rx="6" fill="#161122" stroke="#3a2c4d"/>
+          <text x="554" y="450" font-family="JetBrains Mono, monospace" font-size="11" fill="#f5d896">await Promise.all(stopImage × 3)</text>
+          <text x="554" y="466" font-family="Inter" font-size="11" fill="#f5efe6">stops every status === 'ready' → autoWalkedRef.current = false trigger</text>
+          <text x="554" y="482" font-family="JetBrains Mono, monospace" font-size="10" fill="#8c8696">setTimeout 900ms → walkingCancelRef = false → startWalkthrough()</text>
+
+          <!-- ====== PANEL 3: WALKTHROUGH + REFINE LOOP ====== -->
+          <text x="20" y="540" font-family="JetBrains Mono, monospace" font-size="12" fill="#f5d896" letter-spacing="2">PIPELINE 3 · WALKTHROUGH + BARGE-IN REFINE LOOP</text>
+          <text x="20" y="560" font-family="Inter" font-size="12" fill="#8c8696">7-beat for-loop with cancel guard. User barge-in pauses audio, breaks loop, routes transcript to eve-refine</text>
+
+          <!-- The loop -->
+          <rect x="20" y="580" width="600" height="200" rx="8" fill="#0d0a14" stroke="#3a2c4d"/>
+          <text x="34" y="600" font-family="JetBrains Mono, monospace" font-size="11" fill="#f5d896">for (const beat of beats) {</text>
+          <text x="50" y="620" font-family="JetBrains Mono, monospace" font-size="11" fill="#f5efe6">if (walkingCancelRef.current) break;</text>
+          <text x="50" y="638" font-family="JetBrains Mono, monospace" font-size="11" fill="#f5efe6">setWalkingIdx(beat.idx);</text>
+          <text x="50" y="656" font-family="JetBrains Mono, monospace" font-size="11" fill="#f5efe6">await speakAsEveAndWait(beat.text);</text>
+          <text x="68" y="676" font-family="JetBrains Mono, monospace" font-size="10" fill="#8c8696">// resolves on 'ended' OR 'pause' (barge-in)</text>
+          <text x="50" y="694" font-family="JetBrains Mono, monospace" font-size="11" fill="#f5efe6">await sleep(250);</text>
+          <text x="34" y="712" font-family="JetBrains Mono, monospace" font-size="11" fill="#f5d896">}</text>
+          <text x="34" y="746" font-family="Inter" font-size="11" fill="#8c8696">Mic stays open through entire loop — recognitionRef.current.start() is called once at walkthrough begin and never closed</text>
+          <text x="34" y="762" font-family="Inter" font-size="11" fill="#8c8696">until silence-detect triggers processTranscript</text>
+
+          <!-- The refine path -->
+          <rect x="640" y="580" width="380" height="200" rx="8" fill="#161122" stroke="#e8a39e" stroke-width="2"/>
+          <text x="654" y="600" font-family="JetBrains Mono, monospace" font-size="11" fill="#e8a39e">processTranscript(t):</text>
+          <text x="668" y="620" font-family="JetBrains Mono, monospace" font-size="11" fill="#f5efe6">if (stops.length &amp;&amp; phaseRef==='ready')</text>
+          <text x="688" y="638" font-family="JetBrains Mono, monospace" font-size="11" fill="#f5efe6">walkingCancelRef = true</text>
+          <text x="688" y="656" font-family="JetBrains Mono, monospace" font-size="11" fill="#f5efe6">stopAllAudio()</text>
+          <text x="688" y="674" font-family="JetBrains Mono, monospace" font-size="11" fill="#f5efe6">await eveRefine({ message: t, ... })</text>
+          <text x="688" y="692" font-family="JetBrains Mono, monospace" font-size="11" fill="#f5efe6">setStops(newStops)</text>
+          <text x="688" y="710" font-family="JetBrains Mono, monospace" font-size="11" fill="#f5efe6">autoWalkedRef = false</text>
+          <text x="688" y="728" font-family="JetBrains Mono, monospace" font-size="11" fill="#f5efe6">eveStory(...) + Promise.all(stopImage)</text>
+          <text x="668" y="748" font-family="JetBrains Mono, monospace" font-size="10" fill="#8c8696">// auto-walkthrough effect re-fires on the new plan</text>
+          <text x="668" y="766" font-family="JetBrains Mono, monospace" font-size="10" fill="#8c8696">// rec.start() to keep mic open for next ask</text>
+
+          <!-- ====== PANEL 4: TTS PIPELINE ====== -->
+          <text x="20" y="820" font-family="JetBrains Mono, monospace" font-size="12" fill="#f5d896" letter-spacing="2">PIPELINE 4 · TTS WITH SSML PROSODY (PERSONA SHAPING)</text>
+          <text x="20" y="840" font-family="Inter" font-size="12" fill="#8c8696">Eve mode rewraps every line in SSML — pitch, volume, breath pauses are baked in before the line hits Cloud TTS</text>
+
+          <rect x="20" y="860" width="200" height="80" rx="8" fill="#161122" stroke="#3a2c4d"/>
+          <text x="120" y="884" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#e8a39e">raw line</text>
+          <text x="120" y="903" text-anchor="middle" font-family="Inter" font-size="11" fill="#f5efe6">"I keep thinking…"</text>
+          <text x="120" y="922" text-anchor="middle" font-family="Inter" font-size="10" fill="#8c8696">from prompt-generated</text>
+
+          <path d="M 220 900 L 260 900" stroke="#8c8696" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+
+          <rect x="260" y="860" width="280" height="80" rx="8" fill="#0d0a14" stroke="#a855f7"/>
+          <text x="276" y="882" font-family="JetBrains Mono, monospace" font-size="11" fill="#a855f7">buildSSML(text)</text>
+          <text x="276" y="900" font-family="JetBrains Mono, monospace" font-size="10" fill="#f5efe6">replace ',' → break 200ms</text>
+          <text x="276" y="916" font-family="JetBrains Mono, monospace" font-size="10" fill="#f5efe6">replace '.' → break 180ms</text>
+          <text x="276" y="932" font-family="JetBrains Mono, monospace" font-size="10" fill="#f5efe6">wrap &lt;prosody pitch="-2st" volume="soft"&gt;</text>
+
+          <path d="M 540 900 L 580 900" stroke="#8c8696" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+
+          <rect x="580" y="860" width="240" height="80" rx="8" fill="#161122" stroke="#3a2c4d"/>
+          <text x="596" y="882" font-family="JetBrains Mono, monospace" font-size="11" fill="#e8a39e">Cloud TTS REST</text>
+          <text x="596" y="900" font-family="JetBrains Mono, monospace" font-size="10" fill="#f5efe6">en-US-Neural2-F</text>
+          <text x="596" y="918" font-family="JetBrains Mono, monospace" font-size="10" fill="#f5efe6">speakingRate 0.98 · MP3</text>
+          <text x="596" y="934" font-family="Inter" font-size="10" fill="#8c8696">fallback: en-US-Standard-C</text>
+
+          <path d="M 820 900 L 860 900" stroke="#8c8696" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+
+          <rect x="860" y="860" width="160" height="80" rx="8" fill="#0d0a14" stroke="#3a2c4d"/>
+          <text x="940" y="884" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#e8a39e">&lt;audio&gt;</text>
+          <text x="940" y="903" text-anchor="middle" font-family="Inter" font-size="11" fill="#f5efe6">data: base64 MP3</text>
+          <text x="940" y="922" text-anchor="middle" font-family="Inter" font-size="10" fill="#8c8696">unlocked on first tap</text>
+
+          <!-- ====== PANEL 5: GROUNDING + JSON EXTRACT ====== -->
+          <text x="20" y="990" font-family="JetBrains Mono, monospace" font-size="12" fill="#f5d896" letter-spacing="2">PIPELINE 5 · GOOGLE SEARCH GROUNDING &amp; JSON EXTRACTION</text>
+          <text x="20" y="1010" font-family="Inter" font-size="12" fill="#8c8696">Search-grounded responses sometimes ship with prose preamble — multi-strategy extractor recovers the JSON</text>
+
+          <rect x="20" y="1030" width="220" height="80" rx="8" fill="#161122" stroke="#3a2c4d"/>
+          <text x="34" y="1052" font-family="JetBrains Mono, monospace" font-size="11" fill="#e8a39e">tools: [{ googleSearch: {} }]</text>
+          <text x="34" y="1070" font-family="Inter" font-size="11" fill="#f5efe6">verify venues, mine reviews,</text>
+          <text x="34" y="1086" font-family="Inter" font-size="11" fill="#f5efe6">infer cuisine, fact-check city</text>
+          <text x="34" y="1102" font-family="JetBrains Mono, monospace" font-size="10" fill="#8c8696">groundingMetadata returned</text>
+
+          <path d="M 240 1070 L 280 1070" stroke="#f5d896" stroke-width="1.5" fill="none" marker-end="url(#arr-gold)"/>
+
+          <rect x="280" y="1030" width="240" height="80" rx="8" fill="#0d0a14" stroke="#a855f7"/>
+          <text x="294" y="1052" font-family="JetBrains Mono, monospace" font-size="11" fill="#a855f7">extractJson(text)</text>
+          <text x="294" y="1070" font-family="Inter" font-size="11" fill="#f5efe6">strategy 1: direct parse</text>
+          <text x="294" y="1086" font-family="Inter" font-size="11" fill="#f5efe6">strategy 2: strip ```json fences</text>
+          <text x="294" y="1102" font-family="Inter" font-size="11" fill="#f5efe6">strategy 3: balance-brace scan</text>
+
+          <path d="M 520 1070 L 560 1070" stroke="#a855f7" stroke-width="1.5" fill="none" marker-end="url(#arr-em)"/>
+
+          <rect x="560" y="1030" width="220" height="80" rx="8" fill="#161122" stroke="#3a2c4d"/>
+          <text x="574" y="1052" font-family="JetBrains Mono, monospace" font-size="11" fill="#e8a39e">structured output</text>
+          <text x="574" y="1070" font-family="Inter" font-size="11" fill="#f5efe6">{ stops, story, copy, ... }</text>
+          <text x="574" y="1086" font-family="JetBrains Mono, monospace" font-size="10" fill="#8c8696">typed via shared service layer</text>
+
+          <path d="M 780 1070 L 820 1070" stroke="#8c8696" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+
+          <rect x="820" y="1030" width="200" height="80" rx="8" fill="#0d0a14" stroke="#3a2c4d"/>
+          <text x="834" y="1052" font-family="JetBrains Mono, monospace" font-size="11" fill="#e8a39e">on parse fail</text>
+          <text x="834" y="1070" font-family="Inter" font-size="11" fill="#f5efe6">graceful 502 to client</text>
+          <text x="834" y="1086" font-family="Inter" font-size="11" fill="#f5efe6">Eve says "lost my train"</text>
+          <text x="834" y="1102" font-family="JetBrains Mono, monospace" font-size="10" fill="#8c8696">reopen mic, re-prompt</text>
+
+          <!-- ====== PANEL 6: MARKETPLACE FLYWHEEL ====== -->
+          <text x="20" y="1170" font-family="JetBrains Mono, monospace" font-size="12" fill="#f5d896" letter-spacing="2">PIPELINE 6 · TWO-SIDED MARKETPLACE FLYWHEEL</text>
+          <text x="20" y="1190" font-family="Inter" font-size="12" fill="#8c8696">Restaurant publishes → POSTED_SPECIALS in-memory index → diner-side skeleton consults → Eve Original badge</text>
+
+          <rect x="20" y="1210" width="220" height="80" rx="8" fill="#161122" stroke="#e8a39e" stroke-width="2"/>
+          <text x="34" y="1232" font-family="JetBrains Mono, monospace" font-size="11" fill="#e8a39e">restaurant POST</text>
+          <text x="34" y="1250" font-family="JetBrains Mono, monospace" font-size="11" fill="#f5efe6">/api/post-special</text>
+          <text x="34" y="1268" font-family="Inter" font-size="11" fill="#8c8696">{ name, city, cuisine, dish,</text>
+          <text x="34" y="1284" font-family="Inter" font-size="11" fill="#8c8696">caption, image }</text>
+
+          <path d="M 240 1250 L 280 1250" stroke="#e8a39e" stroke-width="1.5" fill="none" marker-end="url(#arr-rose)"/>
+
+          <rect x="280" y="1210" width="220" height="80" rx="8" fill="#0d0a14" stroke="#a855f7"/>
+          <text x="294" y="1232" font-family="JetBrains Mono, monospace" font-size="11" fill="#a855f7">POSTED_SPECIALS</text>
+          <text x="294" y="1250" font-family="Inter" font-size="11" fill="#f5efe6">in-memory Map keyed by city</text>
+          <text x="294" y="1268" font-family="Inter" font-size="11" fill="#8c8696">demo seed: 5 Bay Area entries</text>
+          <text x="294" y="1284" font-family="JetBrains Mono, monospace" font-size="10" fill="#8c8696">v1.1 → Firestore</text>
+
+          <path d="M 500 1250 L 540 1250" stroke="#a855f7" stroke-width="1.5" fill="none" marker-end="url(#arr-em)"/>
+
+          <rect x="540" y="1210" width="220" height="80" rx="8" fill="#161122" stroke="#3a2c4d"/>
+          <text x="554" y="1232" font-family="JetBrains Mono, monospace" font-size="11" fill="#e8a39e">listSpecials(city)</text>
+          <text x="554" y="1250" font-family="Inter" font-size="11" fill="#f5efe6">consulted before skeleton</text>
+          <text x="554" y="1268" font-family="Inter" font-size="11" fill="#8c8696">name fuzzy-match against</text>
+          <text x="554" y="1284" font-family="Inter" font-size="11" fill="#8c8696">Gemini-suggested venues</text>
+
+          <path d="M 760 1250 L 800 1250" stroke="#8c8696" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+
+          <rect x="800" y="1210" width="220" height="80" rx="8" fill="#0d0a14" stroke="#f5d896"/>
+          <text x="814" y="1232" font-family="JetBrains Mono, monospace" font-size="11" fill="#f5d896">isEveOriginal=true</text>
+          <text x="814" y="1250" font-family="Inter" font-size="11" fill="#f5efe6">badge surfaces on diner card</text>
+          <text x="814" y="1268" font-family="Inter" font-size="11" fill="#8c8696">restaurant gets discovery</text>
+          <text x="814" y="1284" font-family="JetBrains Mono, monospace" font-size="10" fill="#8c8696">→ user plans evening</text>
+
+          <!-- ====== PANEL 7: DEPLOY ====== -->
+          <text x="20" y="1350" font-family="JetBrains Mono, monospace" font-size="12" fill="#f5d896" letter-spacing="2">PIPELINE 7 · CI / CD &amp; INFRA</text>
+
+          <rect x="20" y="1370" width="180" height="60" rx="6" fill="#161122" stroke="#3a2c4d"/>
+          <text x="34" y="1390" font-family="JetBrains Mono, monospace" font-size="11" fill="#e8a39e">git push origin main</text>
+          <text x="34" y="1408" font-family="Inter" font-size="11" fill="#8c8696">eve repo on GitHub</text>
+
+          <path d="M 200 1400 L 230 1400" stroke="#8c8696" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+
+          <rect x="230" y="1370" width="180" height="60" rx="6" fill="#161122" stroke="#3a2c4d"/>
+          <text x="244" y="1390" font-family="JetBrains Mono, monospace" font-size="11" fill="#e8a39e">Cloud Build</text>
+          <text x="244" y="1408" font-family="Inter" font-size="11" fill="#8c8696">cloudbuild.yaml · us-west1</text>
+
+          <path d="M 410 1400 L 440 1400" stroke="#8c8696" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+
+          <rect x="440" y="1370" width="180" height="60" rx="6" fill="#161122" stroke="#3a2c4d"/>
+          <text x="454" y="1390" font-family="JetBrains Mono, monospace" font-size="11" fill="#e8a39e">Artifact Registry</text>
+          <text x="454" y="1408" font-family="Inter" font-size="11" fill="#8c8696">container per build</text>
+
+          <path d="M 620 1400 L 650 1400" stroke="#8c8696" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+
+          <rect x="650" y="1370" width="180" height="60" rx="6" fill="#161122" stroke="#3a2c4d"/>
+          <text x="664" y="1390" font-family="JetBrains Mono, monospace" font-size="11" fill="#e8a39e">Cloud Run gen2</text>
+          <text x="664" y="1408" font-family="Inter" font-size="11" fill="#8c8696">2 CPU · 1 GiB · autoscale</text>
+
+          <path d="M 830 1400 L 860 1400" stroke="#8c8696" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+
+          <rect x="860" y="1370" width="180" height="60" rx="6" fill="#161122" stroke="#f5d896"/>
+          <text x="874" y="1390" font-family="JetBrains Mono, monospace" font-size="11" fill="#f5d896">Cloud DNS + mapping</text>
+          <text x="874" y="1408" font-family="Inter" font-size="11" fill="#8c8696">eve.mohitgoenka.com</text>
+
+          <!-- Secret Manager dashed connector to Cloud Run -->
+          <rect x="650" y="1440" width="180" height="32" rx="4" fill="#0d0a14" stroke="#a855f7" stroke-dasharray="4,3"/>
+          <text x="664" y="1461" font-family="JetBrains Mono, monospace" font-size="10" fill="#a855f7">Secret Manager · GEMINI_API_KEY</text>
+          <path d="M 740 1440 L 740 1430" stroke="#a855f7" stroke-width="1" stroke-dasharray="3,3" fill="none"/>
+        </svg>
+      </div>
+
+      <p style="margin-top: 12px; font-style: italic; opacity: 0.7;">
+        Implementation notes: refs (<code>useRef</code>) mirror state where any <code>setInterval</code> or async loop reads the value, since closures over React state are stale. The walkthrough loop checks <code>walkingCancelRef.current</code> at every iteration; barge-in mutates the ref synchronously inside <code>rec.onresult</code>. <code>speakAsEveAndWait</code> resolves on either the <code>ended</code> event or the <code>pause</code> event so a paused (interrupted) line doesn't hang the for-loop.
+      </p>
     </section>
 
     <!-- Stack table -->
