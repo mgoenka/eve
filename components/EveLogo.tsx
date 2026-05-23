@@ -4,17 +4,22 @@ interface Props {
   withWordmark?: boolean;
 }
 
-// Side profile of a woman with long flowing hair, drawn in outline only.
-// Path traces forehead → nose → lips → chin → neck → shoulder, then sweeps
-// up the back of the head with hair extending to the bottom of the frame.
-// All in the warm gold-rose-plum gradient stroke.
-const SILHOUETTE_PATH =
-  // Top of head, forehead, nose, lips, chin, jaw, neck, shoulder, hair, back of head
-  'M 32 8 C 38 8 44 12 45 19 L 45 21 L 51 25 L 45 27 L 46 29 L 48 30 L 45 32 L 44 34 C 43 37 41 39 38 41 L 37 45 L 37 50 L 32 56 L 10 56 L 8 48 C 6 38 8 26 12 18 C 14 12 22 8 32 8 Z';
+// Side profile of a woman, facing right, with long flowing hair.
+// The face silhouette is a clean outline. The hair lives OUTSIDE the head —
+// multiple long S-curves, varying thickness and opacity, sweeping past the
+// frame edges. Reads as windblown, not pinned-down.
 
-const HAIR_WAVE_1 = 'M 10 22 Q 4 36 9 56';
-const HAIR_WAVE_2 = 'M 14 18 Q 12 36 16 56';
-const HAIR_WAVE_3 = 'M 20 14 Q 22 36 26 56';
+// Face only (forehead → nose → lips → chin → throat → shoulder → up the back of head)
+const SILHOUETTE_PATH =
+  'M 32 8 C 38 8 44 12 45 19 L 45 21 L 51 25 L 45 27 L 46 29 L 48 30 L 45 32 L 44 34 C 43 37 41 39 38 41 L 37 45 L 37 50 L 32 56 L 22 56 C 18 50 16 38 18 28 C 19 22 22 14 28 10 C 29 9 30 8 32 8 Z';
+
+// Flowing hair strands — each one a long curve, not pinned to the silhouette.
+const HAIR_FLOW_MAIN = 'M 26 10 C 8 18 0 38 6 60';            // big sweep from crown out and down
+const HAIR_FLOW_2 = 'M 22 14 C 4 26 -2 46 8 60';               // outer flow
+const HAIR_FLOW_3 = 'M 28 12 C 14 22 10 40 18 60';             // inner flow
+const HAIR_FLOW_4 = 'M 30 14 C 22 26 22 44 28 60';             // close flow
+const HAIR_TENDRIL_1 = 'M 12 22 Q 4 32 8 44';                   // loose tendril mid
+const HAIR_TENDRIL_2 = 'M 16 30 Q 6 42 14 56';                  // loose tendril lower
 
 export function EveLogo({ size = 36, className = '', withWordmark = false }: Props) {
   if (!withWordmark) {
@@ -52,10 +57,14 @@ export function EveLogo({ size = 36, className = '', withWordmark = false }: Pro
           fill="none"
         />
 
-        {/* Hair waves down the back */}
-        <path d={HAIR_WAVE_1} stroke="url(#eve-grad-icon)" strokeWidth="1.4" strokeLinecap="round" fill="none" opacity="0.85" />
-        <path d={HAIR_WAVE_2} stroke="url(#eve-grad-icon)" strokeWidth="1.3" strokeLinecap="round" fill="none" opacity="0.65" />
-        <path d={HAIR_WAVE_3} stroke="url(#eve-grad-icon)" strokeWidth="1.2" strokeLinecap="round" fill="none" opacity="0.45" />
+        {/* Long flowing hair — strands extend outside the silhouette and
+            past the frame edges. Varying weight + opacity for depth. */}
+        <path d={HAIR_FLOW_MAIN} stroke="url(#eve-grad-icon)" strokeWidth="2" strokeLinecap="round" fill="none" opacity="0.9" />
+        <path d={HAIR_FLOW_2} stroke="url(#eve-grad-icon)" strokeWidth="1.5" strokeLinecap="round" fill="none" opacity="0.7" />
+        <path d={HAIR_FLOW_3} stroke="url(#eve-grad-icon)" strokeWidth="1.4" strokeLinecap="round" fill="none" opacity="0.6" />
+        <path d={HAIR_FLOW_4} stroke="url(#eve-grad-icon)" strokeWidth="1.2" strokeLinecap="round" fill="none" opacity="0.45" />
+        <path d={HAIR_TENDRIL_1} stroke="url(#eve-grad-icon)" strokeWidth="1" strokeLinecap="round" fill="none" opacity="0.5" />
+        <path d={HAIR_TENDRIL_2} stroke="url(#eve-grad-icon)" strokeWidth="1" strokeLinecap="round" fill="none" opacity="0.4" />
 
         {/* Eyelash hint where her eye would be */}
         <path d="M 33 22 Q 36 21 39 22" stroke="url(#eve-grad-icon)" strokeWidth="1.2" strokeLinecap="round" fill="none" opacity="0.75" />
@@ -100,8 +109,9 @@ export function EveLogo({ size = 36, className = '', withWordmark = false }: Pro
           strokeLinejoin="round"
           fill="none"
         />
-        <path d={HAIR_WAVE_1} stroke="url(#eve-grad-word)" strokeWidth="1.3" strokeLinecap="round" fill="none" opacity="0.8" />
-        <path d={HAIR_WAVE_2} stroke="url(#eve-grad-word)" strokeWidth="1.2" strokeLinecap="round" fill="none" opacity="0.6" />
+        <path d={HAIR_FLOW_MAIN} stroke="url(#eve-grad-word)" strokeWidth="1.8" strokeLinecap="round" fill="none" opacity="0.85" />
+        <path d={HAIR_FLOW_2} stroke="url(#eve-grad-word)" strokeWidth="1.4" strokeLinecap="round" fill="none" opacity="0.65" />
+        <path d={HAIR_FLOW_3} stroke="url(#eve-grad-word)" strokeWidth="1.2" strokeLinecap="round" fill="none" opacity="0.5" />
         <path d="M 33 22 Q 36 21 39 22" stroke="url(#eve-grad-word)" strokeWidth="1.1" strokeLinecap="round" fill="none" opacity="0.7" />
         <circle cx="33" cy="32" r="1.1" fill="#fef3c7" opacity="0.9" />
       </g>
