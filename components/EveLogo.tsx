@@ -71,16 +71,41 @@ export function EveLogo({ size = 36, className = '', withWordmark = false }: Pro
         <rect width="64" height="64" rx="14" fill="#1a0d2e" />
         <circle cx="32" cy="28" r="22" fill="url(#eve-glow-icon)" />
 
-        {/* Filled silhouette */}
-        <path d={SILHOUETTE_PATH} fill="url(#eve-grad-icon)" />
+        {/* Outlined silhouette — same shape, drawn as stroke not fill */}
+        <path
+          d={SILHOUETTE_PATH}
+          stroke="url(#eve-grad-icon)"
+          strokeWidth="2"
+          strokeLinejoin="round"
+          fill="none"
+        />
 
-        {/* Ponytail tie — a small darker pinch where the hair gathers */}
-        <ellipse cx="22" cy="14" rx="2" ry="1.1" fill="#1a0d2e" opacity="0.85" />
+        {/* Ponytail tie — a small accent line at the gather */}
+        <ellipse
+          cx="22"
+          cy="14"
+          rx="2"
+          ry="1.1"
+          stroke="url(#eve-grad-icon)"
+          strokeWidth="1.2"
+          fill="none"
+          opacity="0.9"
+        />
 
         {/* Whisp strands trailing past the ponytail bottom */}
-        <path d={HAIR_WHISP_1} stroke="url(#eve-grad-icon)" strokeWidth="1.2" strokeLinecap="round" fill="none" opacity="0.65" />
-        <path d={HAIR_WHISP_2} stroke="url(#eve-grad-icon)" strokeWidth="1" strokeLinecap="round" fill="none" opacity="0.5" />
+        <path d={HAIR_WHISP_1} stroke="url(#eve-grad-icon)" strokeWidth="1.2" strokeLinecap="round" fill="none" opacity="0.7" />
+        <path d={HAIR_WHISP_2} stroke="url(#eve-grad-icon)" strokeWidth="1" strokeLinecap="round" fill="none" opacity="0.55" />
         <path d={HAIR_WHISP_3} stroke="url(#eve-grad-icon)" strokeWidth="0.9" strokeLinecap="round" fill="none" opacity="0.4" />
+
+        {/* Eyelash hint where the eye would be */}
+        <path
+          d="M 41 22 Q 44 21 47 22"
+          stroke="url(#eve-grad-icon)"
+          strokeWidth="1.2"
+          strokeLinecap="round"
+          fill="none"
+          opacity="0.7"
+        />
 
         {/* Quiet wink star */}
         <g transform="translate(54 12)">
@@ -116,8 +141,24 @@ export function EveLogo({ size = 36, className = '', withWordmark = false }: Pro
       </defs>
 
       <g transform="translate(0 -2) scale(0.85)">
-        <path d={SILHOUETTE_PATH} fill="url(#eve-grad-word)" />
-        <ellipse cx="22" cy="14" rx="2" ry="1.1" fill="#1a0d2e" opacity="0.6" />
+        <path
+          d={SILHOUETTE_PATH}
+          stroke="url(#eve-grad-word)"
+          strokeWidth="2"
+          strokeLinejoin="round"
+          fill="none"
+        />
+        <ellipse
+          cx="22"
+          cy="14"
+          rx="2"
+          ry="1.1"
+          stroke="url(#eve-grad-word)"
+          strokeWidth="1.1"
+          fill="none"
+          opacity="0.85"
+        />
+        <path d={HAIR_WHISP_1} stroke="url(#eve-grad-word)" strokeWidth="1.1" strokeLinecap="round" fill="none" opacity="0.65" />
       </g>
 
       <text
