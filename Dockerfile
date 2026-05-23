@@ -22,6 +22,8 @@ COPY agent.ts ./
 COPY constants.ts ./
 COPY types.ts ./
 COPY tsconfig.json ./
+COPY lib ./lib
+COPY data ./data
 
 EXPOSE 8080
 ENV PORT=8080
