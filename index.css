@@ -1,13 +1,19 @@
 @import "tailwindcss";
 
+/*
+ * Eve uses the unified Mohit-app palette: dark near-black canvas, warm
+ * gold primary, off-white text, with subtle plum + rose accents kept as
+ * tertiary brand color. Existing components reference eve-* tokens — they
+ * pick up the new palette without per-component edits.
+ */
 @theme {
-  --color-eve-ink: #1a0d2e;
-  --color-eve-ink-soft: #2d1b3e;
-  --color-eve-plum: #4a2d5e;
+  --color-eve-ink: #0a0a0b;
+  --color-eve-ink-soft: #15151a;
+  --color-eve-plum: #1f1530;
   --color-eve-rose: #e8a39e;
-  --color-eve-gold: #f5d896;
-  --color-eve-cream: #f8f4ee;
-  --color-eve-paper-dim: #d4c8d8;
+  --color-eve-gold: #f5c542;
+  --color-eve-cream: #fafaf9;
+  --color-eve-paper-dim: #d4d4d8;
 }
 
 * {

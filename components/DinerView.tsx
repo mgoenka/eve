@@ -180,7 +180,9 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   // each reply, so it feels like a continuous conversation, not a series
   // of single-shot voice commands.
   const [conversationActive, setConversationActive] = useState(false);
-  const [userMuted, setUserMuted] = useState(false);
+  // Eve starts muted by default. Conversation only begins after the user
+  // taps the Activate-Eve toggle in the top-right of the header.
+  const [userMuted, setUserMuted] = useState(true);
 
   const recognitionRef = useRef<any>(null);
   const baseTextRef = useRef('');
@@ -189,7 +191,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   const voiceListeningRef = useRef(false);
   const voiceTranscriptRef = useRef('');
   const conversationActiveRef = useRef(false);
-  const userMutedRef = useRef(false);
+  const userMutedRef = useRef(true);
   const eveSpeakingRef = useRef(false);
 
   const [formExpanded, setFormExpanded] = useState(false);
@@ -197,7 +199,8 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   const [parsing, setParsing] = useState(false);
 
   const [playing, setPlaying] = useState(false);
-  const [muted, setMuted] = useState(false);
+  // Eve's voice is muted by default — the Activate-Eve toggle flips this on.
+  const [muted, setMuted] = useState(true);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const eveAudioRef = useRef<HTMLAudioElement | null>(null);
   const cancelRef = useRef(false);
@@ -1147,8 +1150,12 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   ];
 
   const greetingPlayedRef = useRef(false);
-  const playGreetingOnce = useCallback(() => {
-    if (greetingPlayedRef.current || muted) return;
+  // forceUnmuted=true bypasses the muted check — we use this when the user
+  // taps "Activate Eve" so the greeting plays immediately without waiting
+  // for the muted state closure to flush.
+  const playGreetingOnce = useCallback((forceUnmuted = false) => {
+    if (greetingPlayedRef.current) return;
+    if (muted && !forceUnmuted) return;
     greetingPlayedRef.current = true;
     setEveGreeted(true);
     const greeting = GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
@@ -1162,7 +1169,6 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
       if (
         !conversationActiveRef.current &&
         !voiceListeningRef.current &&
-        !muted &&
         recognitionRef.current
       ) {
         setConversationActive(true);
@@ -1467,14 +1473,38 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
             <EveLogo size={42} withWordmark />
           </a>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setMuted((m) => !m)}
-              className="p-2 rounded-full bg-white/5 hover:bg-white/10 transition-colors text-eve-cream/80"
-              title={muted ? "Unmute Eve's voice" : "Mute Eve's voice"}
-              aria-label={muted ? 'Unmute' : 'Mute'}
-            >
-              {muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
-            </button>
+            {muted ? (
+              <button
+                onClick={() => {
+                  setMuted(false);
+                  setUserMuted(false);
+                  userMutedRef.current = false;
+                  // Bypass the muted closure — fire greeting immediately.
+                  setTimeout(() => playGreetingOnce(true), 50);
+                }}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold uppercase tracking-wider text-eve-ink bg-eve-gold hover:bg-yellow-300 transition-colors shadow-[0_0_20px_rgba(245,197,66,0.35)]"
+                title="Turn on mic + sound and start talking with Eve"
+                aria-label="Activate Eve"
+              >
+                <Mic size={14} />
+                <Volume2 size={14} />
+                <span>Activate Eve</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  setMuted(true);
+                  setUserMuted(true);
+                  userMutedRef.current = true;
+                }}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-full text-xs font-medium bg-white/5 hover:bg-white/10 text-eve-cream/80 hover:text-eve-cream border border-white/10 transition-colors"
+                title="Mute Eve and turn off mic"
+                aria-label="Deactivate Eve"
+              >
+                <MicOff size={14} />
+                <VolumeX size={14} />
+              </button>
+            )}
             <button
               onClick={onSwitchToRestaurant}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-medium bg-white/5 hover:bg-white/10 text-eve-cream/80 hover:text-eve-cream border border-white/10 transition-colors"
@@ -1872,11 +1902,22 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
             </button>
           )}
           <button
-            onClick={() => setMuted((m) => !m)}
-            className="p-2 rounded-full bg-white/5 hover:bg-white/10 transition-colors text-eve-cream/80"
-            title={muted ? 'Unmute Eve' : 'Mute Eve'}
+            onClick={() => {
+              const next = !muted;
+              setMuted(next);
+              setUserMuted(next);
+              userMutedRef.current = next;
+            }}
+            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full transition-colors text-xs font-medium ${
+              muted
+                ? 'text-eve-ink bg-eve-gold hover:bg-yellow-300 shadow-[0_0_18px_rgba(245,197,66,0.3)] uppercase tracking-wider font-bold'
+                : 'bg-white/5 hover:bg-white/10 text-eve-cream/80 border border-white/10'
+            }`}
+            title={muted ? 'Activate Eve — turn on mic + sound' : 'Deactivate Eve — turn off mic + sound'}
           >
-            {muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+            {muted ? <Mic size={14} /> : <MicOff size={14} />}
+            {muted ? <Volume2 size={14} /> : <VolumeX size={14} />}
+            {muted ? <span>Activate Eve</span> : null}
           </button>
           <button
             onClick={reset}
