@@ -76,13 +76,13 @@ export function EveLogo({ size = 36, className = '', withWordmark = false }: Pro
     );
   }
 
-  // WORDMARK — "eve" as feminine silhouette
-  // Layout: e (head/curl) — v (V-neckline / shoulders) — e (hip/leg flourish)
+  // WORDMARK — clean "eve" with subtle feminine silhouette accents.
+  // Transparent background; the host page background shows through.
   return (
     <svg
       width={w}
       height={h}
-      viewBox="0 0 200 60"
+      viewBox="0 0 140 60"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={className}
@@ -99,15 +99,8 @@ export function EveLogo({ size = 36, className = '', withWordmark = false }: Pro
           <stop offset="0%" stopColor="#f5d896" stopOpacity="0.85" />
           <stop offset="100%" stopColor="#e8a39e" stopOpacity="0.45" />
         </linearGradient>
-        <radialGradient id="eve-glow-word" cx="0.4" cy="0.5" r="0.55">
-          <stop offset="0%" stopColor="#fef3c7" stopOpacity="0.30" />
-          <stop offset="100%" stopColor="#f5d896" stopOpacity="0" />
-        </radialGradient>
       </defs>
 
-      <ellipse cx="60" cy="30" rx="60" ry="22" fill="url(#eve-glow-word)" />
-
-      {/* The "eve" wordmark itself */}
       <text
         x="6"
         y="46"
@@ -121,47 +114,22 @@ export function EveLogo({ size = 36, className = '', withWordmark = false }: Pro
         eve
       </text>
 
-      {/* Hair curl above the first "e" — small flourish that suggests a face turning */}
+      {/* Subtle hip curve descending from the second 'e' */}
       <path
-        d="M 18 12 Q 26 4 36 8 Q 30 14 28 18"
+        d="M 92 38 Q 105 44 110 50"
         stroke="url(#eve-curve-grad)"
-        strokeWidth="2.2"
+        strokeWidth="2"
         strokeLinecap="round"
         fill="none"
-        opacity="0.85"
+        opacity="0.7"
       />
 
-      {/* V neckline accent — the V in eve becomes a soft décolletage line */}
-      <path
-        d="M 50 8 L 60 22 L 70 8"
-        stroke="url(#eve-curve-grad)"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        fill="none"
-        opacity="0.55"
-      />
-
-      {/* Silhouette curve flowing from the second e — hip into trailing dress hem */}
-      <path
-        d="M 92 36 Q 110 42 116 50 Q 122 56 132 54"
-        stroke="url(#eve-curve-grad)"
-        strokeWidth="2.4"
-        strokeLinecap="round"
-        fill="none"
-        opacity="0.85"
-      />
-
-      {/* Two small stars — her quiet wink */}
+      {/* Tiny star — her quiet wink */}
       <g transform="translate(96 14)">
         <path
-          d="M 0 -4.5 L 1.2 -1.2 L 4.5 0 L 1.2 1.2 L 0 4.5 L -1.2 1.2 L -4.5 0 L -1.2 -1.2 Z"
+          d="M 0 -4 L 1 -1 L 4 0 L 1 1 L 0 4 L -1 1 L -4 0 L -1 -1 Z"
           fill="#fef3c7"
-        />
-      </g>
-      <g transform="translate(108 26)" opacity="0.55">
-        <path
-          d="M 0 -2.4 L 0.6 -0.6 L 2.4 0 L 0.6 0.6 L 0 2.4 L -0.6 0.6 L -2.4 0 L -0.6 -0.6 Z"
-          fill="#e8a39e"
+          opacity="0.85"
         />
       </g>
     </svg>

@@ -348,26 +348,42 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
     }
   }, []);
 
+  // Stop ALL Eve-related audio sources before starting a new one. Prevents
+  // overlapping audio (e.g. walkthrough playing on top of plan narration).
+  const stopAllAudio = useCallback(() => {
+    try {
+      const a = eveAudioRef.current;
+      if (a) {
+        a.pause();
+        a.currentTime = 0;
+      }
+    } catch {}
+    try {
+      const a = audioRef.current;
+      if (a) {
+        a.pause();
+        a.currentTime = 0;
+      }
+    } catch {}
+    setEveSpeaking(false);
+    eveSpeakingRef.current = false;
+    setPlaying(false);
+  }, []);
+
   const speakAsEve = useCallback(
     async (text: string) => {
       console.log('[Eve] speakAsEve:', text.slice(0, 70));
-      if (!text || muted) {
-        console.log('[Eve] skipped (muted=' + muted + ', empty=' + !text + ')');
-        return;
-      }
+      if (!text || muted) return;
+      stopAllAudio();
       setEveSpeaking(true);
       try {
         const audio = await synthesize(text, 'eve');
         const a = eveAudioRef.current;
-        if (!a) {
-          console.error('[Eve] audio element ref is null');
-          return;
-        }
+        if (!a) return;
         a.src = `data:${audio.audioMime || 'audio/mpeg'};base64,${audio.audioData}`;
         a.currentTime = 0;
         try {
           await a.play();
-          console.log('[Eve] play() OK');
         } catch (err) {
           console.error('[Eve] play() rejected:', err);
         }
@@ -375,22 +391,20 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
         console.error('[Eve] synth failed:', err);
       }
     },
-    [muted]
+    [muted, stopAllAudio]
   );
 
-  // Plays a line and resolves only when audio finishes (or 8s timeout).
+  // Plays a line and resolves only when audio finishes (or 12s timeout).
   const speakAsEveAndWait = useCallback(
     async (text: string) => {
       console.log('[Eve] speakAsEveAndWait:', text.slice(0, 70));
       if (!text || muted) return;
+      stopAllAudio();
       setEveSpeaking(true);
       try {
         const audio = await synthesize(text, 'eve');
         const a = eveAudioRef.current;
-        if (!a) {
-          console.error('[Eve] audio element ref is null (wait)');
-          return;
-        }
+        if (!a) return;
         a.src = `data:${audio.audioMime || 'audio/mpeg'};base64,${audio.audioData}`;
         a.currentTime = 0;
         await new Promise<void>((resolve) => {
@@ -402,12 +416,10 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
             resolve();
           };
           a.addEventListener('ended', finish, { once: true });
-          a.play()
-            .then(() => console.log('[Eve] play() OK (wait)'))
-            .catch((err) => {
-              console.error('[Eve] play() rejected (wait):', err);
-              finish();
-            });
+          a.play().catch((err) => {
+            console.error('[Eve] play() rejected (wait):', err);
+            finish();
+          });
           setTimeout(finish, 12000);
         });
       } catch (err) {
@@ -416,7 +428,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
         setEveSpeaking(false);
       }
     },
-    [muted]
+    [muted, stopAllAudio]
   );
 
   // Unlock the audio playback context on first user gesture. Browsers
@@ -910,7 +922,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
 
   useEffect(() => {
     if (eveGreeted || muted) return;
-    const t = setTimeout(playGreetingOnce, 5000);
+    const t = setTimeout(playGreetingOnce, 3000);
     const onFirst = () => {
       // Tiny delay so the click sound doesn't overlap Eve's first word
       setTimeout(playGreetingOnce, 150);
@@ -1035,6 +1047,8 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   const startWalkthrough = useCallback(async () => {
     if (!story) return;
     walkingCancelRef.current = false;
+    // Override any audio currently playing (plan narration, eve outro, etc.)
+    stopAllAudio();
     const beats: { idx: number; text: string }[] = [
       { idx: 0, text: story.opening },
       { idx: 1, text: story.atStop1 },
@@ -1053,7 +1067,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
       await new Promise((r) => setTimeout(r, 250));
     }
     if (!walkingCancelRef.current) setWalkingIdx(-1);
-  }, [story, speakAsEveAndWait]);
+  }, [story, speakAsEveAndWait, stopAllAudio]);
 
   const stopWalkthrough = useCallback(() => {
     walkingCancelRef.current = true;
@@ -1107,11 +1121,10 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   useEffect(() => {
     if (!narrationAudio || !audioRef.current) return;
     audioRef.current.src = `data:${narrationMime};base64,${narrationAudio}`;
-    // Auto-play unless muted — Eve narrates the planned evening as soon as it's ready
-    if (!muted) {
-      audioRef.current.play().then(() => setPlaying(true)).catch(() => {});
-    }
-  }, [narrationAudio, narrationMime, muted]);
+    // Don't auto-play — the "Walk me through this evening" walkthrough is the
+    // primary Eve-narrated experience. Auto-playing here used to collide
+    // with Eve's outro line and the walkthrough audio.
+  }, [narrationAudio, narrationMime]);
 
   const togglePlay = () => {
     if (!audioRef.current || !narrationAudio) return;
@@ -1119,6 +1132,14 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
       audioRef.current.pause();
       setPlaying(false);
     } else {
+      // Stop any other Eve audio first
+      try {
+        eveAudioRef.current?.pause();
+      } catch {}
+      setEveSpeaking(false);
+      eveSpeakingRef.current = false;
+      walkingCancelRef.current = true;
+      setWalkingIdx(-1);
       audioRef.current.play().catch(() => {});
       setPlaying(true);
     }
