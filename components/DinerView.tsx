@@ -70,12 +70,15 @@ const SURPRISE_FREETEXT = [
 ];
 
 const SUGGESTED_CITY = 'Santa Clara, CA';
-const SUGGESTED_FREETEXT = 'Indian or Italian dinner, dessert nearby, then a quiet garden walk under stringlights';
 
-// Standard placeholder styling — value stays empty so HTML's native placeholder
-// behavior takes over (visible when empty, gone the moment the user types).
-const PLACEHOLDER_CLS =
-  'text-eve-cream placeholder:text-eve-cream/45 placeholder:italic placeholder:font-serif';
+// CSS-utility helper: when the input's current value still matches the suggested default,
+// render the text in italic-serif faded style so it reads as a placeholder hint
+// rather than as committed text. The moment the user edits, styling snaps to plain.
+function ghostIf(value: string, suggestion: string): string {
+  return value === suggestion
+    ? 'text-eve-cream/55 italic font-serif placeholder:text-eve-cream/45'
+    : 'text-eve-cream placeholder:text-eve-cream/45 placeholder:italic placeholder:font-serif';
+}
 
 function pickRandom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
@@ -123,7 +126,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
 
   const [phase, setPhase] = useState<Phase>('input');
 
-  const [city, setCity] = useState(initial?.city || '');
+  const [city, setCity] = useState(initial?.city || SUGGESTED_CITY);
   const [vibe, setVibe] = useState<Vibe>(initial?.vibe || 'date_night');
   const [party, setParty] = useState<number>(initial?.party || 2);
   const [dietary, setDietary] = useState<DietaryPreference[]>(initial?.dietary || ['vegetarian']);
@@ -251,31 +254,6 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
     setFreeText(s.freeText);
   };
 
-  // When user clicks mute, stop EVERYTHING — Eve audio, plan narration,
-  // walkthrough, and the mic. Unmuting requires explicit Tell Eve click.
-  useEffect(() => {
-    if (muted) {
-      try {
-        eveAudioRef.current?.pause();
-      } catch {}
-      try {
-        audioRef.current?.pause();
-      } catch {}
-      setEveSpeaking(false);
-      eveSpeakingRef.current = false;
-      setPlaying(false);
-      walkingCancelRef.current = true;
-      setWalkingIdx(-1);
-      try {
-        recognitionRef.current?.stop();
-      } catch {}
-      setVoiceListening(false);
-      voiceListeningRef.current = false;
-      if (silenceTimerRef.current) clearInterval(silenceTimerRef.current);
-      silenceTimerRef.current = null;
-    }
-  }, [muted]);
-
   // Keep refs in sync with state so silence-detector closures see fresh values.
   useEffect(() => {
     voiceListeningRef.current = voiceListening;
@@ -292,6 +270,23 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   useEffect(() => {
     eveSpeakingRef.current = eveSpeaking;
   }, [eveSpeaking]);
+
+  // When the page-level mute toggles ON, immediately silence any in-flight
+  // Eve audio. Otherwise the user keeps hearing what was already playing.
+  useEffect(() => {
+    if (!muted) return;
+    try {
+      eveAudioRef.current?.pause();
+    } catch {}
+    try {
+      audioRef.current?.pause();
+    } catch {}
+    setEveSpeaking(false);
+    eveSpeakingRef.current = false;
+    setPlaying(false);
+    walkingCancelRef.current = true;
+    setWalkingIdx(-1);
+  }, [muted]);
 
   // ----- Voice input via Web Speech API: set up the recognizer once -----
   // The recognizer auto-stops on ~3 seconds of silence in "smart" mode,
@@ -501,13 +496,16 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
         dietary: DietaryPreference[];
       }> = {}
     ) => {
-      const useCity = ((overrides.city ?? city).trim()) || SUGGESTED_CITY;
+      const useCity = (overrides.city ?? city).trim();
       const useVibe = overrides.vibe ?? vibe;
-      const useFreeText = ((overrides.freeText ?? freeText).trim()) || SUGGESTED_FREETEXT;
+      const useFreeText = (overrides.freeText ?? freeText).trim();
       const useParty = overrides.party ?? party;
       const useDietary = overrides.dietary ?? dietary;
 
-      // No early return — Eve always has a fallback location/freeText to plan with.
+      if (!useCity) {
+        setError('Tell Eve where you are.');
+        return;
+      }
       cancelRef.current = false;
       setError(null);
       setPhase('forging');
@@ -665,10 +663,10 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           city: useCity,
           stops: initialStops.map((s) => ({ name: s.name, kind: s.kind })),
         });
+        // Set the text bubble but DON'T auto-speak — the "Walk me through this
+        // evening" button is the canonical Eve-narrated experience now,
+        // and auto-speaking outro was a source of overlapping audio.
         setEveOutroText(o.outro || '');
-        if (o.outro) {
-          setTimeout(() => speakAsEve(o.outro), 800);
-        }
       } catch {}
     },
     [city, vibe, party, dietary, budgetPerPerson, freeText, cuisinePref, whenISO, speakAsEve]
@@ -924,49 +922,61 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
     }
   }, [buildPlan, startSmartSilenceWatcher]);
 
-  // Page-load greeting: speak the welcome AND immediately open the mic after,
-  // so Eve is in continuous conversation mode from the very first words.
-  // Triggers either from a 3s timer or the user's first interaction (whichever
-  // comes first). Browsers require user gesture before audio can play; the
-  // interaction listener handles the autoplay-block case.
+  // Rotating greetings — softly flirty without being clingy. Refreshes every load.
+  const GREETINGS = [
+    "Hi, I'm Eve. What kind of evening are we writing tonight, you and me?",
+    "Hello there. I'm Eve. Tell me what evening you want, and I'll work it out for you.",
+    "Hi. I'm Eve. Lovely of you to find me. Tell me what tonight should feel like.",
+    "Hi. I'm Eve. I've been waiting. What kind of evening should we make?",
+    "Hello. I'm Eve. You bring the wish, I'll bring the rest of the night.",
+  ];
+
   const greetingPlayedRef = useRef(false);
-  const playGreetingOnce = useCallback(async () => {
+  const playGreetingOnce = useCallback(() => {
     if (greetingPlayedRef.current || muted) return;
     greetingPlayedRef.current = true;
     setEveGreeted(true);
-    const greeting =
-      "Hi, I'm Eve. Tell me what kind of evening you want, and I'll plan it for you.";
+    const greeting = GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
     setEveIntroText(greeting);
-    // Wait for greeting to finish before opening mic so they don't overlap
-    await speakAsEveAndWait(greeting);
 
-    // After greeting, drop the user straight into conversation mode.
-    if (muted || conversationActiveRef.current) return;
-    const rec = recognitionRef.current;
-    if (!rec) return;
-    setConversationActive(true);
-    conversationActiveRef.current = true;
-    setUserMuted(false);
-    userMutedRef.current = false;
-    baseTextRef.current = '';
-    setVoiceTranscript('');
-    voiceTranscriptRef.current = '';
-    try {
-      rec.start();
-      setVoiceListening(true);
-      voiceListeningRef.current = true;
-      lastSpeechAtRef.current = Date.now();
-      startSmartSilenceWatcher();
-      console.log('[Mic] auto-started after greeting');
-    } catch (err) {
-      console.error('[Mic] auto-start failed:', err);
-    }
+    // Speak greeting, then automatically activate conversation mode + open mic
+    // so the user can just keep talking after Eve says hi.
+    (async () => {
+      await speakAsEveAndWait(greeting);
+      // Auto-start conversation if user hasn't already done something
+      if (
+        !conversationActiveRef.current &&
+        !voiceListeningRef.current &&
+        !muted &&
+        recognitionRef.current
+      ) {
+        setConversationActive(true);
+        conversationActiveRef.current = true;
+        setUserMuted(false);
+        userMutedRef.current = false;
+        baseTextRef.current = '';
+        setVoiceTranscript('');
+        voiceTranscriptRef.current = '';
+        setFreeText('');
+        try {
+          recognitionRef.current.start();
+          setVoiceListening(true);
+          voiceListeningRef.current = true;
+          lastSpeechAtRef.current = Date.now();
+          startSmartSilenceWatcher();
+        } catch (err) {
+          console.warn('[Eve] auto-mic start failed:', err);
+        }
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [muted, speakAsEveAndWait]);
 
   useEffect(() => {
     if (eveGreeted || muted) return;
     const t = setTimeout(playGreetingOnce, 3000);
     const onFirst = () => {
+      // Tiny delay so the click sound doesn't overlap Eve's first word
       setTimeout(playGreetingOnce, 150);
     };
     document.addEventListener('pointerdown', onFirst, { once: true });
@@ -1372,10 +1382,15 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                 <div className="relative">
                   <input
                     type="text"
-                    value={city}
-                    onChange={(e) => setCity(e.target.value)}
+                    value={city === SUGGESTED_CITY ? '' : city}
+                    onChange={(e) => setCity(e.target.value || SUGGESTED_CITY)}
+                    onFocus={(e) => {
+                      // Clearing on focus prevents "Indian" + typing → "IndianChinese".
+                      // Default falls back via the empty-check on submit.
+                      if (city === SUGGESTED_CITY) e.target.value = '';
+                    }}
                     placeholder={SUGGESTED_CITY}
-                    className={`w-full px-5 py-3.5 pr-14 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-base ${PLACEHOLDER_CLS}`}
+                    className="w-full px-5 py-3.5 pr-14 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-base text-eve-cream placeholder:text-eve-cream/45 placeholder:italic placeholder:font-serif"
                   />
                   <button
                     onClick={detectLocation}
@@ -1391,14 +1406,19 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                 <label className="block text-[12px] tracking-wide text-eve-gold/80 mb-2 font-medium">
                   When
                 </label>
-                <input
-                  type="date"
-                  value={whenISO}
-                  min={todayISO()}
-                  onChange={(e) => setWhenISO(e.target.value)}
-                  className="w-full px-4 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-base text-eve-cream"
-                />
-                <p className="mt-1 text-[11px] text-eve-cream/45 italic font-serif">
+                <div className="relative">
+                  <div className="absolute left-2 top-1/2 -translate-y-1/2 p-2 rounded-xl bg-eve-gold/15 text-eve-gold pointer-events-none z-10">
+                    <ClockIcon size={16} />
+                  </div>
+                  <input
+                    type="date"
+                    value={whenISO}
+                    min={todayISO()}
+                    onChange={(e) => setWhenISO(e.target.value)}
+                    className="w-full pl-12 pr-4 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-base text-eve-cream"
+                  />
+                </div>
+                <p className="mt-1 text-[11px] text-eve-cream/55 italic font-serif">
                   {formatDate(whenISO)}
                 </p>
               </div>
@@ -1770,7 +1790,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
             </a>
             {stops.find((s) => s.kind === 'dinner') && (
               <a
-                href={`https://www.opentable.com/s/?term=${encodeURIComponent(`${stops.find((s) => s.kind === 'dinner')!.name} ${city}`)}&covers=${party}`}
+                href={`https://www.opentable.com/s?term=${encodeURIComponent(stops.find((s) => s.kind === 'dinner')!.name + ' ' + city)}&covers=${party}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-eve-rose/15 hover:bg-eve-rose/25 border border-eve-rose/40 text-eve-rose text-sm font-medium transition-colors"

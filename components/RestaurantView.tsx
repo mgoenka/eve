@@ -9,8 +9,11 @@ import { EveLogo } from './EveLogo';
 // When a field's current value still matches the suggested default, render
 // it in faded italic-serif so the user reads it as a placeholder hint they
 // can use as-is or overwrite. Any change snaps the styling back to plain.
-const PLACEHOLDER_CLS =
-  'text-eve-cream placeholder:text-eve-cream/45 placeholder:italic placeholder:font-serif';
+function ghostIf(value: string, suggestion: string): string {
+  return value === suggestion
+    ? 'text-eve-cream/55 italic font-serif placeholder:text-eve-cream/60'
+    : 'text-eve-cream placeholder:text-eve-cream/60 placeholder:italic placeholder:font-serif';
+}
 
 interface Props {
   onSwitchToDiner: () => void;
@@ -59,13 +62,11 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
   const [brand, setBrand] = useState<RestaurantBrand | null>(loadBrand());
   const [setupOpen, setSetupOpen] = useState(false);
 
-  // Empty initial state so HTML placeholder behavior works correctly.
-  // Defaults are filled in at submit time via DEMO_RESTAURANTS[0] fallback.
-  const [name, setName] = useState(brand?.name || '');
-  const [city, setCity] = useState(brand?.city || '');
-  const [cuisine, setCuisine] = useState<Cuisine>(brand?.cuisine || ('' as Cuisine));
-  const [voice, setVoice] = useState(brand?.voice || '');
-  const [signature, setSignature] = useState(brand?.signatureDishes || '');
+  const [name, setName] = useState(brand?.name || DEMO_RESTAURANTS[0].name);
+  const [city, setCity] = useState(brand?.city || DEMO_RESTAURANTS[0].city);
+  const [cuisine, setCuisine] = useState<Cuisine>(brand?.cuisine || DEMO_RESTAURANTS[0].cuisine);
+  const [voice, setVoice] = useState(brand?.voice || DEMO_RESTAURANTS[0].voice);
+  const [signature, setSignature] = useState(brand?.signatureDishes || DEMO_RESTAURANTS[0].signatureDishes);
 
   const [dishName, setDishName] = useState('');
   const [dishDescription, setDishDescription] = useState('');
@@ -139,14 +140,12 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
   }, [setupOpen, brand, name, city, cuisine, voice, signature, suggestion, pack]);
 
   const saveBrandFn = () => {
-    // Fall back to the suggested defaults if the user left fields blank.
-    const fallback = DEMO_RESTAURANTS[0];
     const b: RestaurantBrand = {
-      name: name.trim() || fallback.name,
-      city: city.trim() || fallback.city,
-      cuisine: (cuisine || fallback.cuisine) as Cuisine,
-      voice: voice.trim() || fallback.voice,
-      signatureDishes: signature.trim() || fallback.signatureDishes,
+      name: name.trim(),
+      city: city.trim(),
+      cuisine, // may be empty — server will infer from name + city via Search
+      voice: voice.trim(),
+      signatureDishes: signature.trim(),
     };
     saveBrand(b);
     setBrand(b);
@@ -334,10 +333,10 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
               </label>
               <input
                 type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
+                value={name === DEMO_RESTAURANTS[0].name ? '' : name}
+                onChange={(e) => setName(e.target.value || DEMO_RESTAURANTS[0].name)}
                 placeholder={DEMO_RESTAURANTS[0].name}
-                className={`w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base ${PLACEHOLDER_CLS}`}
+                className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base text-eve-cream placeholder:text-eve-cream/45 placeholder:italic placeholder:font-serif"
               />
             </div>
 
@@ -347,10 +346,10 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
               </label>
               <input
                 type="text"
-                value={city}
-                onChange={(e) => setCity(e.target.value)}
+                value={city === DEMO_RESTAURANTS[0].city ? '' : city}
+                onChange={(e) => setCity(e.target.value || DEMO_RESTAURANTS[0].city)}
                 placeholder={DEMO_RESTAURANTS[0].city}
-                className={`w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base ${PLACEHOLDER_CLS}`}
+                className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base text-eve-cream placeholder:text-eve-cream/45 placeholder:italic placeholder:font-serif"
               />
               <p className="mt-1 text-[11px] text-eve-cream/60 italic font-serif">
                 Helps Eve disambiguate when multiple restaurants share a name.
@@ -363,11 +362,11 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
               </label>
               <input
                 type="text"
-                value={cuisine}
-                onChange={(e) => setCuisine(e.target.value as Cuisine)}
+                value={cuisine === DEMO_RESTAURANTS[0].cuisine ? '' : cuisine}
+                onChange={(e) => setCuisine((e.target.value || DEMO_RESTAURANTS[0].cuisine) as Cuisine)}
                 placeholder="Eve will infer this from your name + city if you skip it"
                 list="restaurant-cuisine-suggestions"
-                className={`w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base ${PLACEHOLDER_CLS}`}
+                className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base text-eve-cream placeholder:text-eve-cream/45 placeholder:italic placeholder:font-serif"
               />
               <datalist id="restaurant-cuisine-suggestions">
                 {CUISINES.map((c) => (
@@ -382,10 +381,10 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
               </label>
               <input
                 type="text"
-                value={voice}
-                onChange={(e) => setVoice(e.target.value)}
+                value={voice === DEMO_RESTAURANTS[0].voice ? '' : voice}
+                onChange={(e) => setVoice(e.target.value || DEMO_RESTAURANTS[0].voice)}
                 placeholder={DEMO_RESTAURANTS[0].voice}
-                className={`w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base ${PLACEHOLDER_CLS}`}
+                className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base text-eve-cream placeholder:text-eve-cream/45 placeholder:italic placeholder:font-serif"
               />
             </div>
 
@@ -395,10 +394,10 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
               </label>
               <textarea
                 rows={3}
-                value={signature}
-                onChange={(e) => setSignature(e.target.value)}
+                value={signature === DEMO_RESTAURANTS[0].signatureDishes ? '' : signature}
+                onChange={(e) => setSignature(e.target.value || DEMO_RESTAURANTS[0].signatureDishes)}
                 placeholder={DEMO_RESTAURANTS[0].signatureDishes}
-                className={`w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] leading-relaxed resize-none ${PLACEHOLDER_CLS}`}
+                className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] leading-relaxed resize-none text-eve-cream placeholder:text-eve-cream/45 placeholder:italic placeholder:font-serif"
               />
             </div>
 

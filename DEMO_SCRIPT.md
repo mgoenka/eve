@@ -11,7 +11,7 @@
 
 ## 0:00–0:30 — Hook
 
-> *"I'm Mohit Goenka. I run mobile email at Yahoo for 250 million people. I have 110+ patents. And every Saturday night I have the same problem you do."*
+> *"I'm Mohit Goenka. Hacker, builder, problem-solver. 120+ patents. And every Saturday night I have the same problem you do."*
 >
 > *"My wife says 'plan something.' Yelp gives me 90 reviews. ChatGPT hallucinates restaurants. Apple Maps is dumb. I'm vegetarian, so 80% of recommendations are useless. There's no AI that plans my whole night."*
 >
@@ -87,7 +87,7 @@ Slide 5.
 
 > *"Six months ago Gemini multimodal couldn't ship this reliably. Today it can. That's why now."*
 >
-> *"I built Recipe.mohitgoenka.com last year — AI cooking app. 50K visits. That was V1. Eve is V2. Twelve AI apps shipped. I am the customer — I'm vegetarian, I cook, I plan date nights, I pay $0 for tools that don't work."*
+> *"Twelve AI apps shipped this year. 120+ patents. I am the customer — I'm vegetarian, I cook, I plan date nights, I pay nothing for tools that don't work."*
 >
 > *"We'd like to talk about what comes next."*
 
@@ -110,7 +110,7 @@ A: Toast is a POS company that bolted on marketing as an upsell. Their content t
 A: Skeleton generation is grounded in Gemini's knowledge of the actual neighborhood. We surface published restaurants (Eve Originals) with priority. v1.1 wires in Google Places API for ground-truth verification.
 
 **Q: Why solo? Will you raise?**
-A: Yes. I've been running mobile platforms at Yahoo for 250M users for five years. I know how to scale. I shipped 12 AI apps as side projects. This is V13. I want a Series Seed to bring on a brand designer, an SF restaurant partnerships lead, and an iOS engineer.
+A: Yes. I've shipped 12 AI apps as side projects this year alone. 120+ patents to my name. I know how to ship and scale. I want a Series Seed to bring on a brand designer, an SF restaurant partnerships lead, and an iOS engineer.
 
 **Q: Defensibility?**
 A: Vertical prompt corpus tuned by a vegetarian foodie founder; restaurant brand memory (cuisine, voice, signature dishes) creates lock-in; the marketplace flywheel makes the index grow with every published special. None of these compound for a horizontal AI tool.

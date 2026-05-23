@@ -10,8 +10,18 @@ interface Props {
   dimmed?: boolean;
 }
 
-// Different gradient palettes for each stop kind so the loading skeleton
-// already feels like the kind of place coming. The image fades in over it.
+// Per-kind placeholder image (royalty-free Unsplash) shown while Eve's
+// AI image renders. Stays in place until the real image fades in over it.
+const KIND_PLACEHOLDERS: Record<StopKind, string> = {
+  dinner: 'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=720&q=70&auto=format&fit=crop',
+  dessert: 'https://images.unsplash.com/photo-1551024601-bec78aea704b?w=720&q=70&auto=format&fit=crop',
+  drink: 'https://images.unsplash.com/photo-1551751299-1b51cab2694c?w=720&q=70&auto=format&fit=crop',
+  walk: 'https://images.unsplash.com/photo-1545486332-9e0999c535b2?w=720&q=70&auto=format&fit=crop',
+  live_music: 'https://images.unsplash.com/photo-1507676184212-d03ab07a01bf?w=720&q=70&auto=format&fit=crop',
+  view: 'https://images.unsplash.com/photo-1502786129293-79981df4e689?w=720&q=70&auto=format&fit=crop',
+  activity: 'https://images.unsplash.com/photo-1521587760476-6c12a4b040da?w=720&q=70&auto=format&fit=crop',
+};
+
 const KIND_GRADIENTS: Record<StopKind, { from: string; via: string; to: string }> = {
   dinner: { from: 'from-amber-500/30', via: 'via-rose-500/25', to: 'to-orange-700/35' },
   dessert: { from: 'from-pink-400/30', via: 'via-rose-300/25', to: 'to-amber-300/30' },
@@ -40,27 +50,33 @@ export function StopCard({ stop, index, city, highlighted, dimmed }: Props) {
       }`}
       style={{ animationDelay: `${index * 120}ms` }}
     >
-      <div className="aspect-[4/3] relative overflow-hidden bg-eve-ink/40">
-        {/* Skeleton: animated gradient already hinting at the stop's mood */}
-        {showSkeleton && (
-          <div
-            className={`absolute inset-0 bg-gradient-to-br ${grad.from} ${grad.via} ${grad.to} animate-pulse`}
-          />
-        )}
+      <div className="aspect-square relative overflow-hidden bg-eve-ink">
+        {/* Per-kind real photograph as placeholder — visible immediately,
+            stays under the AI image, replaced by it on fade-in */}
+        <img
+          src={KIND_PLACEHOLDERS[stop.kind] || KIND_PLACEHOLDERS.dinner}
+          alt=""
+          aria-hidden="true"
+          className="absolute inset-0 w-full h-full object-cover"
+          loading="lazy"
+        />
 
-        {/* Graceful error state — Eve never sees raw error strings */}
+        {/* Subtle dusk tint over the placeholder so it blends with Eve's palette */}
+        <div className={`absolute inset-0 bg-gradient-to-br ${grad.from} ${grad.via} ${grad.to} ${showSkeleton ? 'opacity-90 animate-pulse mix-blend-overlay' : 'opacity-30 mix-blend-overlay'}`} />
+
+        {/* Graceful error state — never expose raw error JSON */}
         {hasError && !stop.imageData && (
-          <div className="absolute inset-0 bg-gradient-to-br from-eve-plum/40 via-eve-ink/55 to-eve-plum/40 flex flex-col items-center justify-center gap-2 px-6 text-center">
-            <span className="font-serif italic text-eve-rose/85 text-base leading-snug">
+          <div className="absolute inset-0 bg-gradient-to-br from-eve-plum/55 via-eve-ink/70 to-eve-plum/55 flex flex-col items-center justify-center gap-2 px-6 text-center backdrop-blur-sm">
+            <span className="font-serif italic text-eve-rose/95 text-base leading-snug">
               "The light wouldn't quite catch this one."
             </span>
-            <span className="text-[12px] text-eve-cream/65 italic font-serif">
+            <span className="text-[12px] text-eve-cream/80 italic font-serif">
               Picture it warmer than that.
             </span>
           </div>
         )}
 
-        {/* Real image fade-in */}
+        {/* Real image fades in on top of the placeholder */}
         {stop.imageData && (
           <img
             src={`data:${stop.imageMime || 'image/png'};base64,${stop.imageData}`}

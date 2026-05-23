@@ -67,7 +67,7 @@ The same engine powers Eve for Restaurants. Owners drop in tonight's special and
 ## Team
 
 **Mohit Goenka** — Solo founder, end-to-end build.
-- Hacker. Builder. Problem-solver.
+- Hacker, builder, problem-solver
 - 120+ patents
 - 12 production AI apps shipped this year
 - **Active member of GDG San Jose**
