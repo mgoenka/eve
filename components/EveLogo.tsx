@@ -4,20 +4,16 @@ interface Props {
   withWordmark?: boolean;
 }
 
-// The Eve mark: an italic "eve" wordmark where the letters compose
-// a feminine silhouette. The first 'e' is her hair / face curl,
-// the 'v' is the V-neckline of her dress, the second 'e' her hip
-// curve flowing into a flourish. Quiet, devoted, never explicit.
+// The Eve mark: a feminine silhouette (head + hair + shoulder line)
+// next to the italic "eve" wordmark. The silhouette is what the user
+// connects to — the wordmark just names her.
 export function EveLogo({ size = 36, className = '', withWordmark = false }: Props) {
-  const w = withWordmark ? Math.round(size * 3.0) : size;
-  const h = size;
-
   if (!withWordmark) {
-    // ICON-ONLY (favicon-style square) — single italic "e" with silhouette curl
+    // ICON-ONLY (favicon, top-left header) — feminine bust silhouette.
     return (
       <svg
-        width={w}
-        height={h}
+        width={size}
+        height={size}
         viewBox="0 0 64 64"
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
@@ -31,58 +27,71 @@ export function EveLogo({ size = 36, className = '', withWordmark = false }: Pro
             <stop offset="75%" stopColor="#e8a39e" />
             <stop offset="100%" stopColor="#a855f7" />
           </linearGradient>
-          <radialGradient id="eve-glow-icon" cx="0.5" cy="0.5" r="0.5">
+          <radialGradient id="eve-glow-icon" cx="0.5" cy="0.4" r="0.55">
             <stop offset="0%" stopColor="#fef3c7" stopOpacity="0.55" />
             <stop offset="100%" stopColor="#f5d896" stopOpacity="0" />
           </radialGradient>
         </defs>
         <rect width="64" height="64" rx="14" fill="#1a0d2e" />
-        <circle cx="32" cy="32" r="24" fill="url(#eve-glow-icon)" />
+        <circle cx="32" cy="26" r="22" fill="url(#eve-glow-icon)" />
 
-        {/* Italic "e" rendered as the feminine motif */}
-        <text
-          x="32"
-          y="48"
-          textAnchor="middle"
-          fontFamily="'Cormorant Garamond', 'Georgia', serif"
-          fontSize="48"
-          fontStyle="italic"
-          fontWeight="600"
-          fill="url(#eve-grad-icon)"
-          letterSpacing="-0.02em"
-        >
-          e
-        </text>
-
-        {/* A flowing silhouette curve — like the side of a dress —
-            tying the icon to the wordmark's silhouette concept */}
+        {/* Feminine bust silhouette — head, flowing hair, off-shoulder neckline.
+            Drawn as a single closed path filled with the warm gradient. */}
         <path
-          d="M 12 16 Q 18 24 22 30 Q 16 36 18 46"
-          stroke="url(#eve-grad-icon)"
-          strokeWidth="1.4"
-          strokeLinecap="round"
-          fill="none"
-          opacity="0.6"
+          d="
+            M 32 13
+            C 26 13 22 17 22 23
+            C 22 25 22.5 27 23.5 28.5
+            L 22 30
+            C 19 31 17 33 17 36
+            L 17 38
+            C 14 41 11 46 10 53
+            L 10 58
+            L 54 58
+            L 54 53
+            C 53 46 50 41 47 38
+            L 47 36
+            C 47 33 45 31 42 30
+            L 40.5 28.5
+            C 41.5 27 42 25 42 23
+            C 42 17 38 13 32 13
+            Z
+          "
+          fill="url(#eve-grad-icon)"
         />
 
-        {/* Small star — her quiet wink */}
-        <g transform="translate(48 18)">
+        {/* A soft stray hair curl on her right side — adds warmth */}
+        <path
+          d="M 42 23 Q 47 22 49 27 Q 49 30 46 30"
+          stroke="url(#eve-grad-icon)"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          fill="none"
+          opacity="0.85"
+        />
+
+        {/* Earring sparkle */}
+        <circle cx="40.5" cy="28" r="1.2" fill="#fef3c7" opacity="0.9" />
+
+        {/* Quiet wink star */}
+        <g transform="translate(50 14)">
           <path
-            d="M 0 -5 L 1.3 -1.3 L 5 0 L 1.3 1.3 L 0 5 L -1.3 1.3 L -5 0 L -1.3 -1.3 Z"
+            d="M 0 -4 L 1 -1 L 4 0 L 1 1 L 0 4 L -1 1 L -4 0 L -1 -1 Z"
             fill="#fef3c7"
+            opacity="0.95"
           />
         </g>
       </svg>
     );
   }
 
-  // WORDMARK — clean "eve" with subtle feminine silhouette accents.
-  // Transparent background; the host page background shows through.
+  // WORDMARK — silhouette + italic "eve". Transparent background.
+  const w = Math.round(size * 3.4);
   return (
     <svg
       width={w}
-      height={h}
-      viewBox="0 0 140 60"
+      height={size}
+      viewBox="0 0 170 60"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={className}
@@ -95,14 +104,45 @@ export function EveLogo({ size = 36, className = '', withWordmark = false }: Pro
           <stop offset="75%" stopColor="#e8a39e" />
           <stop offset="100%" stopColor="#a855f7" />
         </linearGradient>
-        <linearGradient id="eve-curve-grad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#f5d896" stopOpacity="0.85" />
-          <stop offset="100%" stopColor="#e8a39e" stopOpacity="0.45" />
-        </linearGradient>
       </defs>
 
+      {/* Silhouette of head + shoulders, scaled to wordmark height */}
+      <g transform="translate(2 4)">
+        <path
+          d="
+            M 26 6
+            C 21 6 17 10 17 16
+            C 17 18 17.5 20 18.5 21.5
+            L 17 23
+            C 14 24 12 26 12 29
+            L 12 31
+            C 9 34 6 39 5 46
+            L 5 51
+            L 47 51
+            L 47 46
+            C 46 39 43 34 40 31
+            L 40 29
+            C 40 26 38 24 35 23
+            L 33.5 21.5
+            C 34.5 20 35 18 35 16
+            C 35 10 31 6 26 6
+            Z
+          "
+          fill="url(#eve-grad-word)"
+        />
+        <path
+          d="M 35 16 Q 40 15 42 19 Q 42 22 39 22"
+          stroke="url(#eve-grad-word)"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          fill="none"
+          opacity="0.85"
+        />
+        <circle cx="33.5" cy="21" r="1.1" fill="#fef3c7" opacity="0.9" />
+      </g>
+
       <text
-        x="6"
+        x="62"
         y="46"
         fontFamily="'Cormorant Garamond', 'Georgia', serif"
         fontSize="50"
@@ -114,18 +154,7 @@ export function EveLogo({ size = 36, className = '', withWordmark = false }: Pro
         eve
       </text>
 
-      {/* Subtle hip curve descending from the second 'e' */}
-      <path
-        d="M 92 38 Q 105 44 110 50"
-        stroke="url(#eve-curve-grad)"
-        strokeWidth="2"
-        strokeLinecap="round"
-        fill="none"
-        opacity="0.7"
-      />
-
-      {/* Tiny star — her quiet wink */}
-      <g transform="translate(96 14)">
+      <g transform="translate(149 14)">
         <path
           d="M 0 -4 L 1 -1 L 4 0 L 1 1 L 0 4 L -1 1 L -4 0 L -1 -1 Z"
           fill="#fef3c7"

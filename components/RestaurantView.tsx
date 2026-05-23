@@ -1,19 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Sparkles, Wand2, RotateCcw, Download, Copy, Check, ChefHat, Send, Lightbulb, Loader2, Instagram, TrendingUp, Eye } from 'lucide-react';
+import { Sparkles, Wand2, RotateCcw, Download, Copy, Check, ChefHat, Send, Lightbulb, Loader2, Instagram, TrendingUp } from 'lucide-react';
 import { CUISINES, DEMO_RESTAURANTS } from '../constants';
 import type { Cuisine, ContentPack, RestaurantBrand } from '../types';
 import { generateContentPack, postSpecial, synthesize, suggestSpecial } from '../services/eveService';
 import type { SuggestSpecialResponse } from '../services/eveService';
 import { EveLogo } from './EveLogo';
-
-// When a field's current value still matches the suggested default, render
-// it in faded italic-serif so the user reads it as a placeholder hint they
-// can use as-is or overwrite. Any change snaps the styling back to plain.
-function ghostIf(value: string, suggestion: string): string {
-  return value === suggestion
-    ? 'text-eve-cream/55 italic font-serif placeholder:text-eve-cream/60'
-    : 'text-eve-cream placeholder:text-eve-cream/60 placeholder:italic placeholder:font-serif';
-}
 
 interface Props {
   onSwitchToDiner: () => void;
@@ -58,15 +49,24 @@ function downloadText(filename: string, text: string) {
   URL.revokeObjectURL(url);
 }
 
-export function RestaurantView({ onSwitchToDiner }: Props) {
-  const [brand, setBrand] = useState<RestaurantBrand | null>(loadBrand());
-  const [setupOpen, setSetupOpen] = useState(false);
+// Render placeholder-styled value when the field still equals the suggestion
+// the user can either accept or overwrite.
+function ghostClass(value: string, ghost: string): string {
+  const isGhost = !value || value === ghost;
+  return isGhost
+    ? 'text-eve-cream/55 italic font-serif placeholder:text-eve-cream/60'
+    : 'text-eve-cream placeholder:text-eve-cream/60 placeholder:italic placeholder:font-serif';
+}
 
-  const [name, setName] = useState(brand?.name || DEMO_RESTAURANTS[0].name);
-  const [city, setCity] = useState(brand?.city || DEMO_RESTAURANTS[0].city);
-  const [cuisine, setCuisine] = useState<Cuisine>(brand?.cuisine || DEMO_RESTAURANTS[0].cuisine);
-  const [voice, setVoice] = useState(brand?.voice || DEMO_RESTAURANTS[0].voice);
-  const [signature, setSignature] = useState(brand?.signatureDishes || DEMO_RESTAURANTS[0].signatureDishes);
+export function RestaurantView({ onSwitchToDiner }: Props) {
+  const stored = loadBrand();
+  const seed = DEMO_RESTAURANTS[0];
+
+  const [name, setName] = useState(stored?.name || seed.name);
+  const [city, setCity] = useState(stored?.city || seed.city);
+  const [cuisine, setCuisine] = useState<Cuisine>(stored?.cuisine || seed.cuisine);
+  const [voice, setVoice] = useState(stored?.voice || seed.voice);
+  const [signature, setSignature] = useState(stored?.signatureDishes || seed.signatureDishes);
 
   const [dishName, setDishName] = useState('');
   const [dishDescription, setDishDescription] = useState('');
@@ -82,86 +82,90 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
   const [suggestion, setSuggestion] = useState<SuggestSpecialResponse | null>(null);
   const [evePulse, setEvePulse] = useState<{ viewers: number; planning: number; cuisineRank: number } | null>(null);
 
-  useEffect(() => {
-    if (!brand) setSetupOpen(true);
-  }, [brand]);
+  const cancelRef = useRef(false);
 
-  // When the restaurant view loads with a brand set, automatically:
-  //   1. Mine reviews / trends for today's special (suggest-special)
-  //   2. Once we have the dish, auto-generate the full content pack
-  // No "Generate the pack" button needed — Eve does it.
-  const autoFiredRef = useRef(false);
+  // Brand auto-save on edit (so localStorage is always in sync)
   useEffect(() => {
-    if (setupOpen) return;
-    if (!brand) return;
-    if (autoFiredRef.current) return;
-    if (suggestion || pack) return;
-    autoFiredRef.current = true;
+    saveBrand({ name, city, cuisine, voice, signatureDishes: signature });
+  }, [name, city, cuisine, voice, signature]);
 
-    (async () => {
-      setError(null);
-      setSuggesting(true);
-      try {
+  // Auto-suggest a special the moment we have a name + city. The dish becomes
+  // a placeholder the user can either keep or overwrite. Runs once.
+  const autoSuggestedRef = useRef(false);
+  useEffect(() => {
+    if (autoSuggestedRef.current) return;
+    if (!name.trim() || !city.trim()) return;
+    autoSuggestedRef.current = true;
+    setSuggesting(true);
+    suggestSpecial({
+      restaurantName: name.trim(),
+      city: city.trim(),
+      cuisine,
+      signatureDishes: signature,
+    })
+      .then((result) => {
+        setSuggestion(result);
+        if (!dishName) setDishName(result.dishName);
+        if (!dishDescription) setDishDescription(result.dishDescription);
+      })
+      .catch(() => {})
+      .finally(() => setSuggesting(false));
+  }, []);
+
+  const generate = async () => {
+    setError(null);
+    setPack(null);
+    setReelAudio(null);
+    setPosted(false);
+    setEvePulse(null);
+    cancelRef.current = false;
+    setGenerating(true);
+    try {
+      // If the user didn't fill in a dish, do the magic behind the scenes:
+      // mine reviews / trends, pick a dish, then generate. Dish input is
+      // never required.
+      let useDish = dishName.trim();
+      let useDesc = dishDescription.trim();
+      if (!useDish) {
         const result = await suggestSpecial({
           restaurantName: name.trim(),
           city: city.trim(),
           cuisine,
           signatureDishes: signature,
         });
+        useDish = result.dishName;
+        useDesc = result.dishDescription;
         setSuggestion(result);
-        setDishName(result.dishName);
-        setDishDescription(result.dishDescription);
-        setSuggesting(false);
-
-        // Now auto-generate the content pack from the suggested dish
-        setGenerating(true);
-        const packResult = await generateContentPack({
-          dishName: result.dishName,
-          dishDescription: result.dishDescription,
-          restaurantName: name.trim(),
-          cuisine,
-          voice,
-          city,
-          signatureDishes: signature,
-        });
-        setPack(packResult);
-        if (packResult.reel.fullVoiceoverScript) {
-          synthesize(packResult.reel.fullVoiceoverScript, 'reel')
-            .then((audio) => setReelAudio(`data:${audio.audioMime};base64,${audio.audioData}`))
-            .catch(() => {});
-        }
-      } catch (err: any) {
-        setError(err?.message || 'Eve could not auto-prepare your evening kit');
-      } finally {
-        setSuggesting(false);
-        setGenerating(false);
+        setDishName(useDish);
+        setDishDescription(useDesc);
       }
-    })();
-  }, [setupOpen, brand, name, city, cuisine, voice, signature, suggestion, pack]);
 
-  const saveBrandFn = () => {
-    const b: RestaurantBrand = {
-      name: name.trim(),
-      city: city.trim(),
-      cuisine, // may be empty — server will infer from name + city via Search
-      voice: voice.trim(),
-      signatureDishes: signature.trim(),
-    };
-    saveBrand(b);
-    setBrand(b);
-    setSetupOpen(false);
-    // Reset auto-fire so a new brand triggers a fresh suggest+generate
-    autoFiredRef.current = false;
-    setSuggestion(null);
-    setPack(null);
-    setReelAudio(null);
-    setPosted(false);
-    setEvePulse(null);
+      const result = await generateContentPack({
+        dishName: useDish,
+        dishDescription: useDesc,
+        restaurantName: name.trim(),
+        cuisine,
+        voice,
+        city,
+        signatureDishes: signature,
+      });
+      setPack(result);
+
+      if (result.reel.fullVoiceoverScript) {
+        synthesize(result.reel.fullVoiceoverScript, 'reel')
+          .then((audio) => setReelAudio(`data:${audio.audioMime};base64,${audio.audioData}`))
+          .catch(() => {});
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Eve could not put tonight together.');
+    } finally {
+      setGenerating(false);
+    }
   };
 
-  const suggestSpecialFn = async () => {
-    setSuggesting(true);
+  const pickDifferent = async () => {
     setError(null);
+    setSuggesting(true);
     try {
       const result = await suggestSpecial({
         restaurantName: name.trim(),
@@ -172,16 +176,12 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
       setSuggestion(result);
       setDishName(result.dishName);
       setDishDescription(result.dishDescription);
+      setPack(null);
     } catch (err: any) {
       setError(err?.message || 'Suggest failed');
     } finally {
       setSuggesting(false);
     }
-  };
-
-  const applySuggestionAlt = (alt: { dishName: string; rationale: string }) => {
-    setDishName(alt.dishName);
-    setDishDescription(alt.rationale);
   };
 
   const openInstagramShare = () => {
@@ -203,9 +203,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
         if (navAny.canShare?.({ files: [file] })) {
           navAny
             .share({ files: [file], text, title: pack.dishName })
-            .catch(() => {
-              copyAndDownloadFallback(text);
-            });
+            .catch(() => copyAndDownloadFallback(text));
           return;
         }
       } catch {}
@@ -231,41 +229,6 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
     }, 800);
   };
 
-  const generate = async () => {
-    if (!dishName.trim()) {
-      setError("Tell Eve what's on tonight.");
-      return;
-    }
-    setError(null);
-    setPack(null);
-    setReelAudio(null);
-    setPosted(false);
-    setGenerating(true);
-    try {
-      const result = await generateContentPack({
-        dishName: dishName.trim(),
-        dishDescription: dishDescription.trim(),
-        restaurantName: name.trim(),
-        cuisine,
-        voice,
-        city,
-        signatureDishes: signature,
-      });
-      setPack(result);
-
-      if (result.reel.fullVoiceoverScript) {
-        try {
-          const audio = await synthesize(result.reel.fullVoiceoverScript, 'reel');
-          setReelAudio(`data:${audio.audioMime};base64,${audio.audioData}`);
-        } catch {}
-      }
-    } catch (err: any) {
-      setError(err?.message || 'Content pack failed');
-    } finally {
-      setGenerating(false);
-    }
-  };
-
   const publishToEve = async () => {
     if (!pack) return;
     try {
@@ -279,12 +242,11 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
         imageMime: pack.instagramPost.imageMime,
       });
       setPosted(true);
-      // Live marketplace pulse — derived from time-of-evening + cuisine seed for stability per dish
-      const seed = (pack.dishName || '').length + (cuisine || '').length + new Date().getHours();
+      const seedNum = (pack.dishName || '').length + (cuisine || '').length + new Date().getHours();
       setEvePulse({
-        viewers: 7 + (seed % 11),
-        planning: 2 + (seed % 5),
-        cuisineRank: 1 + (seed % 3),
+        viewers: 7 + (seedNum % 11),
+        planning: 2 + (seedNum % 5),
+        cuisineRank: 1 + (seedNum % 3),
       });
     } catch (err: any) {
       setError(err?.message || 'Publish failed');
@@ -299,353 +261,279 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
     } catch {}
   };
 
-  if (setupOpen) {
-    return (
-      <div className="relative z-10 min-h-screen flex flex-col">
-        <header className="px-6 md:px-10 py-5 flex items-center justify-between">
-          <a href="/restaurant" className="inline-flex items-center gap-2"><EveLogo size={42} withWordmark /></a>
-          <button
-            onClick={onSwitchToDiner}
-            className="text-xs font-medium text-eve-cream/70 hover:text-eve-cream italic font-serif"
-          >
-            For diners ↗
-          </button>
-        </header>
-        <main className="flex-1 max-w-2xl mx-auto w-full px-6 py-10">
-          <p className="text-[12px] tracking-wide text-eve-gold/80 italic font-serif mb-4">
+  // Single unified page: brand setup + tonight's dish + content pack.
+  return (
+    <div className="relative z-10 min-h-screen flex flex-col">
+      <header className="px-6 md:px-10 py-5 flex items-center justify-between border-b border-white/5">
+        <a href="/restaurant" className="inline-flex items-center gap-3">
+          <EveLogo size={36} withWordmark />
+          <span className="hidden md:inline text-xs text-eve-cream/55 italic font-serif">
+            for restaurants
+          </span>
+        </a>
+        <button
+          onClick={onSwitchToDiner}
+          className="px-3 py-2 rounded-full bg-white/5 hover:bg-white/10 text-xs font-semibold text-eve-cream/70 transition-colors"
+        >
+          For diners ↗
+        </button>
+      </header>
+
+      <main className="flex-1 max-w-4xl mx-auto w-full px-4 md:px-8 py-8">
+        <div className="mb-7">
+          <p className="text-[12px] tracking-wide text-eve-gold/80 italic font-serif mb-2">
             For restaurants
           </p>
           <h1 className="font-serif text-4xl md:text-5xl leading-tight">
-            <span className="text-eve-cream">Every <span className="italic"><span className="text-shimmer">Eve</span><span className="text-eve-cream/95">ning</span></span>, </span>
+            <span className="text-eve-cream">Every <span className="italic"><span className="text-shimmer">eve</span><span className="text-eve-cream/95">ning</span></span>, </span>
             <span className="text-shimmer italic">told beautifully.</span>
           </h1>
-          <p className="mt-4 text-eve-cream/70 text-base leading-relaxed max-w-xl font-serif italic">
-            Set your restaurant once. Drop in the evening's special. Eve writes the Instagram post,
-            the fifteen-second Reel with voiceover, the menu card, the email, the SMS. All in your
-            voice. Use them anywhere. Your dish also enters the Eve dining index, where local diners
-            planning their evening will find you.
+          <p className="mt-3 text-eve-cream/70 text-base leading-relaxed max-w-2xl font-serif italic">
+            Tell Eve who you are. Skip the rest. She mines your reviews and tonight's trends and
+            puts together a complete content pack — Instagram, Reel, menu card, email, SMS — in
+            your voice. Use them anywhere.
+          </p>
+        </div>
+
+        {/* BRAND + DISH (single block) */}
+        <section className="rounded-3xl border border-white/10 bg-white/[0.03] backdrop-blur p-6 md:p-8">
+          <p className="text-[11px] tracking-wide text-eve-gold/80 italic font-serif mb-1">
+            Your restaurant
           </p>
 
-          <div className="mt-8 space-y-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
             <div>
-              <label className="block text-[11px] tracking-wide text-eve-gold/80 font-medium mb-2">
+              <label className="block text-[11px] tracking-wide text-eve-cream/65 font-medium mb-1.5">
                 Restaurant name
               </label>
               <input
                 type="text"
-                value={name === DEMO_RESTAURANTS[0].name ? '' : name}
-                onChange={(e) => setName(e.target.value || DEMO_RESTAURANTS[0].name)}
-                placeholder={DEMO_RESTAURANTS[0].name}
-                className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base text-eve-cream placeholder:text-eve-cream/45 placeholder:italic placeholder:font-serif"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onFocus={(e) => { if (e.target.value === seed.name) e.target.select(); }}
+                placeholder={seed.name}
+                className={`w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] ${ghostClass(name, seed.name)}`}
               />
             </div>
-
             <div>
-              <label className="block text-[11px] tracking-wide text-eve-gold/80 font-medium mb-2">
+              <label className="block text-[11px] tracking-wide text-eve-cream/65 font-medium mb-1.5">
                 City or area
               </label>
               <input
                 type="text"
-                value={city === DEMO_RESTAURANTS[0].city ? '' : city}
-                onChange={(e) => setCity(e.target.value || DEMO_RESTAURANTS[0].city)}
-                placeholder={DEMO_RESTAURANTS[0].city}
-                className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base text-eve-cream placeholder:text-eve-cream/45 placeholder:italic placeholder:font-serif"
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+                onFocus={(e) => { if (e.target.value === seed.city) e.target.select(); }}
+                placeholder={seed.city}
+                className={`w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] ${ghostClass(city, seed.city)}`}
               />
-              <p className="mt-1 text-[11px] text-eve-cream/60 italic font-serif">
-                Helps Eve disambiguate when multiple restaurants share a name.
-              </p>
             </div>
-
             <div>
-              <label className="block text-[11px] tracking-wide text-eve-gold/80 font-medium mb-2">
-                Cuisine
+              <label className="block text-[11px] tracking-wide text-eve-cream/65 font-medium mb-1.5">
+                Cuisine <span className="opacity-50">(optional — Eve will infer)</span>
               </label>
               <input
                 type="text"
-                value={cuisine === DEMO_RESTAURANTS[0].cuisine ? '' : cuisine}
-                onChange={(e) => setCuisine((e.target.value || DEMO_RESTAURANTS[0].cuisine) as Cuisine)}
-                placeholder="Eve will infer this from your name + city if you skip it"
+                value={cuisine}
+                onChange={(e) => setCuisine(e.target.value as Cuisine)}
+                onFocus={(e) => { if (e.target.value === seed.cuisine) e.target.select(); }}
+                placeholder="Eve infers from name + city"
                 list="restaurant-cuisine-suggestions"
-                className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base text-eve-cream placeholder:text-eve-cream/45 placeholder:italic placeholder:font-serif"
+                className={`w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] ${ghostClass(cuisine, seed.cuisine)}`}
               />
               <datalist id="restaurant-cuisine-suggestions">
-                {CUISINES.map((c) => (
-                  <option key={c.id} value={c.id} />
-                ))}
+                {CUISINES.map((c) => (<option key={c.id} value={c.id} />))}
               </datalist>
             </div>
-
             <div>
-              <label className="block text-[11px] tracking-wide text-eve-gold/80 font-medium mb-2">
-                Brand voice
+              <label className="block text-[11px] tracking-wide text-eve-cream/65 font-medium mb-1.5">
+                Brand voice <span className="opacity-50">(optional)</span>
               </label>
               <input
                 type="text"
-                value={voice === DEMO_RESTAURANTS[0].voice ? '' : voice}
-                onChange={(e) => setVoice(e.target.value || DEMO_RESTAURANTS[0].voice)}
-                placeholder={DEMO_RESTAURANTS[0].voice}
-                className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-base text-eve-cream placeholder:text-eve-cream/45 placeholder:italic placeholder:font-serif"
+                value={voice}
+                onChange={(e) => setVoice(e.target.value)}
+                onFocus={(e) => { if (e.target.value === seed.voice) e.target.select(); }}
+                placeholder={seed.voice}
+                className={`w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] ${ghostClass(voice, seed.voice)}`}
               />
             </div>
+          </div>
 
-            <div>
-              <label className="block text-[11px] tracking-wide text-eve-gold/80 font-medium mb-2">
-                Signature dishes <span className="opacity-50">(optional — Eve will research)</span>
-              </label>
-              <textarea
-                rows={3}
-                value={signature === DEMO_RESTAURANTS[0].signatureDishes ? '' : signature}
-                onChange={(e) => setSignature(e.target.value || DEMO_RESTAURANTS[0].signatureDishes)}
-                placeholder={DEMO_RESTAURANTS[0].signatureDishes}
-                className="w-full px-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] leading-relaxed resize-none text-eve-cream placeholder:text-eve-cream/45 placeholder:italic placeholder:font-serif"
-              />
-            </div>
+          <div className="mt-4">
+            <label className="block text-[11px] tracking-wide text-eve-cream/65 font-medium mb-1.5">
+              Signature dishes <span className="opacity-50">(optional)</span>
+            </label>
+            <textarea
+              rows={2}
+              value={signature}
+              onChange={(e) => setSignature(e.target.value)}
+              onFocus={(e) => { if (e.target.value === seed.signatureDishes) e.target.select(); }}
+              placeholder={seed.signatureDishes}
+              className={`w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] leading-relaxed resize-none ${ghostClass(signature, seed.signatureDishes)}`}
+            />
+          </div>
 
-            <div className="flex flex-wrap gap-2">
-              {DEMO_RESTAURANTS.map((d) => (
-                <button
-                  key={d.id}
-                  onClick={() => {
-                    setName(d.name);
-                    setCity(d.city);
-                    setCuisine(d.cuisine);
-                    setVoice(d.voice);
-                    setSignature(d.signatureDishes);
-                  }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-xs font-medium text-eve-cream/70 hover:text-eve-cream"
-                >
-                  <Sparkles size={11} />
-                  Try: {d.name}
-                </button>
-              ))}
-            </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {DEMO_RESTAURANTS.map((d) => (
+              <button
+                key={d.id}
+                onClick={() => {
+                  setName(d.name);
+                  setCity(d.city);
+                  setCuisine(d.cuisine);
+                  setVoice(d.voice);
+                  setSignature(d.signatureDishes);
+                  setDishName('');
+                  setDishDescription('');
+                  setSuggestion(null);
+                  setPack(null);
+                  setPosted(false);
+                  setEvePulse(null);
+                  autoSuggestedRef.current = false;
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-xs font-medium text-eve-cream/70 hover:text-eve-cream"
+              >
+                <Sparkles size={11} />
+                {d.name}
+              </button>
+            ))}
+          </div>
 
-            <div className="pt-2 border-t border-white/10">
-              <p className="text-[12px] text-eve-cream/60 italic font-serif mb-3 text-center">
-                Skip everything else and Eve will figure out tonight's special from your reviews and current trends.
-              </p>
-              <div className="flex justify-center">
-                <button
-                  onClick={saveBrandFn}
-                  disabled={!name.trim() || !city.trim()}
-                  className="inline-flex items-center gap-2 px-7 py-3.5 rounded-full font-serif italic font-bold text-lg text-eve-ink bg-gradient-to-r from-amber-200 via-eve-gold to-eve-rose disabled:opacity-30 transition-all shadow-[0_0_44px_rgba(245,216,150,0.40)]"
-                >
-                  <ChefHat size={18} />
-                  Generate tonight's look
-                </button>
+          {/* WHAT'S ON TONIGHT — same page, just before Generate button */}
+          <div className="mt-7 pt-7 border-t border-white/10">
+            <p className="text-[11px] tracking-wide text-eve-gold/80 italic font-serif mb-1">
+              What's on tonight?
+            </p>
+            <p className="text-[13px] text-eve-cream/65 italic font-serif mb-3">
+              Optional. Leave blank and Eve picks one for you from your reviews and trends.
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="md:col-span-1">
+                <label className="block text-[11px] tracking-wide text-eve-cream/65 font-medium mb-1.5">
+                  Dish name
+                </label>
+                <input
+                  value={dishName}
+                  onChange={(e) => setDishName(e.target.value)}
+                  placeholder={suggesting ? 'Eve is reading your reviews…' : (suggestion?.dishName || 'Eve will pick one')}
+                  className={`w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] ${
+                    !dishName
+                      ? 'text-eve-cream placeholder:text-eve-cream/55 placeholder:italic placeholder:font-serif'
+                      : 'text-eve-cream'
+                  }`}
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-[11px] tracking-wide text-eve-cream/65 font-medium mb-1.5">
+                  Tonight's note <span className="opacity-50">(optional)</span>
+                </label>
+                <input
+                  value={dishDescription}
+                  onChange={(e) => setDishDescription(e.target.value)}
+                  placeholder={suggestion?.dishDescription || 'e.g. Made with the new spice blend, small batch'}
+                  className={`w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] ${
+                    !dishDescription
+                      ? 'text-eve-cream placeholder:text-eve-cream/55 placeholder:italic placeholder:font-serif'
+                      : 'text-eve-cream'
+                  }`}
+                />
               </div>
             </div>
-          </div>
-        </main>
-      </div>
-    );
-  }
 
-  return (
-    <div className="relative z-10 min-h-screen flex flex-col">
-      <header className="px-6 md:px-10 py-5 flex items-center justify-between border-b border-white/5">
-        <div className="inline-flex items-center gap-3">
-          <EveLogo size={36} withWordmark />
-          <span className="hidden md:inline text-xs text-eve-cream/55 italic font-serif">
-            for restaurants · {brand?.name}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setSetupOpen(true)}
-            className="px-3 py-2 rounded-full bg-white/5 hover:bg-white/10 text-xs font-semibold text-eve-cream/70 transition-colors"
-          >
-            Edit brand
-          </button>
-          <button
-            onClick={onSwitchToDiner}
-            className="px-3 py-2 rounded-full bg-white/5 hover:bg-white/10 text-xs font-semibold text-eve-cream/70 transition-colors"
-          >
-            For diners ↗
-          </button>
-        </div>
-      </header>
+            {suggestion && !pack && (
+              <p className="mt-3 text-[12px] text-eve-cream/55 italic font-serif">
+                Eve suggested <span className="text-eve-gold">{suggestion.dishName}</span> based on {suggestion.mode === 'from_reviews' ? 'your recent reviews' : 'tonight\u2019s trends'}.
+                {suggestion.alternatives?.length > 0 && (
+                  <>
+                    {' Or try: '}
+                    {suggestion.alternatives.slice(0, 3).map((a, i) => (
+                      <button
+                        key={i}
+                        onClick={() => { setDishName(a.dishName); setDishDescription(a.rationale); }}
+                        className="text-eve-cream/85 underline decoration-dotted underline-offset-2 hover:text-eve-rose ml-1"
+                      >
+                        {a.dishName}{i < Math.min(2, suggestion.alternatives.length - 1) ? ',' : ''}
+                      </button>
+                    ))}
+                  </>
+                )}
+              </p>
+            )}
 
-      <main className="flex-1 max-w-5xl mx-auto w-full px-4 md:px-8 py-8">
-        <section className="rounded-3xl border border-white/10 bg-white/[0.03] backdrop-blur p-6 md:p-8">
-          <p className="text-[11px] tracking-wide text-eve-gold/80 italic font-serif mb-2">
-            Tonight at {brand?.name}
-          </p>
-          <h1 className="font-serif text-3xl md:text-4xl leading-tight mb-5 text-eve-cream">
-            What's on tonight?
-          </h1>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="md:col-span-1">
-              <label className="block text-[11px] tracking-wide text-eve-gold/80 font-medium mb-2">
-                Dish name
-              </label>
-              <input
-                value={dishName}
-                onChange={(e) => setDishName(e.target.value)}
-                placeholder="Eve will pick from your reviews"
-                className={`w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] ${
-                  suggestion && dishName === suggestion.dishName
-                    ? 'text-eve-cream/55 italic font-serif placeholder:text-eve-cream/60'
-                    : 'text-eve-cream placeholder:text-eve-cream/60 placeholder:italic placeholder:font-serif'
-                }`}
-              />
-            </div>
-            <div className="md:col-span-2">
-              <label className="block text-[11px] tracking-wide text-eve-gold/80 font-medium mb-2">
-                Tonight's note
-              </label>
-              <input
-                value={dishDescription}
-                onChange={(e) => setDishDescription(e.target.value)}
-                placeholder="e.g. Made with the new spice blend, small batch tonight"
-                className={`w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] ${
-                  suggestion && dishDescription === suggestion.dishDescription
-                    ? 'text-eve-cream/55 italic font-serif placeholder:text-eve-cream/60'
-                    : 'text-eve-cream placeholder:text-eve-cream/60 placeholder:italic placeholder:font-serif'
-                }`}
-              />
-            </div>
-          </div>
-
-          {error && (
-            <div className="mt-4 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-200 text-sm">
-              {error}
-            </div>
-          )}
-
-          <div className="mt-6 flex flex-wrap items-center gap-3">
-            {(suggesting || generating) && (
-              <div className="inline-flex items-center gap-2 px-5 py-3 rounded-full bg-eve-gold/10 border border-eve-gold/30 text-eve-gold text-sm font-medium italic font-serif">
-                <Loader2 size={14} className="animate-spin" />
-                {suggesting ? 'Eve is reading recent reviews and trends…' : 'Eve is forging your evening kit…'}
+            {error && (
+              <div className="mt-4 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-200 text-sm">
+                {error}
               </div>
             )}
-            {!suggesting && !generating && pack && (
+
+            <div className="mt-5 flex flex-wrap items-center gap-3">
               <button
                 onClick={generate}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-medium text-eve-cream/70 hover:text-eve-cream transition-colors"
-                title="Re-generate pack with current dish"
+                disabled={!name.trim() || !city.trim() || generating}
+                className="inline-flex items-center gap-2 px-7 py-3.5 rounded-full font-serif italic font-bold text-lg text-eve-ink bg-gradient-to-r from-amber-200 via-eve-gold to-eve-rose disabled:opacity-30 transition-all shadow-[0_0_44px_rgba(245,216,150,0.40)]"
               >
-                <Wand2 size={12} />
-                Regenerate
+                {generating ? <Loader2 size={16} className="animate-spin" /> : <ChefHat size={18} />}
+                {generating ? 'Eve is making your kit…' : pack ? 'Regenerate tonight\u2019s look' : 'Generate tonight\u2019s look'}
               </button>
-            )}
-            {!suggesting && !generating && (
-              <button
-                onClick={suggestSpecialFn}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-medium text-eve-cream/70 hover:text-eve-cream transition-colors"
-                title="Pick a different dish from reviews / trends"
-              >
-                <Lightbulb size={12} />
-                Different dish
-              </button>
-            )}
-            {pack && (
-              <button
-                onClick={publishToEve}
-                disabled={posted}
-                className={`inline-flex items-center gap-2 px-5 py-3 rounded-full font-semibold text-sm border transition-all ${
-                  posted
-                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
-                    : 'bg-eve-rose/15 text-eve-rose border-eve-rose/40 hover:bg-eve-rose/25'
-                }`}
-              >
-                {posted ? <Check size={14} /> : <Send size={14} />}
-                {posted ? 'Featured on Eve this evening' : 'Publish to Eve diners'}
-              </button>
+              {!generating && pack && (
+                <button
+                  onClick={pickDifferent}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-medium text-eve-cream/70 hover:text-eve-cream transition-colors"
+                  title="Pick a different dish from reviews / trends"
+                >
+                  <Lightbulb size={12} />
+                  Different dish
+                </button>
+              )}
+              {pack && (
+                <button
+                  onClick={publishToEve}
+                  disabled={posted}
+                  className={`inline-flex items-center gap-2 px-5 py-3 rounded-full font-semibold text-sm border transition-all ${
+                    posted
+                      ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+                      : 'bg-eve-rose/15 text-eve-rose border-eve-rose/40 hover:bg-eve-rose/25'
+                  }`}
+                >
+                  {posted ? <Check size={14} /> : <Send size={14} />}
+                  {posted ? 'Featured on Eve this evening' : 'Publish to Eve diners'}
+                </button>
+              )}
+            </div>
+
+            {evePulse && (
+              <div className="mt-5 p-4 rounded-2xl border border-eve-rose/35 bg-gradient-to-br from-eve-rose/8 to-eve-gold/5 animate-fade-in">
+                <p className="text-[12px] tracking-wide text-eve-rose italic font-serif mb-3 inline-flex items-center gap-1.5">
+                  <TrendingUp size={12} />
+                  Live on Eve right now
+                </p>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="text-center">
+                    <div className="font-serif text-3xl text-eve-cream">{evePulse.viewers}</div>
+                    <div className="text-[11px] text-eve-cream/60 italic font-serif">diners viewing</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="font-serif text-3xl text-eve-gold">{evePulse.planning}</div>
+                    <div className="text-[11px] text-eve-cream/60 italic font-serif">planning to come</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="font-serif text-3xl text-eve-rose">#{evePulse.cuisineRank}</div>
+                    <div className="text-[11px] text-eve-cream/60 italic font-serif">in {cuisine || 'cuisine'} tonight</div>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
-
-          {evePulse && (
-            <div className="mt-5 p-4 rounded-2xl border border-eve-rose/35 bg-gradient-to-br from-eve-rose/8 to-eve-gold/5 animate-fade-in">
-              <p className="text-[12px] tracking-wide text-eve-rose italic font-serif mb-3 inline-flex items-center gap-1.5">
-                <TrendingUp size={12} />
-                Live on Eve right now
-              </p>
-              <div className="grid grid-cols-3 gap-3">
-                <div className="text-center">
-                  <div className="font-serif text-3xl text-eve-cream">{evePulse.viewers}</div>
-                  <div className="text-[11px] text-eve-cream/60 italic font-serif">diners viewing</div>
-                </div>
-                <div className="text-center">
-                  <div className="font-serif text-3xl text-eve-gold">{evePulse.planning}</div>
-                  <div className="text-[11px] text-eve-cream/60 italic font-serif">planning to come</div>
-                </div>
-                <div className="text-center">
-                  <div className="font-serif text-3xl text-eve-rose">#{evePulse.cuisineRank}</div>
-                  <div className="text-[11px] text-eve-cream/60 italic font-serif">in {cuisine} tonight</div>
-                </div>
-              </div>
-            </div>
-          )}
         </section>
-
-        {suggestion && (
-          <section className="mt-6 rounded-3xl border border-eve-gold/30 bg-gradient-to-br from-eve-gold/8 to-eve-rose/5 p-6 md:p-7 animate-fade-in-up">
-            <div className="flex items-start justify-between gap-3 mb-3">
-              <div>
-                <p className="text-[10px] tracking-wide text-eve-gold mb-1 italic font-serif inline-flex items-center gap-1.5">
-                  <Lightbulb size={11} />
-                  Eve suggests · {suggestion.mode === 'from_reviews' ? 'from your recent reviews' : 'from current trends'}
-                </p>
-                <h3 className="font-serif text-2xl text-eve-cream">{suggestion.dishName}</h3>
-              </div>
-              <span className="text-[10px] tracking-wide uppercase text-eve-rose/85 font-semibold">
-                Auto-filled below
-              </span>
-            </div>
-            <p className="text-[14px] text-eve-cream/80 italic font-serif leading-snug mb-3">
-              {suggestion.rationale}
-            </p>
-            {suggestion.alternatives?.length > 0 && (
-              <div className="mt-4">
-                <p className="text-[10px] tracking-wide text-eve-cream/65 mb-2 italic font-serif">
-                  Or try
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {suggestion.alternatives.map((alt, i) => (
-                    <button
-                      key={i}
-                      onClick={() => applySuggestionAlt(alt)}
-                      className="text-[12px] px-3 py-1.5 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 hover:border-eve-gold/40 text-eve-cream/85 transition-colors"
-                      title={alt.rationale}
-                    >
-                      {alt.dishName}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            {suggestion.recommendedRestaurants?.length > 0 && (
-              <div className="mt-5 pt-5 border-t border-white/10">
-                <p className="text-[10px] tracking-wide text-eve-cream/55 mb-3 italic font-serif">
-                  Restaurants known for {suggestion.dishName}
-                </p>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  {suggestion.recommendedRestaurants.map((r, i) => (
-                    <div key={i} className="rounded-2xl bg-white/[0.03] border border-white/10 p-3">
-                      <div className="font-serif text-[15px] text-eve-cream font-semibold">{r.name}</div>
-                      <div className="text-[11px] text-eve-cream/55 mb-1.5">{r.city}</div>
-                      <p className="text-[12px] text-eve-cream/75 leading-snug">{r.why}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </section>
-        )}
 
         {pack && (
           <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-5">
             {/* Instagram */}
             <section className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur overflow-hidden animate-fade-in-up">
               <header className="px-5 py-3 flex items-center justify-between border-b border-white/5">
-                <div className="inline-flex items-center gap-2">
-                  <span className="text-[10px] tracking-wide text-eve-gold/80 italic font-serif">
-                    Instagram post
-                  </span>
-                </div>
+                <span className="text-[10px] tracking-wide text-eve-gold/80 italic font-serif">Instagram post</span>
                 <div className="flex gap-1">
                   <button
                     onClick={openInstagramShare}
@@ -701,9 +589,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
             {/* Reel */}
             <section className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur overflow-hidden animate-fade-in-up">
               <header className="px-5 py-3 flex items-center justify-between border-b border-white/5">
-                <span className="text-[10px] tracking-wide text-eve-gold/80 italic font-serif">
-                  15-sec Reel · 3 scenes + voiceover
-                </span>
+                <span className="text-[10px] tracking-wide text-eve-gold/80 italic font-serif">15-sec Reel · 3 scenes + voiceover</span>
                 <button
                   onClick={() => copyToClipboard('reel', pack.reel.fullVoiceoverScript)}
                   className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 text-[10px] font-semibold tracking-wide uppercase text-eve-cream/70 inline-flex items-center gap-1"
@@ -738,11 +624,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                   Full voiceover: "{pack.reel.fullVoiceoverScript}"
                 </p>
                 {reelAudio && (
-                  <audio
-                    controls
-                    src={reelAudio}
-                    className="mt-3 w-full h-9 rounded-full"
-                  />
+                  <audio controls src={reelAudio} className="mt-3 w-full h-9 rounded-full" />
                 )}
               </div>
             </section>
@@ -750,9 +632,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
             {/* Menu Card */}
             <section className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur overflow-hidden animate-fade-in-up">
               <header className="px-5 py-3 flex items-center justify-between border-b border-white/5">
-                <span className="text-[10px] tracking-wide text-eve-gold/80 italic font-serif">
-                  Menu card
-                </span>
+                <span className="text-[10px] tracking-wide text-eve-gold/80 italic font-serif">Menu card</span>
                 <button
                   onClick={() =>
                     downloadText(
@@ -769,21 +649,14 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                 <div className="flex items-baseline justify-between mb-3">
                   <h3 className="font-serif text-2xl text-eve-cream">{pack.menuCard.name}</h3>
                   {pack.menuCard.suggestedPrice && (
-                    <span className="font-serif text-xl text-eve-gold">
-                      {pack.menuCard.suggestedPrice}
-                    </span>
+                    <span className="font-serif text-xl text-eve-gold">{pack.menuCard.suggestedPrice}</span>
                   )}
                 </div>
-                <p className="text-[14px] text-eve-cream/85 leading-relaxed">
-                  {pack.menuCard.description}
-                </p>
+                <p className="text-[14px] text-eve-cream/85 leading-relaxed">{pack.menuCard.description}</p>
                 {pack.menuCard.allergenTags.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-1.5">
                     {pack.menuCard.allergenTags.map((tag, i) => (
-                      <span
-                        key={i}
-                        className="px-2 py-0.5 rounded-full text-[10px] tracking-wide uppercase text-eve-rose/90 border border-eve-rose/30 bg-eve-rose/5"
-                      >
+                      <span key={i} className="px-2 py-0.5 rounded-full text-[10px] tracking-wide uppercase text-eve-rose/90 border border-eve-rose/30 bg-eve-rose/5">
                         {tag}
                       </span>
                     ))}
@@ -795,9 +668,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
             {/* Email + SMS */}
             <section className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur overflow-hidden animate-fade-in-up">
               <header className="px-5 py-3 flex items-center justify-between border-b border-white/5">
-                <span className="text-[10px] tracking-wide text-eve-gold/80 italic font-serif">
-                  Email + SMS
-                </span>
+                <span className="text-[10px] tracking-wide text-eve-gold/80 italic font-serif">Email + SMS</span>
                 <button
                   onClick={() =>
                     copyToClipboard(
@@ -812,29 +683,19 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
               </header>
               <div className="p-5 space-y-4">
                 <div>
-                  <p className="text-[10px] tracking-wide text-eve-cream/55 mb-1 italic font-serif">
-                    Email subject
-                  </p>
-                  <p className="text-[15px] text-eve-cream font-medium">
-                    {pack.emailBlast.subject}
-                  </p>
+                  <p className="text-[10px] tracking-wide text-eve-cream/55 mb-1 italic font-serif">Email subject</p>
+                  <p className="text-[15px] text-eve-cream font-medium">{pack.emailBlast.subject}</p>
                 </div>
                 <div>
-                  <p className="text-[10px] tracking-wide text-eve-cream/55 mb-1 italic font-serif">
-                    Email body
-                  </p>
+                  <p className="text-[10px] tracking-wide text-eve-cream/55 mb-1 italic font-serif">Email body</p>
                   <div
                     className="text-[13px] text-eve-cream/85 leading-relaxed prose-eve"
                     dangerouslySetInnerHTML={{ __html: pack.emailBlast.bodyHtml }}
                   />
                 </div>
                 <div className="pt-4 border-t border-white/10">
-                  <p className="text-[10px] tracking-wide text-eve-cream/55 mb-1 italic font-serif">
-                    SMS blast
-                  </p>
-                  <p className="text-[14px] text-eve-cream/90 italic font-serif leading-snug">
-                    {pack.smsBlast}
-                  </p>
+                  <p className="text-[10px] tracking-wide text-eve-cream/55 mb-1 italic font-serif">SMS blast</p>
+                  <p className="text-[14px] text-eve-cream/90 italic font-serif leading-snug">{pack.smsBlast}</p>
                 </div>
               </div>
             </section>

@@ -125,6 +125,12 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   const initial = readURLParams();
 
   const [phase, setPhase] = useState<Phase>('input');
+  // Live mirror so async loops (e.g. background filler talk during plan
+  // generation) can see the current phase without stale closures.
+  const phaseRef = useRef<Phase>('input');
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
 
   const [city, setCity] = useState(initial?.city || SUGGESTED_CITY);
   const [vibe, setVibe] = useState<Vibe>(initial?.vibe || 'date_night');
@@ -156,6 +162,9 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   // 3 atStop2, 4 transition2to3, 5 atStop3, 6 closing, 7 done
   const [walkingIdx, setWalkingIdx] = useState<number>(-1);
   const walkingCancelRef = useRef(false);
+  // Once-per-plan auto-walk guard so Eve narrates the night the moment it
+  // finishes loading, instead of waiting on the user to hit the button.
+  const autoWalkedRef = useRef(false);
 
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
@@ -229,6 +238,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
     setStops([]);
     setStory(null);
     setPlanTitle('');
+    autoWalkedRef.current = false;
     setNarrationAudio(null);
     setNarrationText('');
     setEveIntroText('');
@@ -520,6 +530,42 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
 
       // Stream of Eve's progress phrases during planning. We sequence them
       // through TTS so she's audibly thinking out loud while the plan loads.
+      // Vibe-tinted filler keeps her voice present during the inevitable
+      // 8-10s wait for the skeleton, instead of going dead-silent.
+      const FILLERS_BY_VIBE: Record<Vibe, string[]> = {
+        date_night: [
+          'I keep thinking about what would make this night feel like yours…',
+          'Mm, that one. No, the other one. Hold on.',
+          'I want this to feel like the kind of night you tell someone about later.',
+          'Almost. Let me just pick the one I would have picked if I were going.',
+        ],
+        celebrating: [
+          'Tonight has to feel like something. Let me find that.',
+          'I want a place that knows how to make a fuss without trying.',
+          'Hold on. I am being picky on purpose.',
+        ],
+        casual: [
+          'Easy. Something nice. I have a feeling.',
+          'Let me check one more spot before I commit.',
+          'Almost. I just want to be sure.',
+        ],
+        family: [
+          'Let me find somewhere everyone can settle into.',
+          'Warm room, kind people. That is what I am after.',
+          'Hold on, picking the one with the patient kitchen.',
+        ],
+        friends: [
+          'Pulling together a good one for the gang. Hold on.',
+          'I want a place loud enough to laugh in.',
+          'Almost. Just checking who has a good table tonight.',
+        ],
+        solo: [
+          'Just for you. Let me pick somewhere kind.',
+          'Quiet. Beautiful. Hold on.',
+          'I want this one to feel like it knows you.',
+        ],
+      };
+
       eveIntro({ vibe: useVibe, city: useCity, party: useParty, freeText: useFreeText })
         .then(async (r) => {
           const lines = r.lines && r.lines.length > 0 ? r.lines : r.intro ? [r.intro] : [];
@@ -533,8 +579,26 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
               await speakAsEveAndWait(line);
             } catch {}
             if (cancelRef.current) return;
-            // Small pause between thoughts so it feels human
-            await new Promise((r) => setTimeout(r, 180));
+            await new Promise((r) => setTimeout(r, 220));
+          }
+
+          // If the plan is still loading after the intro lines, keep talking.
+          // Eve does NOT go silent while she "thinks". Conversational filler
+          // until skeleton lands or stops are ready or user cancels.
+          const fillers = FILLERS_BY_VIBE[useVibe] || FILLERS_BY_VIBE.casual;
+          let i = 0;
+          while (
+            !cancelRef.current &&
+            phaseRef.current === 'forging' &&
+            i < fillers.length
+          ) {
+            const line = fillers[i++];
+            setEveIntroText(line);
+            try {
+              await speakAsEveAndWait(line);
+            } catch {}
+            if (cancelRef.current) return;
+            await new Promise((r) => setTimeout(r, 320));
           }
         })
         .catch(() => {});
@@ -783,7 +847,16 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
               nextLocation = resolved;
               setCity(resolved);
               result.isComplete = true;
-              result.spokenReply = `Got you near ${resolved}. Pulling tonight together now.`;
+              const v = (result.extracted.vibe as Vibe) || nextVibe;
+              const vibeLine: Record<Vibe, string> = {
+                date_night: `Got you near ${resolved}. Hold on, I'm finding somewhere worthy of you tonight…`,
+                celebrating: `Got you near ${resolved}. Let me set up the kind of night this calls for.`,
+                casual: `Got you near ${resolved}. I'll keep it easy. One sec.`,
+                family: `Got you near ${resolved}. Let me pull together something everyone will love.`,
+                friends: `Got you near ${resolved}. Pulling together a good night with the gang. Hold on.`,
+                solo: `Got you near ${resolved}. Just for you, tonight. Let me think.`,
+              };
+              result.spokenReply = vibeLine[v] || vibeLine.casual;
             }
           } catch {
             // Permission denied / unavailable — fall through to the
@@ -1155,6 +1228,22 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
     }
     if (!walkingCancelRef.current) setWalkingIdx(-1);
   }, [story, speakAsEveAndWait, stopAllAudio]);
+
+  // Auto-trigger the walkthrough once the plan is fully loaded. Eve walks
+  // the user through the evening on her own — no button click needed.
+  useEffect(() => {
+    if (autoWalkedRef.current) return;
+    if (muted || userMuted) return;
+    if (!story) return;
+    if (stops.length < 2) return;
+    if (!stops.every((s) => s.status === 'ready' || s.status === 'error')) return;
+    autoWalkedRef.current = true;
+    const t = setTimeout(() => {
+      if (walkingCancelRef.current) return;
+      startWalkthrough();
+    }, 900);
+    return () => clearTimeout(t);
+  }, [story, stops, muted, userMuted, startWalkthrough]);
 
   const stopWalkthrough = useCallback(() => {
     walkingCancelRef.current = true;
