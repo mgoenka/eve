@@ -220,14 +220,13 @@
 
     <p class="section-num">SYSTEM ARCHITECTURE · v22</p>
     <h1>Eve is a multimodal AI evening concierge built end-to-end on Google Cloud.</h1>
-    <p class="lede">Voice-in / voice-out conversational interface, multimodal interleaved venue cards, Search-grounded reasoning, ADK-pattern agent runtime, real-time TTS. Single Cloud Run service serves both diner and restaurant surfaces. Built solo for the Build with AI Hackathon 2026 at the Computer History Museum.</p>
+    <p class="lede">Voice-in / voice-out conversational interface, multimodal interleaved venue cards, Search-grounded reasoning, ADK-pattern agent runtime, real-time TTS. Single Cloud Run service serves both diner and restaurant surfaces.</p>
     <div class="meta">
-      <span class="pill">Mandatory: Gemini interleaved ✓</span>
-      <span class="pill">Mandatory: Google Cloud ✓</span>
-      <span class="pill">Mandatory: Google GenAI SDK ✓</span>
-      <span class="pill alt">Bonus: ADK-pattern agent runtime</span>
-      <span class="pill alt">Bonus: Google Search grounding</span>
-      <span class="pill alt">Bonus: GDG San Jose member</span>
+      <span class="pill">Gemini 2.5 Flash Image · interleaved TEXT+IMAGE</span>
+      <span class="pill">Google Search grounding · no hallucinations</span>
+      <span class="pill">Cloud TTS Neural2-F · SSML prosody</span>
+      <span class="pill alt">ADK-pattern agent runtime</span>
+      <span class="pill alt">Voice barge-in · auto-walkthrough</span>
     </div>
 
     <!-- Flow chart -->
@@ -520,7 +519,7 @@
     <section>
       <p class="section-num">05 / STACK</p>
       <h2>Google products in use</h2>
-      <p>Eight discrete Google surfaces are wired into one Cloud Run service. The mandatory tech (interleaved Gemini output, Google GenAI SDK, Google Cloud hosting) is fully exercised; the rest are bonus signal.</p>
+      <p>Eight discrete Google surfaces are wired into one Cloud Run service.</p>
       <table class="stack-table">
         <thead>
           <tr><th style="width:200px">Product</th><th style="width:200px">Role</th><th>Where it shows up in Eve</th></tr>
@@ -614,7 +613,7 @@
     <section>
       <p class="section-num">08 / AGENT RUNTIME</p>
       <h2>ADK-pattern Agent / Tool / Runner</h2>
-      <p>A native TypeScript abstraction in <code>agent.ts</code> mirrors Google's ADK architecture without taking on a fragile mid-hackathon dependency. Tools are typed function declarations; the runner executes them in a deterministic plan and reports per-call latency telemetry.</p>
+      <p>A native TypeScript abstraction in <code>agent.ts</code> mirrors Google's ADK architecture. Tools are typed function declarations; the runner executes them in a deterministic plan and reports per-call latency telemetry.</p>
       <pre><span class="com">// Try the agent runtime live:</span>
 curl -X POST https://eve.mohitgoenka.com/api/agent/run \
   -H <span class="str">'Content-Type: application/json'</span> \
@@ -635,7 +634,7 @@ curl -X POST https://eve.mohitgoenka.com/api/agent/run \
       <h2>Mohit Goenka</h2>
       <div class="bio">
         <h3>Hacker. Builder. Problem-solver. 120+ patents.</h3>
-        <p><strong>Mohit Goenka</strong> built Eve solo, end-to-end, in one day for the Google I/O Build with AI Hackathon 2026 at the Computer History Museum. Twelve production AI apps shipped this year. Active member of <strong>GDG San Jose</strong>.</p>
+        <p><strong>Mohit Goenka</strong> is the founder. Twelve production AI apps shipped this year, end-to-end. Eve is the latest.</p>
       </div>
     </section>
 

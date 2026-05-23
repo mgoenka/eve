@@ -5,8 +5,7 @@
 // (the JS port is still moving) — instead it mirrors ADK's core
 // architectural concepts (declarative tools, schema-typed inputs,
 // runtime-orchestrated tool calls) directly on top of `@google/genai`
-// so we get the same architectural shape without taking on a fragile
-// dependency mid-hackathon.
+// so we get the same architectural shape without an extra dependency.
 //
 // Concepts borrowed from ADK:
 //   - Tool: a typed function the agent can call (name, description,

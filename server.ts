@@ -116,8 +116,8 @@ app.get('/api/health', (_req, res) => {
 });
 
 // ADK-pattern agent endpoint: the same three tools the rest of the
-// app uses, exposed through a single agent runtime call. Lets judges
-// see the agent abstraction in action.
+// app uses, exposed through a single agent runtime call. Inspectable
+// from any client that wants to observe the agent abstraction.
 app.post('/api/agent/run', async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
   const plan = req.body?.plan;
