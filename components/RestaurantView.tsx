@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Sparkles, Wand2, RotateCcw, Download, Copy, Check, ChefHat, Send, Lightbulb, Loader2, Instagram, TrendingUp } from 'lucide-react';
+import { Sparkles, Wand2, RotateCcw, Download, Copy, Check, ChefHat, Send, Lightbulb, Loader2, Instagram, TrendingUp, Link as LinkIcon } from 'lucide-react';
 import { CUISINES, DEMO_RESTAURANTS } from '../constants';
 import type { Cuisine, ContentPack, RestaurantBrand } from '../types';
 import { generateContentPack, postSpecial, synthesize, suggestSpecial } from '../services/eveService';
@@ -81,6 +81,47 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
   const [suggesting, setSuggesting] = useState(false);
   const [suggestion, setSuggestion] = useState<SuggestSpecialResponse | null>(null);
   const [evePulse, setEvePulse] = useState<{ viewers: number; planning: number; cuisineRank: number } | null>(null);
+  // Instagram connection state — pulled from server brand doc.
+  const [igConnected, setIgConnected] = useState<boolean>(false);
+  const [igPublishing, setIgPublishing] = useState<boolean>(false);
+
+  // Stable brand id: slugified "name-city"
+  const brandId = `${(name || 'eve').toLowerCase()}-${(city || 'brand').toLowerCase()}`
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+
+  // Fetch brand from server on mount + when name/city stabilize. Reads
+  // Instagram-connected state and any other server-side brand info.
+  useEffect(() => {
+    if (!name.trim() || !city.trim()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/restaurant/brand/${encodeURIComponent(brandId)}`);
+        const data = (await res.json()) as { brand?: any };
+        if (cancelled) return;
+        // Server brand existence implies the IG token is on the server side.
+        // We expose only a boolean to the client.
+        if (data.brand?.instagramBusinessAccountId) setIgConnected(true);
+      } catch {}
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [brandId, name, city]);
+
+  // After the IG OAuth callback redirects back with ?ig=connected, refresh.
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const igStatus = sp.get('ig');
+    if (!igStatus) return;
+    if (igStatus === 'connected') setIgConnected(true);
+    // Drop the param from the URL once we've consumed it.
+    sp.delete('ig');
+    const cleanUrl = `${window.location.pathname}${sp.toString() ? `?${sp.toString()}` : ''}`;
+    window.history.replaceState({}, '', cleanUrl);
+  }, []);
 
   const cancelRef = useRef(false);
 
@@ -181,6 +222,46 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
       setError(err?.message || 'Suggest failed');
     } finally {
       setSuggesting(false);
+    }
+  };
+
+  // Real Instagram Graph API publish via the server. The server has the
+  // long-lived page token + IG Business Account id stored against this
+  // brandId. Falls back to copy-share if it errors out.
+  const publishToInstagramAPI = async () => {
+    if (!pack) return;
+    if (!pack.instagramPost.imageData) {
+      copyAndDownloadFallback(
+        `${pack.instagramPost.caption}\n\n${pack.instagramPost.hashtags.map((h) => '#' + h).join(' ')}`
+      );
+      return;
+    }
+    setIgPublishing(true);
+    try {
+      // Upload the base64 image to a temporary URL the Graph API can fetch.
+      // For now we use a data URL; a hardened version would push the bytes
+      // to GCS and pass the public https URL.
+      const imageUrl = `data:${pack.instagramPost.imageMime || 'image/png'};base64,${pack.instagramPost.imageData}`;
+      const caption = `${pack.instagramPost.caption}\n\n${pack.instagramPost.hashtags
+        .map((h) => '#' + h)
+        .join(' ')}`;
+      const res = await fetch('/api/instagram/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brandId, imageUrl, caption }),
+      });
+      const data = (await res.json()) as { ok?: boolean; mediaId?: string; error?: string };
+      if (!res.ok || !data.ok) throw new Error(data.error || `Publish failed (${res.status})`);
+      setCopied('ig_published');
+      setTimeout(() => setCopied(null), 3000);
+    } catch (err: any) {
+      console.warn('[ig] direct publish failed, falling back to share:', err?.message || err);
+      const text = `${pack.instagramPost.caption}\n\n${pack.instagramPost.hashtags
+        .map((h) => '#' + h)
+        .join(' ')}`;
+      copyAndDownloadFallback(text);
+    } finally {
+      setIgPublishing(false);
     }
   };
 
@@ -539,13 +620,40 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
               <header className="px-5 py-3 flex items-center justify-between border-b border-white/5">
                 <span className="text-[10px] tracking-wide text-eve-gold/80 italic font-serif">Instagram post</span>
                 <div className="flex gap-1">
+                  {!igConnected && (
+                    <a
+                      href={`/api/auth/instagram/start?brandId=${encodeURIComponent(brandId)}`}
+                      className="px-3 py-1 rounded-full bg-white/5 hover:bg-white/10 text-[10px] font-bold tracking-wide uppercase text-eve-cream/85 border border-white/15 hover:border-eve-gold/45 inline-flex items-center gap-1"
+                      title="Connect Instagram for one-click publishing"
+                    >
+                      <LinkIcon size={10} />
+                      Connect IG
+                    </a>
+                  )}
                   <button
-                    onClick={openInstagramShare}
-                    className="px-3 py-1 rounded-full bg-gradient-to-r from-pink-500/20 to-purple-500/20 hover:from-pink-500/30 hover:to-purple-500/30 border border-pink-400/40 text-[10px] font-bold tracking-wide uppercase text-pink-300 inline-flex items-center gap-1"
-                    title="Share to Instagram"
+                    onClick={igConnected ? publishToInstagramAPI : openInstagramShare}
+                    disabled={igPublishing}
+                    className="px-3 py-1 rounded-full bg-gradient-to-r from-pink-500/20 to-purple-500/20 hover:from-pink-500/30 hover:to-purple-500/30 border border-pink-400/40 text-[10px] font-bold tracking-wide uppercase text-pink-300 inline-flex items-center gap-1 disabled:opacity-50"
+                    title={igConnected ? 'Post directly to Instagram' : 'Copy + open Instagram'}
                   >
-                    {copied === 'ig_share' ? <Check size={10} /> : <Instagram size={10} />}
-                    {copied === 'ig_share' ? 'Copied & opening IG' : 'Post to IG'}
+                    {igPublishing ? (
+                      <Loader2 size={10} className="animate-spin" />
+                    ) : copied === 'ig_published' ? (
+                      <Check size={10} />
+                    ) : copied === 'ig_share' ? (
+                      <Check size={10} />
+                    ) : (
+                      <Instagram size={10} />
+                    )}
+                    {igPublishing
+                      ? 'Posting…'
+                      : copied === 'ig_published'
+                        ? 'Posted to Instagram'
+                        : copied === 'ig_share'
+                          ? 'Copied & opening IG'
+                          : igConnected
+                            ? 'Post to IG'
+                            : 'Copy & share'}
                   </button>
                   {pack.instagramPost.imageData && (
                     <button

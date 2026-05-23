@@ -4,8 +4,10 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI } from '@google/genai';
 import { CUISINES, VIBES, DIETARY_PREFERENCES, DEMO_RESTAURANTS } from './constants';
-import type { PostedSpecial } from './types';
 import { AgentRuntime, buildEveBrainAgent } from './agent';
+import * as firestore from './lib/firestore';
+import * as stripeLib from './lib/stripe';
+import * as instagramLib from './lib/instagram';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -24,8 +26,6 @@ if (!GEMINI_API_KEY) {
 }
 
 const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
-
-const POSTED_SPECIALS: PostedSpecial[] = [];
 
 function jsonError(res: express.Response, code: number, message: string) {
   res.status(code).json({ error: message });
@@ -544,12 +544,16 @@ app.post('/api/reverse-geocode', async (req, res) => {
   }
 });
 
-app.get('/api/specials', (req, res) => {
-  const cityFilter = (req.query?.city || '').toString().toLowerCase();
-  const list = cityFilter
-    ? POSTED_SPECIALS.filter((s) => s.city.toLowerCase().includes(cityFilter))
-    : POSTED_SPECIALS;
-  res.json({ specials: list.slice(-20) });
+app.get('/api/specials', async (req, res) => {
+  const cityFilter = (req.query?.city || '').toString();
+  try {
+    const specials = cityFilter
+      ? await firestore.listSpecialsForCity(cityFilter, 25)
+      : await firestore.listSpecials(25);
+    res.json({ specials });
+  } catch (err: any) {
+    res.json({ specials: [] });
+  }
 });
 
 app.post('/api/plan-experience/skeleton', async (req, res) => {
@@ -614,8 +618,9 @@ app.post('/api/plan-experience/skeleton', async (req, res) => {
     whenLine = `Date: this plan is for ${dayLabel}. Consider day-of-week vibe (Tuesdays are quiet, Saturdays are busy) and pick venues that will plausibly be open and good that night.`;
   }
 
-  const specialsHints = POSTED_SPECIALS.filter((s) =>
-    s.city.toLowerCase().includes(city.toLowerCase().split(',')[0])
+  const allSpecials = await firestore.listSpecials(200);
+  const specialsHints = allSpecials.filter((s) =>
+    (s.city || '').toLowerCase().includes(city.toLowerCase().split(',')[0])
   )
     .slice(-5)
     .map(
@@ -1171,7 +1176,7 @@ Constraints:
   }
 });
 
-app.post('/api/post-special', (req, res) => {
+app.post('/api/post-special', async (req, res) => {
   const restaurantName: string = (req.body?.restaurantName || '').trim();
   const city: string = (req.body?.city || '').trim();
   const cuisine: string = (req.body?.cuisine || 'fusion').trim();
@@ -1183,21 +1188,237 @@ app.post('/api/post-special', (req, res) => {
   if (!restaurantName || !dishName || !city) {
     return jsonError(res, 400, 'restaurantName, dishName, city required');
   }
-  const id = `${restaurantName}-${Date.now()}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-  const special: PostedSpecial = {
-    id,
-    restaurantName,
-    city,
-    cuisine: cuisine as any,
-    dishName,
-    caption,
-    imageData,
-    imageMime,
-    postedAt: Date.now(),
-  };
-  POSTED_SPECIALS.push(special);
-  if (POSTED_SPECIALS.length > 200) POSTED_SPECIALS.shift();
-  res.json({ ok: true, id });
+  try {
+    const id = await firestore.addSpecial({
+      restaurantName,
+      city,
+      cuisine,
+      dishName,
+      caption,
+      imageData,
+      imageMime,
+      postedAtISO: new Date().toISOString(),
+    });
+    res.json({ ok: true, id });
+  } catch (err: any) {
+    jsonError(res, 500, `post-special failed: ${err?.message || 'unknown'}`);
+  }
+});
+
+// ---------- Brand persistence (replaces localStorage) ----------
+
+app.get('/api/restaurant/brand/:id', async (req, res) => {
+  try {
+    const brand = await firestore.getBrand(req.params.id);
+    if (!brand) return res.json({ brand: null });
+    // Never echo secret tokens to the client
+    const { instagramAccessToken, ...safe } = brand;
+    void instagramAccessToken;
+    res.json({ brand: safe });
+  } catch (err: any) {
+    jsonError(res, 500, err?.message || 'getBrand failed');
+  }
+});
+
+app.post('/api/restaurant/brand/:id', async (req, res) => {
+  try {
+    const allowed = ['name', 'city', 'cuisine', 'voice', 'signatureDishes', 'ownerUid'] as const;
+    const data: any = {};
+    for (const key of allowed) {
+      if (typeof req.body?.[key] !== 'undefined') data[key] = req.body[key];
+    }
+    await firestore.saveBrand(req.params.id, data);
+    res.json({ ok: true });
+  } catch (err: any) {
+    jsonError(res, 500, err?.message || 'saveBrand failed');
+  }
+});
+
+app.get('/api/restaurant/metrics/:name', async (req, res) => {
+  try {
+    const city = (req.query?.city || '').toString();
+    const days = Math.max(1, Math.min(30, Number(req.query?.days) || 7));
+    const metrics = await firestore.getMetricsForBrand(req.params.name, city, days);
+    res.json(metrics);
+  } catch (err: any) {
+    jsonError(res, 500, err?.message || 'metrics failed');
+  }
+});
+
+// ---------- Stripe checkout + webhook ----------
+
+app.post('/api/stripe/create-checkout-session', async (req, res) => {
+  if (!stripeLib.isStripeConfigured()) {
+    return jsonError(
+      res,
+      503,
+      'Checkout not yet enabled. The team is finishing the payment setup — check back soon.'
+    );
+  }
+  try {
+    const tier: 'restaurant' | 'diner' = req.body?.tier === 'restaurant' ? 'restaurant' : 'diner';
+    const returnPath: string = (req.body?.returnPath || '/pricing').toString();
+    const origin = req.headers.origin || `${req.protocol}://${req.get('host')}`;
+    const session = await stripeLib.createCheckoutSession({
+      tier,
+      successUrl: `${origin}/pricing?status=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancelUrl: `${origin}${returnPath}?status=canceled`,
+      customerEmail: req.body?.email,
+      metadata: { tier, returnPath },
+    });
+    res.json({ url: session.url });
+  } catch (err: any) {
+    jsonError(res, 500, err?.message || 'checkout failed');
+  }
+});
+
+// Stripe needs the raw body to validate webhook signatures.
+app.post(
+  '/api/stripe/webhook',
+  express.raw({ type: 'application/json' }),
+  async (req, res) => {
+    const stripe = stripeLib.getStripe();
+    const sig = req.headers['stripe-signature'] as string | undefined;
+    const whsec = process.env.STRIPE_WEBHOOK_SECRET || '';
+    if (!stripe || !whsec || !sig) return res.status(503).send('not configured');
+    let event: any;
+    try {
+      event = stripe.webhooks.constructEvent(req.body as Buffer, sig, whsec);
+    } catch (err: any) {
+      console.error('[stripe] webhook signature verify failed:', err?.message);
+      return res.status(400).send('bad signature');
+    }
+    try {
+      switch (event.type) {
+        case 'checkout.session.completed': {
+          const session = event.data.object as any;
+          const customerId = session.customer as string | undefined;
+          const subscriptionId = session.subscription as string | undefined;
+          const tier = (session.metadata?.tier as string) || '';
+          const email = (session.customer_details?.email || session.customer_email) as string | undefined;
+          const brandId = (session.metadata?.brandId as string) || email || customerId;
+          if (brandId) {
+            await firestore.saveBrand(brandId, {
+              stripeCustomerId: customerId,
+              stripeSubscriptionId: subscriptionId,
+              subscriptionStatus: 'active',
+            });
+          }
+          console.log(`[stripe] checkout completed for ${tier} → ${brandId}`);
+          break;
+        }
+        case 'customer.subscription.updated':
+        case 'customer.subscription.deleted': {
+          const sub = event.data.object as any;
+          const brandId = sub.metadata?.brandId || sub.customer;
+          if (brandId) {
+            await firestore.saveBrand(brandId, {
+              subscriptionStatus: sub.status,
+              stripeSubscriptionId: sub.id,
+            });
+          }
+          break;
+        }
+        case 'invoice.payment_failed': {
+          const inv = event.data.object as any;
+          const brandId = inv.metadata?.brandId || inv.customer;
+          if (brandId) await firestore.saveBrand(brandId, { subscriptionStatus: 'past_due' });
+          break;
+        }
+      }
+      res.json({ received: true });
+    } catch (err: any) {
+      console.error('[stripe] webhook handler error:', err?.message || err);
+      res.status(500).send('handler error');
+    }
+  }
+);
+
+// ---------- Instagram OAuth + publish ----------
+
+app.get('/api/auth/instagram/start', (req, res) => {
+  if (!instagramLib.isInstagramConfigured()) {
+    return jsonError(res, 503, 'Instagram publishing is not enabled yet — copy-share works in the meantime.');
+  }
+  const brandId = (req.query?.brandId || '').toString();
+  if (!brandId) return jsonError(res, 400, 'brandId required');
+  const state = Buffer.from(JSON.stringify({ brandId, ts: Date.now() })).toString('base64url');
+  res.redirect(instagramLib.buildAuthUrl(state));
+});
+
+app.get('/api/auth/instagram/callback', async (req, res) => {
+  if (!instagramLib.isInstagramConfigured()) {
+    return res.status(503).send('Instagram not configured');
+  }
+  const code = (req.query?.code || '').toString();
+  const stateRaw = (req.query?.state || '').toString();
+  if (!code || !stateRaw) return res.status(400).send('missing code or state');
+  let brandId = '';
+  try {
+    const parsed = JSON.parse(Buffer.from(stateRaw, 'base64url').toString('utf8'));
+    brandId = parsed.brandId;
+  } catch {
+    return res.status(400).send('bad state');
+  }
+  try {
+    const shortLived = await instagramLib.exchangeCodeForToken(code);
+    const { token: longLived } = await instagramLib.exchangeForLongLivedToken(shortLived);
+    const igAccount = await instagramLib.findInstagramBusinessAccount(longLived);
+    if (!igAccount) {
+      return res.redirect('/restaurant?ig=no_business_account');
+    }
+    await firestore.saveBrand(brandId, {
+      instagramAccessToken: igAccount.pageAccessToken,
+      instagramBusinessAccountId: igAccount.igBusinessAccountId,
+    });
+    res.redirect('/restaurant?ig=connected');
+  } catch (err: any) {
+    console.error('[instagram] callback failed:', err?.message || err);
+    res.redirect('/restaurant?ig=error');
+  }
+});
+
+app.post('/api/instagram/publish', async (req, res) => {
+  if (!instagramLib.isInstagramConfigured()) {
+    return jsonError(res, 503, 'Instagram publishing not enabled. Use copy-share for now.');
+  }
+  const brandId: string = (req.body?.brandId || '').trim();
+  const imageUrl: string = (req.body?.imageUrl || '').trim();
+  const caption: string = (req.body?.caption || '').trim();
+  if (!brandId || !imageUrl || !caption) {
+    return jsonError(res, 400, 'brandId, imageUrl, caption required');
+  }
+  try {
+    const brand = await firestore.getBrand(brandId);
+    if (!brand?.instagramAccessToken || !brand.instagramBusinessAccountId) {
+      return jsonError(res, 400, 'Brand has not connected Instagram yet.');
+    }
+    const result = await instagramLib.publishImageToInstagram({
+      igBusinessAccountId: brand.instagramBusinessAccountId,
+      pageAccessToken: brand.instagramAccessToken,
+      imageUrl,
+      caption,
+    });
+    res.json({ ok: true, mediaId: result.id });
+  } catch (err: any) {
+    jsonError(res, 500, err?.message || 'publish failed');
+  }
+});
+
+// ---------- Sitemap (SEO for city pages) ----------
+
+app.get('/sitemap.xml', (_req, res) => {
+  const base = 'https://eve.mohitgoenka.com';
+  const slugs = ['', 'restaurant', 'pricing', 'sf', 'nyc', 'austin', 'la', 'seattle', 'chicago'];
+  const today = new Date().toISOString().slice(0, 10);
+  const urls = slugs
+    .map(
+      (s) =>
+        `<url><loc>${base}/${s}</loc><lastmod>${today}</lastmod><changefreq>weekly</changefreq><priority>${s === '' ? '1.0' : '0.8'}</priority></url>`
+    )
+    .join('');
+  res.set('Content-Type', 'application/xml');
+  res.send(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls}</urlset>`);
 });
 
 app.post('/api/tts', async (req, res) => {

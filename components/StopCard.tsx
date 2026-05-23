@@ -1,14 +1,20 @@
-import { MapPin, Clock, Footprints, Sparkles, ExternalLink } from 'lucide-react';
+import { MapPin, Clock, Footprints, Sparkles, ExternalLink, BookOpen } from 'lucide-react';
 import type { ExperienceStop, StopKind } from '../types';
 import { STOP_KINDS } from '../constants';
+import { buildReservationLinks } from '../lib/reservations';
 
 interface Props {
   stop: ExperienceStop;
   index: number;
   city?: string;
+  whenISO?: string;
+  startTime?: string;
+  party?: number;
   highlighted?: boolean;
   dimmed?: boolean;
 }
+
+const RESERVABLE_KINDS: StopKind[] = ['dinner', 'dessert', 'drink', 'live_music'];
 
 // Per-kind food / scene photograph used as a soft warm placeholder while
 // Eve's AI image renders. The placeholder is hidden the moment the AI image
@@ -34,12 +40,22 @@ const KIND_GRADIENTS: Record<StopKind, { from: string; via: string; to: string }
   activity: { from: 'from-emerald-500/25', via: 'via-teal-500/25', to: 'to-amber-400/25' },
 };
 
-export function StopCard({ stop, index, city, highlighted, dimmed }: Props) {
+export function StopCard({ stop, index, city, whenISO, startTime, party, highlighted, dimmed }: Props) {
   const kindMeta = STOP_KINDS.find((k) => k.kind === stop.kind);
   const grad = KIND_GRADIENTS[stop.kind] || KIND_GRADIENTS.dinner;
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${stop.name} ${city || ''}`.trim())}`;
   const hasError = stop.status === 'error';
   const showSkeleton = !stop.imageData && (stop.status === 'pending' || stop.status === 'generating');
+
+  const reservationLinks = RESERVABLE_KINDS.includes(stop.kind)
+    ? buildReservationLinks({
+        restaurantName: stop.name,
+        city: city || '',
+        party,
+        whenISO,
+        startTime,
+      })
+    : null;
 
   return (
     <article
@@ -164,6 +180,33 @@ export function StopCard({ stop, index, city, highlighted, dimmed }: Props) {
             <ExternalLink size={9} />
           </a>
         </div>
+
+        {/* Reservation deep links — visible for food / drink / live music
+            stops. OpenTable first because it has the deepest pre-fill. */}
+        {reservationLinks && (
+          <div className="mt-3 pt-3 border-t border-white/10">
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <BookOpen size={11} className="text-eve-gold/80" />
+              <span className="text-[10px] tracking-wide uppercase text-eve-cream/55 font-semibold">
+                Book a table
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {reservationLinks.map((link) => (
+                <a
+                  key={link.platform}
+                  href={link.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-eve-ink-soft hover:bg-[#1a1a1e] border border-eve-gold/25 hover:border-eve-gold/45 text-eve-gold text-[11px] font-semibold tracking-wide transition-colors"
+                >
+                  {link.label}
+                  <ExternalLink size={9} />
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </article>
   );

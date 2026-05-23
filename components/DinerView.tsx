@@ -2139,6 +2139,9 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                   stop={stop}
                   index={i}
                   city={city}
+                  whenISO={whenISO}
+                  startTime={startTime}
+                  party={party}
                   highlighted={highlightedStopIdx === i}
                   dimmed={walkingIdx >= 0 && highlightedStopIdx >= 0 && highlightedStopIdx !== i}
                 />
