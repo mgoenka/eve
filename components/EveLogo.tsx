@@ -4,44 +4,46 @@ interface Props {
   withWordmark?: boolean;
 }
 
-// Filled side-profile silhouette of a woman with a long ponytail flowing
-// down the back, defined bust, bare shoulder. Inspired by the reference
-// silhouette art, recolored in the warm gold-rose-plum gradient.
+// Eve mark — head-only silhouette, gestural strokes, inspired by the
+// reference art: a profile face traced as a single line, dense flowing
+// hair across the back and crown, no bust or shoulders, no fill.
 
-// Single closed path traced clockwise from the top of the crown:
-// crown → forehead → nose → lips → chin → throat → front of neck →
-// collarbone → bust curve → bottom edge → up the ponytail's left side →
-// over the top of the ponytail → down behind the head → back to crown.
-const SILHOUETTE_PATH =
-  'M 38 6 ' +
-  'C 44 6 48 10 48 16 ' +
-  'L 48 19 ' +
-  'L 53 23 ' +
-  'L 47 26 ' +
-  'L 49 27 ' +
-  'L 46 29 ' +
-  'L 49 30 ' +
-  'L 47 31 ' +
-  'L 46 34 ' +
-  'C 45 36 43 37 41 37 ' +
-  'L 38 40 ' +
-  'L 36 44 ' +
-  'L 34 47 ' +
-  'C 36 49 39 51 41 54 ' +
-  'C 43 57 44 59 44 62 ' +
-  'L 6 62 ' +
-  'L 6 56 ' +
-  'C 4 48 4 36 6 28 ' +
-  'C 8 21 13 17 17 15 ' +
-  'L 23 13 ' +
-  'C 26 11 29 9 32 8 ' +
-  'C 34 7 36 6 38 6 ' +
-  'Z';
+// Single open curve from top of head → forehead → brow → nose bridge →
+// nose tip → philtrum → upper lip → mouth → lower lip → chin → under jaw.
+const FACE_PROFILE =
+  'M 38 10 ' +
+  'C 44 12 47 16 47 22 ' + // forehead + brow
+  'L 47 24 ' +              // brow ridge
+  'L 53 28 ' +              // nose tip
+  'L 47 30 ' +              // below nose
+  'L 49 32 ' +              // upper lip
+  'L 46 33 ' +              // mouth corner
+  'L 49 34 ' +              // lower lip
+  'L 47 36 ' +              // mouth-to-chin
+  'C 47 38 45 40 42 41 ' + // chin
+  'L 39 44';                // under jaw
 
-// Small whisp strands extending past the ponytail base — gives motion.
-const HAIR_WHISP_1 = 'M 5 56 C 2 60 1 64 4 66';
-const HAIR_WHISP_2 = 'M 8 60 C 6 64 5 67 8 68';
-const HAIR_WHISP_3 = 'M 12 60 C 11 64 11 66 14 67';
+// Subtle face features
+const EYEBROW = 'M 40 23 Q 42 22 45 23';
+const EYELASH = 'M 41 26 Q 43 26 44 27';
+const LIP_LINE = 'M 46 33 L 49 33';
+
+// Hair: many gestural strokes radiating from the crown back and out,
+// extending past the frame edges. Mix of S-curves, arcs, and tendrils.
+const HAIR_TOP_1 = 'M 38 10 C 32 6 24 6 18 12';
+const HAIR_TOP_2 = 'M 36 8 C 28 4 20 6 14 14';
+const HAIR_TOP_3 = 'M 32 6 C 22 4 12 8 10 18';
+const HAIR_CROWN_1 = 'M 38 10 C 30 12 22 14 16 22';
+const HAIR_CROWN_2 = 'M 38 12 C 28 16 20 22 16 30';
+const HAIR_BACK_1 = 'M 26 12 C 12 18 4 32 6 50';
+const HAIR_BACK_2 = 'M 22 14 C 8 22 2 38 8 56';
+const HAIR_BACK_3 = 'M 18 18 C 6 30 0 46 10 60';
+const HAIR_BACK_4 = 'M 14 24 C 4 36 4 50 14 60';
+const HAIR_TENDRIL_1 = 'M 26 24 C 22 32 24 42 30 48';
+const HAIR_TENDRIL_2 = 'M 30 26 C 28 36 32 46 36 50';
+const HAIR_TENDRIL_3 = 'M 34 30 Q 36 38 40 44';
+// A loose strand floating across in front of the chin
+const HAIR_FRONT = 'M 35 38 Q 32 44 28 48';
 
 export function EveLogo({ size = 36, className = '', withWordmark = false }: Props) {
   if (!withWordmark) {
@@ -71,30 +73,41 @@ export function EveLogo({ size = 36, className = '', withWordmark = false }: Pro
         <rect width="64" height="64" rx="14" fill="#1a0d2e" />
         <circle cx="32" cy="28" r="22" fill="url(#eve-glow-icon)" />
 
-        {/* Outline silhouette — same shape, no fill, gradient stroke */}
+        {/* Hair strokes — densest at the back/top, thinning out as they trail */}
+        <g
+          stroke="url(#eve-grad-icon)"
+          strokeLinecap="round"
+          fill="none"
+        >
+          <path d={HAIR_TOP_1} strokeWidth="1.6" opacity="0.95" />
+          <path d={HAIR_TOP_2} strokeWidth="1.4" opacity="0.85" />
+          <path d={HAIR_TOP_3} strokeWidth="1.3" opacity="0.75" />
+          <path d={HAIR_CROWN_1} strokeWidth="1.4" opacity="0.85" />
+          <path d={HAIR_CROWN_2} strokeWidth="1.3" opacity="0.7" />
+          <path d={HAIR_BACK_1} strokeWidth="1.7" opacity="0.95" />
+          <path d={HAIR_BACK_2} strokeWidth="1.5" opacity="0.85" />
+          <path d={HAIR_BACK_3} strokeWidth="1.4" opacity="0.75" />
+          <path d={HAIR_BACK_4} strokeWidth="1.2" opacity="0.6" />
+          <path d={HAIR_TENDRIL_1} strokeWidth="1.1" opacity="0.55" />
+          <path d={HAIR_TENDRIL_2} strokeWidth="1" opacity="0.5" />
+          <path d={HAIR_TENDRIL_3} strokeWidth="0.9" opacity="0.45" />
+          <path d={HAIR_FRONT} strokeWidth="1" opacity="0.5" />
+        </g>
+
+        {/* Face profile — single stroke, slightly thicker than hair */}
         <path
-          d={SILHOUETTE_PATH}
+          d={FACE_PROFILE}
           stroke="url(#eve-grad-icon)"
           strokeWidth="2.2"
+          strokeLinecap="round"
           strokeLinejoin="round"
-          strokeLinecap="round"
           fill="none"
         />
 
-        {/* Ponytail tie — small accent stroke where hair gathers */}
-        <path
-          d="M 20 13 Q 22 14 24 13"
-          stroke="url(#eve-grad-icon)"
-          strokeWidth="1.4"
-          strokeLinecap="round"
-          fill="none"
-          opacity="0.8"
-        />
-
-        {/* Whisp strands trailing past the ponytail bottom */}
-        <path d={HAIR_WHISP_1} stroke="url(#eve-grad-icon)" strokeWidth="1.2" strokeLinecap="round" fill="none" opacity="0.65" />
-        <path d={HAIR_WHISP_2} stroke="url(#eve-grad-icon)" strokeWidth="1" strokeLinecap="round" fill="none" opacity="0.5" />
-        <path d={HAIR_WHISP_3} stroke="url(#eve-grad-icon)" strokeWidth="0.9" strokeLinecap="round" fill="none" opacity="0.4" />
+        {/* Subtle face details */}
+        <path d={EYEBROW} stroke="url(#eve-grad-icon)" strokeWidth="1.2" strokeLinecap="round" fill="none" opacity="0.85" />
+        <path d={EYELASH} stroke="url(#eve-grad-icon)" strokeWidth="1" strokeLinecap="round" fill="none" opacity="0.7" />
+        <path d={LIP_LINE} stroke="url(#eve-grad-icon)" strokeWidth="1" strokeLinecap="round" fill="none" opacity="0.7" />
 
         {/* Quiet wink star */}
         <g transform="translate(54 12)">
@@ -129,23 +142,17 @@ export function EveLogo({ size = 36, className = '', withWordmark = false }: Pro
         </linearGradient>
       </defs>
 
-      <g transform="translate(0 -2) scale(0.85)">
-        <path
-          d={SILHOUETTE_PATH}
-          stroke="url(#eve-grad-word)"
-          strokeWidth="2.2"
-          strokeLinejoin="round"
-          strokeLinecap="round"
-          fill="none"
-        />
-        <path
-          d="M 20 13 Q 22 14 24 13"
-          stroke="url(#eve-grad-word)"
-          strokeWidth="1.3"
-          strokeLinecap="round"
-          fill="none"
-          opacity="0.8"
-        />
+      <g transform="translate(0 -2) scale(0.85)" stroke="url(#eve-grad-word)" strokeLinecap="round" fill="none">
+        <path d={HAIR_TOP_1} strokeWidth="1.5" opacity="0.9" />
+        <path d={HAIR_TOP_2} strokeWidth="1.3" opacity="0.8" />
+        <path d={HAIR_CROWN_1} strokeWidth="1.4" opacity="0.85" />
+        <path d={HAIR_BACK_1} strokeWidth="1.5" opacity="0.9" />
+        <path d={HAIR_BACK_2} strokeWidth="1.3" opacity="0.75" />
+        <path d={HAIR_BACK_3} strokeWidth="1.2" opacity="0.6" />
+        <path d={HAIR_TENDRIL_1} strokeWidth="1" opacity="0.5" />
+        <path d={FACE_PROFILE} strokeWidth="2" strokeLinejoin="round" />
+        <path d={EYEBROW} strokeWidth="1.1" opacity="0.85" />
+        <path d={LIP_LINE} strokeWidth="0.9" opacity="0.7" />
       </g>
 
       <text
