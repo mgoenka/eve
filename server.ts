@@ -1169,9 +1169,10 @@ app.post('/api/tts', async (req, res) => {
   const voiceName =
     voiceMode === 'reel' ? 'en-US-Chirp3-HD-Aoede' : 'en-US-Neural2-F';
 
-  // For Eve mode, wrap the text in SSML prosody so she sounds breathy and
-  // unhurried. Insert short breath-pauses after commas and slow her overall.
-  // Replace plain commas/periods with ssml breaks for a thoughtful cadence.
+  // SSML wrapper for Eve mode. Goal is a low, breathy, intimate read at
+  // close-to-natural pace — not "slow audiobook". So: keep prosody rate at
+  // default, deepen pitch, soften volume, and add only light breath pauses
+  // at sentence boundaries (no comma breaks — those made her stilted).
   const buildSSML = (raw: string): string => {
     const escaped = raw
       .replace(/&/g, '&amp;')
@@ -1179,15 +1180,12 @@ app.post('/api/tts', async (req, res) => {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&apos;');
-    // Add breath after commas and ellipses; longer pauses after periods.
     const cadenced = escaped
-      .replace(/\.\.\./g, '<break time="380ms"/>')
-      .replace(/—/g, '<break time="240ms"/>')
-      .replace(/,\s+/g, ',<break time="200ms"/> ')
-      .replace(/\.\s+/g, '.<break time="320ms"/> ')
-      .replace(/\?\s+/g, '?<break time="320ms"/> ');
-    // Slow rate and lower pitch land an intimate, leaning-in register.
-    return `<speak><prosody rate="slow" pitch="-2st" volume="soft">${cadenced}</prosody></speak>`;
+      .replace(/\.\.\./g, '<break time="220ms"/>')
+      .replace(/—/g, '<break time="140ms"/>')
+      .replace(/\.\s+/g, '.<break time="180ms"/> ')
+      .replace(/\?\s+/g, '?<break time="180ms"/> ');
+    return `<speak><prosody pitch="-2st" volume="soft">${cadenced}</prosody></speak>`;
   };
 
   const isEveMode = voiceMode !== 'reel';
@@ -1197,7 +1195,8 @@ app.post('/api/tts', async (req, res) => {
         voice: { languageCode: 'en-US', name: voiceName },
         audioConfig: {
           audioEncoding: 'MP3',
-          speakingRate: 0.92,
+          // Just barely slower than default for an unhurried-but-natural feel.
+          speakingRate: 0.98,
           pitch: 0,
         },
       }
