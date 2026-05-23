@@ -777,7 +777,14 @@ ${venueLine}
 
 ${sceneStyle}
 
-Visual style: ${visualStyle}. Photoreal but slightly painterly, like a high-end magazine spread (Bon Appetit, Cereal Magazine, Kinfolk). Honor the real venue details above when present — interior cues, signature dish, ambient mood — and apply the visual style on top. NO text in the image. NO logos. NO watermarks. NO captions. Single composed scene, no collage. Square aspect ratio framing.`;
+Visual style: ${visualStyle}. Photoreal but slightly painterly, like a high-end magazine spread (Bon Appetit, Cereal Magazine, Kinfolk). Honor the real venue details above when present — interior cues, signature dish, ambient mood — and apply the visual style on top.
+
+CRITICAL composition rules:
+- The image MUST be full-bleed: every pixel of the frame, all four edges, all four corners is part of the scene.
+- NO white background, NO cream background, NO pale studio backdrop, NO white border, NO white margin around the subject. This is a dusk/evening app — backgrounds should always be dark, warm, and atmospheric.
+- If the natural composition would leave empty space, fill it with a softly out-of-focus continuation of the venue interior, dim ambient lighting, deep shadow, or a tonal gradient toward deep plum.
+- NO text, NO logos, NO watermarks, NO captions, NO cutouts, NO collage.
+- Square aspect ratio. Subject extends to or is cropped by the edges of the frame.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -902,7 +909,14 @@ Generate marketing copy across 4 channels for tonight. Stay in the brand voice. 
 
   const heroImagePrompt = `Editorial food photography of "${dishName}" at ${restaurantName}, a ${cuisine} restaurant.
 ${dishDescription ? `Dish notes: ${dishDescription}` : ''}
-Cinematic dusk-warm lighting, single hero plate composition, slightly overhead angle, rustic ceramic tableware, natural linens, one ingredient prop in soft focus background. Warm color palette appropriate to the cuisine. No text, no logos, no watermarks, no captions in the image. Square aspect ratio framing.`;
+Cinematic dusk-warm lighting, single hero plate composition, slightly overhead angle, rustic ceramic tableware, natural linens, one ingredient prop in soft focus background. Warm color palette appropriate to the cuisine.
+
+CRITICAL composition rules:
+- Image must be FULL-BLEED — every pixel of the frame, including all four edges and corners, is part of the scene.
+- NO white background, NO cream background, NO pale studio backdrop, NO white border, NO white margin around the plate.
+- Fill any empty space around the plate with deep shadow, dim ambient warmth, soft fabric, or out-of-focus restaurant interior.
+- NO text, NO logos, NO watermarks, NO captions.
+- Square aspect ratio. Subject reaches the edges of the frame.`;
 
   const reelStoryPrompt = `${sharedContext}
 
@@ -974,7 +988,7 @@ Strict JSON only:
       try {
         const sceneResp = await ai.models.generateContent({
           model: IMAGE_MODEL,
-          contents: `${sharedContext}\n\nScene from a 15-second Reel: ${scene.description}.\nEditorial food/restaurant photography style. Warm dusk light. No text in image. Square aspect ratio framing.`,
+          contents: `${sharedContext}\n\nScene from a 15-second Reel: ${scene.description}.\nEditorial food/restaurant photography style. Warm dusk light.\n\nCRITICAL: Image MUST be full-bleed with NO white background, NO cream background, NO pale studio backdrop, NO white border. Fill all four edges with the scene — deep shadow, dim ambient warmth, or out-of-focus interior. NO text, NO logos. Square aspect ratio.`,
           config: { responseModalities: ['TEXT', 'IMAGE'] },
         });
         const parts = sceneResp.candidates?.[0]?.content?.parts || [];

@@ -81,13 +81,19 @@ export function StopCard({ stop, index, city, highlighted, dimmed }: Props) {
           </div>
         )}
 
-        {/* Real image fades in on top of the placeholder */}
+        {/* Real image fades in on top of the placeholder. We slightly scale
+            up + multiply-tint with a dusk plum so any pale edge from the AI
+            generator (occasional studio whitespace) gets cropped or warmed
+            instead of leaving a white halo around the subject. */}
         {stop.imageData && (
-          <img
-            src={`data:${stop.imageMime || 'image/png'};base64,${stop.imageData}`}
-            alt={stop.name}
-            className="absolute inset-0 w-full h-full object-cover animate-fade-in"
-          />
+          <>
+            <img
+              src={`data:${stop.imageMime || 'image/png'};base64,${stop.imageData}`}
+              alt={stop.name}
+              className="absolute inset-0 w-full h-full object-cover scale-105 animate-fade-in"
+            />
+            <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-eve-ink/55 via-transparent to-eve-ink/15" />
+          </>
         )}
 
         {/* Top labels */}
