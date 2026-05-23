@@ -9,19 +9,21 @@ interface Props {
 // hair across the back and crown, no bust or shoulders, no fill.
 
 // Single open curve from top of head → forehead → brow → nose bridge →
-// nose tip → philtrum → upper lip → mouth → lower lip → chin → under jaw.
+// soft nose tip → philtrum → upper lip → mouth → lower lip → chin → under
+// jaw. Curves through the nose are intentionally gentle — earlier versions
+// had a pointy nose; this softens the bridge and rounds the tip.
 const FACE_PROFILE =
   'M 38 10 ' +
-  'C 44 12 47 16 47 22 ' + // forehead + brow
-  'L 47 24 ' +              // brow ridge
-  'L 53 28 ' +              // nose tip
-  'L 47 30 ' +              // below nose
-  'L 49 32 ' +              // upper lip
-  'L 46 33 ' +              // mouth corner
-  'L 49 34 ' +              // lower lip
-  'L 47 36 ' +              // mouth-to-chin
-  'C 47 38 45 40 42 41 ' + // chin
-  'L 39 44';                // under jaw
+  'C 44 12 47 16 47 22 ' +     // forehead + brow
+  'Q 48 25 50 27 ' +           // nose bridge to softened tip
+  'Q 51 28.5 49.5 29 ' +       // rounded nose tip
+  'Q 48 29.5 47 30 ' +         // underside curving back to face
+  'L 49 32 ' +                  // upper lip
+  'L 46 33 ' +                  // mouth corner
+  'L 49 34 ' +                  // lower lip
+  'L 47 36 ' +                  // mouth to chin
+  'C 47 38 45 40 42 41 ' +     // chin curve
+  'L 39 44';                    // under jaw
 
 // Subtle face features
 const EYEBROW = 'M 40 23 Q 42 22 45 23';
