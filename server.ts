@@ -1405,6 +1405,64 @@ app.post('/api/instagram/publish', async (req, res) => {
   }
 });
 
+// ---------- Reservation availability check ----------
+//
+// Given a restaurant name + city, returns which of OpenTable / Resy / Tock
+// actually have the venue listed. Uses Gemini Flash with Google Search
+// grounding so the answer is real-time. Cached in-process for 12 hours.
+const RESERVATION_CACHE = new Map<string, { value: { opentable: boolean; resy: boolean; tock: boolean }; ts: number }>();
+const RESERVATION_CACHE_TTL = 12 * 60 * 60 * 1000;
+
+app.post('/api/reservations/check', async (req, res) => {
+  if (!ai) {
+    // Without Gemini, optimistically allow all platforms.
+    return res.json({ opentable: true, resy: true, tock: true, source: 'fallback' });
+  }
+  const restaurantName: string = (req.body?.restaurantName || '').trim();
+  const city: string = (req.body?.city || '').trim();
+  if (!restaurantName) return jsonError(res, 400, 'restaurantName required');
+
+  const cacheKey = `${restaurantName.toLowerCase()}|${city.toLowerCase()}`;
+  const cached = RESERVATION_CACHE.get(cacheKey);
+  if (cached && Date.now() - cached.ts < RESERVATION_CACHE_TTL) {
+    return res.json({ ...cached.value, source: 'cache' });
+  }
+
+  const prompt = `For the restaurant "${restaurantName}" in ${city || 'the United States'}, which of these reservation platforms actually list it for booking? Answer based on real Google Search results, not assumptions. If the restaurant takes walk-ins only or uses its own website (no platform), all three should be false.
+
+Return STRICT JSON only, no prose, no markdown:
+{
+  "opentable": true_or_false,
+  "resy": true_or_false,
+  "tock": true_or_false
+}
+
+First character of your response is { and last is }.`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: TEXT_MODEL,
+      contents: prompt,
+      config: {
+        temperature: 0.1,
+        tools: [{ googleSearch: {} }],
+      },
+    });
+    const parsed = safeParseJson(response.text || '');
+    const value = {
+      opentable: !!parsed?.opentable,
+      resy: !!parsed?.resy,
+      tock: !!parsed?.tock,
+    };
+    RESERVATION_CACHE.set(cacheKey, { value, ts: Date.now() });
+    res.json({ ...value, source: 'live' });
+  } catch (err: any) {
+    console.warn('[reservations] check failed:', err?.message || err);
+    // On error, allow all so the user still has a path to book.
+    res.json({ opentable: true, resy: true, tock: true, source: 'error_fallback' });
+  }
+});
+
 // ---------- Sitemap (SEO for city pages) ----------
 
 app.get('/sitemap.xml', (_req, res) => {

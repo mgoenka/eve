@@ -345,19 +345,39 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
   // Single unified page: brand setup + tonight's dish + content pack.
   return (
     <div className="relative z-10 min-h-screen flex flex-col">
-      <header className="px-6 md:px-10 py-5 flex items-center justify-between border-b border-white/5">
-        <a href="/restaurant" className="inline-flex items-center gap-3">
-          <EveLogo size={36} withWordmark />
-          <span className="hidden md:inline text-xs text-eve-cream/55 italic font-serif">
-            for restaurants
-          </span>
-        </a>
-        <button
-          onClick={onSwitchToDiner}
-          className="px-3 py-2 rounded-full bg-white/5 hover:bg-white/10 text-xs font-semibold text-eve-cream/70 transition-colors"
+      <header
+        className="w-full py-2 px-3 md:py-2.5 md:px-4 border-b border-white/[0.06] bg-eve-ink/95 backdrop-blur-sm grid grid-cols-3 items-center gap-2"
+        role="banner"
+      >
+        <a
+          href="https://mohitgoenka.com/apps/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-eve-cream/55 hover:text-eve-gold text-xs md:text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink rounded justify-self-start"
+          aria-label="Apps and Games"
         >
-          For diners ↗
-        </button>
+          Apps and Games <span aria-hidden="true">🎮</span>
+        </a>
+        <a
+          href="/restaurant"
+          className="flex items-center justify-center gap-2 min-w-0 hover:opacity-80 transition-opacity"
+          title="Eve · For Restaurants"
+          aria-label="Eve · For Restaurants"
+        >
+          <span className="text-eve-cream/85 text-xs md:text-sm font-medium whitespace-nowrap">Eve</span>
+          <EveLogo size={26} />
+          <span className="hidden md:inline text-[11px] text-eve-cream/45 ml-1">restaurants</span>
+        </a>
+        <div className="flex items-center justify-end gap-2">
+          <button
+            onClick={onSwitchToDiner}
+            className="p-2 md:p-2.5 h-9 md:h-10 flex items-center justify-center bg-eve-ink-soft rounded-xl border border-white/[0.08] hover:bg-[#1a1a1e] transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink"
+            aria-label="For diners"
+            title="For diners"
+          >
+            <Sparkles size={18} className="text-eve-cream/70" />
+          </button>
+        </div>
       </header>
 
       <main className="flex-1 max-w-4xl mx-auto w-full px-4 md:px-8 py-8">
@@ -825,7 +845,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
       </main>
 
       <footer className="text-center py-6 text-[10px] text-white/55 tracking-[0.3em] uppercase">
-        Powered by Gemini 2.5 · Google Cloud · ADK-ready
+        Eve · For Restaurants
       </footer>
     </div>
   );

@@ -56,16 +56,37 @@ export function PricingPage({ onBack }: Props) {
 
   return (
     <div className="relative z-10 min-h-screen flex flex-col">
-      <header className="px-6 md:px-10 py-5 flex items-center justify-between">
-        <a href="/" className="inline-flex items-center gap-2 group">
-          <EveLogo size={42} withWordmark />
-        </a>
-        <button
-          onClick={onBack}
-          className="px-3 py-2 rounded-full bg-white/5 hover:bg-white/10 text-xs font-medium text-eve-cream/80 hover:text-eve-cream border border-white/10 transition-colors"
+      <header
+        className="w-full py-2 px-3 md:py-2.5 md:px-4 border-b border-white/[0.06] bg-eve-ink/95 backdrop-blur-sm grid grid-cols-3 items-center gap-2"
+        role="banner"
+      >
+        <a
+          href="https://mohitgoenka.com/apps/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-eve-cream/55 hover:text-eve-gold text-xs md:text-sm font-medium transition-colors rounded justify-self-start"
+          aria-label="Apps and Games"
         >
-          Back
-        </button>
+          Apps and Games <span aria-hidden="true">🎮</span>
+        </a>
+        <a
+          href="/"
+          className="flex items-center justify-center gap-2 min-w-0 hover:opacity-80 transition-opacity"
+          aria-label="Eve home"
+        >
+          <span className="text-eve-cream/85 text-xs md:text-sm font-medium">Eve</span>
+          <EveLogo size={26} />
+        </a>
+        <div className="flex items-center justify-end gap-2">
+          <button
+            onClick={onBack}
+            className="p-2 md:p-2.5 h-9 md:h-10 flex items-center justify-center bg-eve-ink-soft rounded-xl border border-white/[0.08] hover:bg-[#1a1a1e] transition-all text-xs font-semibold text-eve-cream/70"
+            aria-label="Back"
+            title="Back"
+          >
+            Back
+          </button>
+        </div>
       </header>
 
       <main className="flex-1 max-w-5xl mx-auto w-full px-6 py-10 md:py-14">

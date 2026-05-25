@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { MapPin, Clock, Footprints, Sparkles, ExternalLink, BookOpen } from 'lucide-react';
 import type { ExperienceStop, StopKind } from '../types';
 import { STOP_KINDS } from '../constants';
@@ -15,6 +16,12 @@ interface Props {
 }
 
 const RESERVABLE_KINDS: StopKind[] = ['dinner', 'dessert', 'drink', 'live_music'];
+
+interface AvailabilityMap {
+  opentable: boolean;
+  resy: boolean;
+  tock: boolean;
+}
 
 // Per-kind food / scene photograph used as a soft warm placeholder while
 // Eve's AI image renders. The placeholder is hidden the moment the AI image
@@ -47,7 +54,8 @@ export function StopCard({ stop, index, city, whenISO, startTime, party, highlig
   const hasError = stop.status === 'error';
   const showSkeleton = !stop.imageData && (stop.status === 'pending' || stop.status === 'generating');
 
-  const reservationLinks = RESERVABLE_KINDS.includes(stop.kind)
+  const isReservable = RESERVABLE_KINDS.includes(stop.kind);
+  const allReservationLinks = isReservable
     ? buildReservationLinks({
         restaurantName: stop.name,
         city: city || '',
@@ -55,7 +63,40 @@ export function StopCard({ stop, index, city, whenISO, startTime, party, highlig
         whenISO,
         startTime,
       })
-    : null;
+    : [];
+
+  // Check actual availability on each platform via the server
+  // (Gemini + Google Search). Filter out platforms that don't list the
+  // venue. Falls back to all-three on error so the user always has a path.
+  const [availability, setAvailability] = useState<AvailabilityMap | null>(null);
+  useEffect(() => {
+    if (!isReservable || !stop.name) return;
+    let cancelled = false;
+    fetch('/api/reservations/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ restaurantName: stop.name, city: city || '' }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        setAvailability({
+          opentable: !!data.opentable,
+          resy: !!data.resy,
+          tock: !!data.tock,
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isReservable, stop.name, city]);
+
+  const reservationLinks = allReservationLinks.filter((l) => {
+    if (!availability) return true; // optimistic until check returns
+    return (availability as any)[l.platform];
+  });
+  const showReservations = isReservable && reservationLinks.length > 0;
 
   return (
     <article
@@ -68,7 +109,7 @@ export function StopCard({ stop, index, city, whenISO, startTime, party, highlig
       }`}
       style={{ animationDelay: `${index * 120}ms` }}
     >
-      <div className="aspect-square relative overflow-hidden bg-eve-ink">
+      <div className="aspect-[16/10] relative overflow-hidden bg-eve-ink">
         {/* Per-kind food / scene photograph — visible only until the AI image
             arrives. Hidden via stop.imageData check below so it can never
             mislead the viewer about what Eve actually produced. */}
@@ -181,9 +222,9 @@ export function StopCard({ stop, index, city, whenISO, startTime, party, highlig
           </a>
         </div>
 
-        {/* Reservation deep links — visible for food / drink / live music
-            stops. OpenTable first because it has the deepest pre-fill. */}
-        {reservationLinks && (
+        {/* Reservation deep links — only show platforms that actually list
+            the venue. Hides the whole section if none do. */}
+        {showReservations && (
           <div className="mt-3 pt-3 border-t border-white/10">
             <div className="flex items-center gap-1.5 mb-1.5">
               <BookOpen size={11} className="text-eve-gold/80" />

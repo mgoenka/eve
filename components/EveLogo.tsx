@@ -72,7 +72,7 @@ export function EveLogo({ size = 36, className = '', withWordmark = false }: Pro
           </radialGradient>
         </defs>
 
-        <rect width="64" height="64" rx="14" fill="#1a0d2e" />
+        <rect width="64" height="64" rx="14" fill="#0a0a0b" />
         <circle cx="32" cy="28" r="22" fill="url(#eve-glow-icon)" />
 
         {/* Hair strokes — densest at the back/top, thinning out as they trail */}

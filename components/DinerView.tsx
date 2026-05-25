@@ -25,6 +25,7 @@ import {
   Mic,
   MicOff,
   ChevronDown,
+  Pencil,
 } from 'lucide-react';
 import {
   LOADING_MESSAGES,
@@ -241,6 +242,14 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   const [playing, setPlaying] = useState(false);
   // Eve's voice is muted by default — the Activate-Eve toggle flips this on.
   const [muted, setMuted] = useState(true);
+  // Live mirror so the speak callbacks (whose closure captures `muted` at
+  // creation time) can always check the latest value. Without this, hitting
+  // Activate-Eve and immediately calling speakAsEveAndWait would short-circuit
+  // because the closure still held muted=true.
+  const mutedRef = useRef(true);
+  useEffect(() => {
+    mutedRef.current = muted;
+  }, [muted]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const eveAudioRef = useRef<HTMLAudioElement | null>(null);
   const cancelRef = useRef(false);
@@ -450,7 +459,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   const speakAsEve = useCallback(
     async (text: string) => {
       console.log('[Eve] speakAsEve:', text.slice(0, 70));
-      if (!text || muted) return;
+      if (!text || mutedRef.current) return;
       stopAllAudio();
       setEveSpeaking(true);
       try {
@@ -475,7 +484,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   const speakAsEveAndWait = useCallback(
     async (text: string) => {
       console.log('[Eve] speakAsEveAndWait:', text.slice(0, 70));
-      if (!text || muted) return;
+      if (!text || mutedRef.current) return;
       stopAllAudio();
       setEveSpeaking(true);
       try {
@@ -1510,49 +1519,68 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
     return (
       <div className="relative z-10 min-h-screen flex flex-col">
         <audio ref={eveAudioRef} preload="auto" />
-        <header className="px-6 md:px-10 py-5 flex items-center justify-between">
-          <a href="/" className="inline-flex items-center gap-2 group">
-            <EveLogo size={42} withWordmark />
+        <header
+          className="w-full py-2 px-3 md:py-2.5 md:px-4 border-b border-white/[0.06] bg-eve-ink/95 backdrop-blur-sm grid grid-cols-3 items-center gap-2"
+          role="banner"
+        >
+          <a
+            href="https://mohitgoenka.com/apps/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-eve-cream/55 hover:text-eve-gold text-xs md:text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink rounded justify-self-start"
+            aria-label="Apps and Games"
+          >
+            Apps and Games <span aria-hidden="true">🎮</span>
           </a>
-          <div className="flex items-center gap-2">
+          <a
+            href="/"
+            className="flex items-center justify-center gap-2 min-w-0 hover:opacity-80 transition-opacity"
+            title="Eve home"
+            aria-label="Eve home"
+          >
+            <span className="text-eve-cream/85 text-xs md:text-sm font-medium whitespace-nowrap">Eve</span>
+            <EveLogo size={26} />
+          </a>
+          <div className="flex items-center justify-end gap-2">
             {muted ? (
               <button
                 onClick={() => {
+                  mutedRef.current = false;
+                  userMutedRef.current = false;
                   setMuted(false);
                   setUserMuted(false);
-                  userMutedRef.current = false;
-                  // Bypass the muted closure — fire greeting immediately.
-                  setTimeout(() => playGreetingOnce(true), 50);
+                  playGreetingOnce(true);
                 }}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold uppercase tracking-wider text-eve-ink bg-eve-gold hover:bg-yellow-300 transition-colors shadow-[0_0_20px_rgba(245,197,66,0.35)]"
+                className="inline-flex items-center gap-1.5 px-3 md:px-3.5 h-9 md:h-10 rounded-xl bg-eve-gold text-eve-ink hover:bg-yellow-300 transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink shadow-[0_0_18px_rgba(245,197,66,0.28)] text-xs font-bold uppercase tracking-wider"
                 title="Turn on mic + sound and start talking with Eve"
                 aria-label="Activate Eve"
               >
                 <Mic size={14} />
                 <Volume2 size={14} />
-                <span>Activate Eve</span>
+                <span>Activate</span>
               </button>
             ) : (
               <button
                 onClick={() => {
+                  mutedRef.current = true;
+                  userMutedRef.current = true;
                   setMuted(true);
                   setUserMuted(true);
-                  userMutedRef.current = true;
                 }}
-                className="inline-flex items-center gap-2 px-3 py-2 rounded-full text-xs font-medium bg-white/5 hover:bg-white/10 text-eve-cream/80 hover:text-eve-cream border border-white/10 transition-colors"
+                className="p-2 md:p-2.5 h-9 md:h-10 flex items-center justify-center bg-eve-ink-soft rounded-xl border border-white/[0.08] hover:bg-[#1a1a1e] transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink"
                 title="Mute Eve and turn off mic"
                 aria-label="Deactivate Eve"
               >
-                <MicOff size={14} />
-                <VolumeX size={14} />
+                <Volume2 size={18} className="text-eve-gold" />
               </button>
             )}
             <button
               onClick={onSwitchToRestaurant}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-medium bg-white/5 hover:bg-white/10 text-eve-cream/80 hover:text-eve-cream border border-white/10 transition-colors"
+              className="p-2 md:p-2.5 h-9 md:h-10 flex items-center justify-center bg-eve-ink-soft rounded-xl border border-white/[0.08] hover:bg-[#1a1a1e] transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink"
+              aria-label="For restaurants"
+              title="For restaurants"
             >
-              <Store size={14} />
-              For restaurants
+              <Store size={18} className="text-eve-cream/70" />
             </button>
           </div>
         </header>
@@ -1957,7 +1985,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
         </main>
 
         <footer className="text-center py-6 text-[11px] text-white/55 italic font-serif">
-          Gemini 2.5 · Google Search · Cloud TTS · Maps
+          Eve · Yours, quietly
         </footer>
       </div>
     );
@@ -1968,45 +1996,78 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
       <audio ref={audioRef} preload="auto" />
       <audio ref={eveAudioRef} preload="auto" />
 
-      <header className="px-6 md:px-10 py-5 flex items-center justify-between border-b border-white/5">
-        <button onClick={reset} className="inline-flex items-center gap-2">
-          <EveLogo size={36} withWordmark />
+      <header
+        className="w-full py-2 px-3 md:py-2.5 md:px-4 border-b border-white/[0.06] bg-eve-ink/95 backdrop-blur-sm grid grid-cols-3 items-center gap-2"
+        role="banner"
+      >
+        <a
+          href="https://mohitgoenka.com/apps/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-eve-cream/55 hover:text-eve-gold text-xs md:text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink rounded justify-self-start"
+          aria-label="Apps and Games"
+        >
+          Apps and Games <span aria-hidden="true">🎮</span>
+        </a>
+        <button
+          onClick={reset}
+          className="flex items-center justify-center gap-2 min-w-0 hover:opacity-80 transition-opacity"
+          title="Start a new evening"
+          aria-label="Start a new evening"
+        >
+          <span className="text-eve-cream/85 text-xs md:text-sm font-medium whitespace-nowrap">Eve</span>
+          <EveLogo size={26} />
         </button>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-end gap-2">
           {phase === 'ready' && stops.length > 0 && (
             <button
               onClick={sharePlan}
-              title="Share this evening"
-              className="px-3 py-2 rounded-full bg-white/5 hover:bg-white/10 transition-colors text-xs font-medium inline-flex items-center gap-1.5 text-eve-cream/80"
+              className="p-2 md:p-2.5 h-9 md:h-10 flex items-center justify-center bg-eve-ink-soft rounded-xl border border-white/[0.08] hover:bg-[#1a1a1e] transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink"
+              aria-label={shareCopied ? 'Plan copied' : 'Share plan'}
+              title={shareCopied ? 'Copied!' : 'Share this evening'}
             >
-              {shareCopied ? <Check size={14} /> : <Share2 size={14} />}
-              {shareCopied ? 'Copied' : 'Share'}
+              {shareCopied ? <Check size={18} className="text-emerald-400" /> : <Share2 size={18} className="text-eve-cream/70" />}
             </button>
           )}
           <button
-            onClick={() => {
-              const next = !muted;
-              setMuted(next);
-              setUserMuted(next);
-              userMutedRef.current = next;
-            }}
-            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full transition-colors text-xs font-medium ${
-              muted
-                ? 'text-eve-ink bg-eve-gold hover:bg-yellow-300 shadow-[0_0_18px_rgba(245,197,66,0.3)] uppercase tracking-wider font-bold'
-                : 'bg-white/5 hover:bg-white/10 text-eve-cream/80 border border-white/10'
-            }`}
-            title={muted ? 'Activate Eve — turn on mic + sound' : 'Deactivate Eve — turn off mic + sound'}
-          >
-            {muted ? <Mic size={14} /> : <MicOff size={14} />}
-            {muted ? <Volume2 size={14} /> : <VolumeX size={14} />}
-            {muted ? <span>Activate Eve</span> : null}
-          </button>
-          <button
             onClick={reset}
-            className="px-3 py-2 rounded-full bg-white/5 hover:bg-white/10 transition-colors text-xs font-medium inline-flex items-center gap-1.5 text-eve-cream/80"
+            className="p-2 md:p-2.5 h-9 md:h-10 flex items-center justify-center bg-eve-ink-soft rounded-xl border border-white/[0.08] hover:bg-[#1a1a1e] transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink"
+            aria-label="Edit plan"
+            title="Edit plan"
           >
-            <RotateCcw size={14} /> New evening
+            <Pencil size={18} className="text-eve-cream/70" />
           </button>
+          {muted ? (
+            <button
+              onClick={() => {
+                mutedRef.current = false;
+                userMutedRef.current = false;
+                setMuted(false);
+                setUserMuted(false);
+                playGreetingOnce(true);
+              }}
+              className="inline-flex items-center gap-1.5 px-3 md:px-3.5 h-9 md:h-10 rounded-xl bg-eve-gold text-eve-ink hover:bg-yellow-300 transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink shadow-[0_0_18px_rgba(245,197,66,0.28)] text-xs font-bold uppercase tracking-wider"
+              title="Turn on Eve's voice"
+              aria-label="Activate Eve"
+            >
+              <Mic size={14} />
+              <span>Activate</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                mutedRef.current = true;
+                userMutedRef.current = true;
+                setMuted(true);
+                setUserMuted(true);
+              }}
+              className="p-2 md:p-2.5 h-9 md:h-10 flex items-center justify-center bg-eve-ink-soft rounded-xl border border-white/[0.08] hover:bg-[#1a1a1e] transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink"
+              title="Mute Eve"
+              aria-label="Mute Eve"
+            >
+              <Volume2 size={18} className="text-eve-gold" />
+            </button>
+          )}
         </div>
       </header>
 
@@ -2034,13 +2095,6 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
             </div>
           )}
           <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
-            {groundedSearchUsed && (
-              <span className="text-[10px] tracking-wide text-eve-rose/85 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-eve-rose/10 border border-eve-rose/20">
-                <Sparkles size={10} />
-                Verified via Google Search
-                {groundedSources.length > 0 ? ` · ${groundedSources.length}` : ''}
-              </span>
-            )}
             {story?.moodArc && (
               <span className="text-[10px] tracking-wide text-eve-gold/85 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-eve-gold/10 border border-eve-gold/30 italic font-serif">
                 <Heart size={10} />
@@ -2315,7 +2369,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
       </main>
 
       <footer className="text-center py-6 text-[11px] text-white/55 italic font-serif">
-        Gemini 2.5 · Google Search · Cloud TTS · Maps · Cloud Run
+        Eve · Yours, quietly
       </footer>
     </div>
   );
