@@ -97,6 +97,64 @@ function imagePart(mimeType: string, data: string) {
   return { inlineData: { mimeType, data } };
 }
 
+// Rate limiting + origin check for AI endpoints.
+// Stripe webhook and Instagram OAuth callbacks are exempt — they are called by
+// external services (Stripe/Meta) and must remain reachable from outside.
+const EXEMPT_AI_PATHS = new Set([
+  '/api/health',
+  '/api/stripe/webhook',
+  '/api/auth/instagram/start',
+  '/api/auth/instagram/callback',
+]);
+
+const ALLOWED_EVE_ORIGINS = new Set(['eve.mohitgoenka.com', 'localhost', '127.0.0.1']);
+const aiBuckets = new Map<string, { count: number; resetAt: number }>();
+
+function clientIp(req: express.Request): string {
+  const fwd = req.get('x-forwarded-for');
+  return fwd ? fwd.split(',')[0].trim() : req.ip || 'unknown';
+}
+
+function hostFrom(header: string | undefined): string | null {
+  if (!header) return null;
+  try { return new URL(header).hostname.toLowerCase(); } catch { return null; }
+}
+
+function isAllowedEveOrigin(req: express.Request): boolean {
+  if (process.env.NODE_ENV !== 'production') return true;
+  const originHost = hostFrom(req.get('origin'));
+  const refererHost = hostFrom(req.get('referer'));
+  const host = (req.get('x-forwarded-host') || req.get('host') || '').split(':')[0].toLowerCase();
+  return Boolean(
+    (originHost && ALLOWED_EVE_ORIGINS.has(originHost)) ||
+    (refererHost && ALLOWED_EVE_ORIGINS.has(refererHost)) ||
+    (host && ALLOWED_EVE_ORIGINS.has(host))
+  );
+}
+
+function checkAiRateLimit(req: express.Request): boolean {
+  const key = clientIp(req);
+  const now = Date.now();
+  const bucket = aiBuckets.get(key);
+  if (!bucket || bucket.resetAt <= now) {
+    aiBuckets.set(key, { count: 1, resetAt: now + 60_000 });
+    return true;
+  }
+  bucket.count += 1;
+  return bucket.count <= 30;
+}
+
+app.use('/api/', (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const rawPath = req.originalUrl.split('?')[0];
+  if (EXEMPT_AI_PATHS.has(rawPath)) return next();
+  if (!isAllowedEveOrigin(req)) return res.status(403).json({ error: 'Forbidden' });
+  if (!checkAiRateLimit(req)) {
+    res.set('Retry-After', '60');
+    return res.status(429).json({ error: 'Too many requests' });
+  }
+  next();
+});
+
 app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
@@ -1538,10 +1596,10 @@ app.post('/api/tts', async (req, res) => {
 
   try {
     const ttsRes = await fetch(
-      `https://texttospeech.googleapis.com/v1/text:synthesize?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+      'https://texttospeech.googleapis.com/v1/text:synthesize',
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
         body: JSON.stringify(ttsBody),
       }
     );
@@ -1553,10 +1611,10 @@ app.post('/api/tts', async (req, res) => {
         voice: { languageCode: 'en-US', name: 'en-US-Standard-C' },
       };
       const fallbackRes = await fetch(
-        `https://texttospeech.googleapis.com/v1/text:synthesize?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+        'https://texttospeech.googleapis.com/v1/text:synthesize',
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
           body: JSON.stringify(fallbackBody),
         }
       );
