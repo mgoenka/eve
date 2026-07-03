@@ -87,7 +87,14 @@ function pickRandom<T>(arr: T[]): T {
 }
 
 function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  // Local calendar date (not UTC). toISOString() returns UTC, which rolls over
+  // to tomorrow during the evening in timezones behind UTC (e.g. US Pacific) —
+  // exactly when Eve is used — so it would block selecting today.
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 function formatDate(iso: string): string {
