@@ -161,11 +161,13 @@ export function makeVoiceLineTool(geminiKey: string): Tool {
         voice: { languageCode: 'en-US', name: 'en-US-Chirp3-HD-Aoede' },
         audioConfig: { audioEncoding: 'MP3', speakingRate: 0.96, pitch: -0.5 },
       };
+      // Key goes in the header, never the URL query string, so it can't leak
+      // into request logs (same approach as the /api/tts route in server.ts).
       const r = await fetch(
-        `https://texttospeech.googleapis.com/v1/text:synthesize?key=${encodeURIComponent(geminiKey)}`,
+        'https://texttospeech.googleapis.com/v1/text:synthesize',
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey },
           body: JSON.stringify(ttsBody),
         }
       );
