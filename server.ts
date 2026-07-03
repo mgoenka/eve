@@ -132,6 +132,11 @@ function isAllowedEveOrigin(req: express.Request): boolean {
   );
 }
 
+// A single evening plan bursts many /api/* calls in ~30-60s (intro, intent,
+// skeleton, one image + reservation check per stop, per-beat TTS, avatar, outro),
+// so the per-IP ceiling must comfortably clear one rich plan plus a refine.
+const AI_REQUESTS_PER_MINUTE = 120;
+
 function checkAiRateLimit(req: express.Request): boolean {
   const key = clientIp(req);
   const now = Date.now();
@@ -141,7 +146,7 @@ function checkAiRateLimit(req: express.Request): boolean {
     return true;
   }
   bucket.count += 1;
-  return bucket.count <= 30;
+  return bucket.count <= AI_REQUESTS_PER_MINUTE;
 }
 
 app.use('/api/', (req: express.Request, res: express.Response, next: express.NextFunction) => {
