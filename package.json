@@ -7,7 +7,7 @@
     "dev:server": "tsx watch server.ts",
     "dev:client": "vite",
     "dev": "concurrently \"npm:dev:server\" \"npm:dev:client\"",
-    "build": "vite build",
+    "build": "vite build && node scripts/check-no-secrets.mjs",
     "start": "tsx server.ts",
     "preview": "vite preview",
     "lint": "tsc --noEmit"
