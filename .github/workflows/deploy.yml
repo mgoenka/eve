@@ -1,0 +1,62 @@
+# Auto-deploy to Cloud Run on every push to main.
+# Keyless: GitHub OIDC -> Workload Identity Federation (pool "github" in public-mohit-260610),
+# allowed only for repos owned by mgoenka and only for refs/heads/main. No secrets stored in GitHub.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', 'docs/**', '.github/ISSUE_TEMPLATE/**']
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT: public-mohit-260610
+  REGION: us-west1
+  URL: https://eve.mohitgoenka.com/
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: projects/4161275924/locations/global/workloadIdentityPools/github/providers/github-oidc
+          service_account: github-deployer@public-mohit-260610.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Build and deploy with Cloud Build
+        run: |
+          # Never upload the short-lived auth file the auth step writes into the workspace.
+          [ -f .gcloudignore ] || printf '#!include:.gitignore\n.git\n.github\n' > .gcloudignore
+          printf '\ngha-creds-*.json\n' >> .gcloudignore
+          id=$(gcloud builds submit --config=cloudbuild.yaml --project="$PROJECT" --region="$REGION" \
+            --gcs-source-staging-dir="gs://$PROJECT-gha-source/source" --async --format='value(id)' .)
+          echo "Build $id: https://console.cloud.google.com/cloud-build/builds;region=$REGION/$id?project=$PROJECT"
+          for i in $(seq 1 120); do
+            st=$(gcloud builds describe "$id" --project="$PROJECT" --region="$REGION" --format='value(status)')
+            case "$st" in QUEUED|WORKING|PENDING|"") sleep 15;; *) break;; esac
+          done
+          echo "Status: $st"
+          [ "$st" = "SUCCESS" ]
+
+      - name: Verify the live site
+        run: |
+          for i in 1 2 3 4 5 6; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -L "$URL") && [ "$code" = "200" ] && { echo "$URL -> 200"; exit 0; }
+            sleep 10
+          done
+          echo "$URL -> $code"; exit 1
