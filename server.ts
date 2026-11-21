@@ -72,7 +72,8 @@ if (!GEMINI_API_KEY) {
   console.warn('GEMINI_API_KEY: not set — /api/* will return 503');
 }
 
-const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
+// @google/genai 3 defaults to the v1 API, where the gemini-flash-latest alias doesn't exist (404).
+const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY, httpOptions: { apiVersion: 'v1beta' } }) : null;
 
 function jsonError(res: express.Response, code: number, message: string) {
   // Upstream (Gemini / TTS) failure details stay in the server log; users get
