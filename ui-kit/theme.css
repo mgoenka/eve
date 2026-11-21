@@ -1,0 +1,200 @@
+/* generated from app-platform/ui-kit — edit there and re-sync. */
+/*
+ * Mohit's app kit — Tailwind CSS v4 theme, base layer and self-hosted fonts.
+ *
+ * Import it from the app's main CSS file, right AFTER Tailwind:
+ *
+ *   @import "tailwindcss";
+ *   @import "./ui-kit/theme.css";          (path relative to that CSS file)
+ *
+ * Gives utilities such as bg-mg-bg, bg-mg-surface, text-mg-gold, border-mg-border,
+ * font-display, rounded-mg, shadow-mg-card, animate-fade-in.
+ */
+
+/* Make sure Tailwind scans the kit's components even if the folder is git-ignored somewhere. */
+@source "./components";
+
+/* ------------------------------------------------------------------ fonts */
+/* Syne + DM Sans variable fonts, latin subset (SIL OFL 1.1, see fonts/OFL.txt).
+   Family names match the old Google Fonts names, so existing font-family: 'Syne' / 'DM Sans'
+   declarations keep working once the Google Fonts <link> is removed. */
+@font-face {
+  font-family: 'Syne';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 800;
+  src: url('./fonts/syne-latin-wght.woff2') format('woff2-variations'), url('./fonts/syne-latin-wght.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'DM Sans';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 1000;
+  src: url('./fonts/dm-sans-latin-wght.woff2') format('woff2-variations'), url('./fonts/dm-sans-latin-wght.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'DM Sans';
+  font-style: italic;
+  font-display: swap;
+  font-weight: 100 1000;
+  src: url('./fonts/dm-sans-latin-wght-italic.woff2') format('woff2-variations'), url('./fonts/dm-sans-latin-wght-italic.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* ----------------------------------------------------------------- tokens */
+@theme {
+  /* surfaces */
+  --color-mg-bg: #0a0a0b;
+  --color-mg-surface: #121214;
+  --color-mg-surface-2: #1a1a1e;
+  --color-mg-surface-3: #242428;
+  --color-mg-elevated: #18181b;
+  /* borders */
+  --color-mg-border: rgb(255 255 255 / 0.08);
+  --color-mg-border-subtle: rgb(255 255 255 / 0.06);
+  --color-mg-border-strong: rgb(255 255 255 / 0.15);
+  /* text */
+  --color-mg-text: #fafaf9;
+  --color-mg-text-2: #d4d4d8;
+  --color-mg-muted: #a1a1aa;
+  --color-mg-subtle: #71717a;
+  /* accent */
+  --color-mg-gold: #f5c542;
+  --color-mg-gold-hover: #e6b73a;
+  --color-mg-on-gold: #0a0a0b;
+  /* status */
+  --color-mg-danger: #f43f5e;
+  --color-mg-success: #10b981;
+  --color-mg-warning: #f59e0b;
+  --color-mg-info: #0ea5e9;
+
+  /* type */
+  --font-display: 'Syne', 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+
+  /* radii */
+  --radius-mg-sm: 0.5rem;
+  --radius-mg: 0.75rem;
+  --radius-mg-lg: 1rem;
+  --radius-mg-xl: 1.5rem;
+
+  /* shadows */
+  --shadow-mg-card: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.35);
+  --shadow-mg-modal: 0 24px 64px rgb(0 0 0 / 0.6);
+  --shadow-mg-glow: 0 0 24px rgb(245 197 66 / 0.25);
+
+  /* motion */
+  --animate-fade-in: mg-fade-in 0.4s ease-out both;
+  --animate-fade-in-up: mg-fade-in-up 0.5s ease-out both;
+  --animate-mg-sheet-up: mg-sheet-up 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  --animate-mg-pop: mg-pop 0.2s ease-out both;
+  --animate-mg-backdrop: mg-fade 0.2s ease-out both;
+  --animate-mg-shimmer: mg-shimmer 1.6s ease-in-out infinite;
+
+  @keyframes mg-fade { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes mg-fade-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes mg-fade-in-up { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes mg-sheet-up { from { opacity: 0.6; transform: translateY(100%); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes mg-pop { from { opacity: 0; transform: translateY(6px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+  @keyframes mg-shimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+}
+
+/* ------------------------------------------------------------------- base */
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    color-scheme: dark;
+    background-color: var(--color-mg-bg);
+  }
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    font-family: var(--font-sans);
+    background-color: var(--color-mg-bg);
+    color: var(--color-mg-text);
+    overflow-x: clip;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* Spello pattern: keep content out of notches / home indicator (needs viewport-fit=cover). */
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  button, a, [role='button'], input, select, textarea, label, summary {
+    touch-action: manipulation;
+  }
+  button:not(:disabled), [role='button']:not([aria-disabled='true']) {
+    cursor: pointer;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-mg-gold);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: rgb(245 197 66 / 0.3);
+    color: var(--color-mg-text);
+  }
+}
+
+/* --------------------------------------------------------------- helpers */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  &::-webkit-scrollbar { display: none; }
+}
+@utility pt-safe { padding-top: env(safe-area-inset-top); }
+@utility pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+@utility pl-safe { padding-left: env(safe-area-inset-left); }
+@utility pr-safe { padding-right: env(safe-area-inset-right); }
+@utility px-safe { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+@utility mb-safe { margin-bottom: env(safe-area-inset-bottom); }
+@utility bottom-safe { bottom: max(1rem, env(safe-area-inset-bottom)); }
+@utility h-screen-safe { height: 100dvh; }
+@utility min-h-screen-safe { min-height: 100dvh; }
+@utility font-header { font-family: var(--font-display); }
+@utility drop-shadow-glow { filter: drop-shadow(0 0 12px rgb(245 197 66 / 0.4)); }
+
+/* The shared page backdrop (same as the apps' existing .site-theme). */
+@layer components {
+  .site-theme {
+    background: var(--color-mg-bg);
+    color: var(--color-mg-text);
+  }
+  .site-theme::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 100% 80% at 50% -10%, rgb(245 197 66 / 0.08) 0%, transparent 50%),
+      radial-gradient(ellipse 60% 40% at 80% 80%, rgb(59 130 246 / 0.04) 0%, transparent 50%),
+      radial-gradient(ellipse 60% 40% at 20% 80%, rgb(239 68 68 / 0.04) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  .mg-skeleton {
+    background: linear-gradient(90deg, rgb(255 255 255 / 0.04) 25%, rgb(255 255 255 / 0.09) 37%, rgb(255 255 255 / 0.04) 63%);
+    background-size: 400% 100%;
+    animation: var(--animate-mg-shimmer);
+  }
+}
+
+/* --------------------------------------------------------- reduced motion */
+/* Damps every CSS animation/transition when the OS asks for it, or when the user turns on
+   "Reduce motion" in the kit's SettingsSheet (sets <html data-reduce-motion="true">).
+   JS animations / confetti must check useReducedMotion() themselves. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+html[data-reduce-motion='true'] *, html[data-reduce-motion='true'] *::before, html[data-reduce-motion='true'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}

@@ -1,7 +1,29 @@
 import path from 'path';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import { mgKit } from './ui-kit/vite-plugin-mg.mjs';
+
+// Preload the two latin fonts the planner's first screen paints with (kit
+// DM Sans + Eve's Cormorant Garamond). The kit's own preload would add Syne,
+// which only the pricing and city pages use.
+function preloadFonts(): Plugin {
+  const wanted = [/dm-sans-latin-wght-(?!italic)/, /cormorant-garamond-latin-wght-(normal|italic)/];
+  return {
+    name: 'eve-preload-fonts',
+    enforce: 'post',
+    transformIndexHtml(_html, ctx) {
+      if (!ctx.bundle) return [];
+      return Object.keys(ctx.bundle)
+        .filter((f) => f.endsWith('.woff2') && wanted.some((r) => r.test(f)))
+        .map((f) => ({
+          tag: 'link',
+          attrs: { rel: 'preload', href: `/${f}`, as: 'font', type: 'font/woff2', crossorigin: '' },
+          injectTo: 'head' as const,
+        }));
+    },
+  };
+}
 
 export default defineConfig({
   server: {
@@ -14,13 +36,14 @@ export default defineConfig({
       },
     },
   },
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), mgKit({ preloadFonts: false }), preloadFonts()],
   build: {
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom'],
-          icons: ['lucide-react'],
+        manualChunks(id: string) {
+          if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) return 'vendor';
+          if (id.includes('node_modules/lucide-react/')) return 'icons';
+          return undefined;
         },
       },
     },
@@ -28,7 +51,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, '.'),
+      '@': path.resolve(import.meta.dirname, '.'),
     },
   },
 });

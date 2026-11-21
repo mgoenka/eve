@@ -1,9 +1,71 @@
-import { useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { DinerView } from './components/DinerView';
-import { RestaurantView } from './components/RestaurantView';
-import { CityLanding } from './components/CityLanding';
-import { PricingPage } from './components/PricingPage';
 import { findCity, CITIES } from './data/cities';
+import { RulesContext } from './components/RulesContext';
+import { RulesOverlay, lazyWithRetry, type RuleSection } from './ui-kit';
+
+// Secondary screens load on demand so the planner opens fast.
+const RestaurantView = lazyWithRetry(() =>
+  import('./components/RestaurantView').then((m) => ({ default: m.RestaurantView }))
+);
+const PricingPage = lazyWithRetry(() => import('./components/PricingPage').then((m) => ({ default: m.PricingPage })));
+const CityLanding = lazyWithRetry(() => import('./components/CityLanding').then((m) => ({ default: m.CityLanding })));
+
+const APP_RULES: RuleSection[] = [
+  {
+    title: 'Plan an evening',
+    icon: '🌙',
+    items: [
+      'Pick a place (or tap the pin to use your location), a vibe, date, start time and how long the evening should run. Longer evenings get more stops.',
+      'Set party size, budget per person, dietary needs and a cuisine if you have one, or just tell Eve what you want in your own words.',
+      'Tap Plan my evening. Surprise me keeps what you filled in and lets Eve pick the rest. The sample chips fill the form for you.',
+      'Hide the details if you would rather just talk to Eve.',
+    ],
+  },
+  {
+    title: 'Talk to Eve',
+    icon: '🎙️',
+    items: [
+      'Tap Activate to turn on Eve’s voice and the mic. Tell Eve what kind of evening you want; she asks for anything she still needs.',
+      'Talk over her any time to cut in. Tap the speaker to mute her and turn the mic off.',
+    ],
+  },
+  {
+    title: 'Your evening',
+    icon: '✨',
+    items: [
+      'Each stop shows a painted scene, arrival time, what to order or do, walking time, a map link and reservation links where the venue takes bookings.',
+      'With her voice on, Eve walks you through the evening stop by stop. You can stop the walkthrough, or play her narration.',
+      'Ask for changes in the chat ("swap dessert for live music") or tap a tweak chip like Cheaper or Earlier.',
+      'Share sends a link with the whole plan, so friends see the same evening. The pencil takes you back to the form.',
+      'Your last six evenings are saved on this device under Your recent evenings. Tap one to reopen it, or the x to remove it.',
+    ],
+  },
+  {
+    title: 'Paintings and limits',
+    icon: '🎨',
+    items: [
+      'Eve paints up to 40 pictures an hour for each visitor, and shows how many are left under Plan my evening. Cards she has already painted are free.',
+      'If a picture fails or the hour’s paintings run out, the plan still works. Tap Repaint on a card to try again.',
+      'If Eve can’t finish a plan, you get a clear message and a Try again button.',
+    ],
+  },
+  {
+    title: 'For restaurants',
+    icon: '🍽️',
+    items: [
+      'Tap the shop icon. Enter your restaurant and city; cuisine, voice and signature dishes are optional.',
+      'Eve suggests tonight’s special from recent reviews or trends. Different dish asks for another idea.',
+      'Generate tonight’s look makes an Instagram post, a Reel storyboard with voiceover, a menu card, an email and an SMS. It uses 4 of the hour’s paintings.',
+      'Publish to Eve diners features your special to people planning evenings nearby.',
+    ],
+  },
+  {
+    title: 'Keys',
+    icon: '⌨️',
+    items: ['Press ? to open this guide and Esc to close it.'],
+  },
+];
 
 type Route =
   | { kind: 'diner' }
@@ -23,13 +85,38 @@ function getRoute(): Route {
   return { kind: 'diner' };
 }
 
+function ScreenFallback() {
+  return (
+    <div className="min-h-dvh flex items-center justify-center" role="status" aria-label="Loading">
+      <div className="w-10 h-10 rounded-full border-2 border-eve-gold/25 border-t-eve-gold animate-spin" />
+    </div>
+  );
+}
+
 export default function App() {
   const [route, setRoute] = useState<Route>(getRoute());
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const openRules = useCallback(() => setRulesOpen(true), []);
+  const closeRules = useCallback(() => setRulesOpen(false), []);
+  const rulesCtx = useMemo(() => ({ open: openRules }), [openRules]);
 
   useEffect(() => {
     const onPop = () => setRoute(getRoute());
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  // "?" opens the guide (not while typing).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== '?' || e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      e.preventDefault();
+      setRulesOpen(true);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   useEffect(() => {
@@ -47,41 +134,34 @@ export default function App() {
     setRoute({ kind });
   };
 
+  let screen;
+  const city = route.kind === 'city' ? findCity(route.slug) : undefined;
   if (route.kind === 'restaurant') {
-    return (
-      <div className="site-bg min-h-dvh relative">
-        <RestaurantView onSwitchToDiner={() => navigate('diner')} />
-      </div>
+    screen = <RestaurantView onSwitchToDiner={() => navigate('diner')} />;
+  } else if (route.kind === 'pricing') {
+    screen = <PricingPage onBack={() => navigate('diner')} />;
+  } else if (city) {
+    screen = (
+      <CityLanding
+        city={city}
+        onPlanInCity={() => {
+          // Pass the city as URL state so the diner planner pre-fills it.
+          const initial = btoa(encodeURIComponent(JSON.stringify({ city: city.fullName, vibe: 'date_night' })));
+          window.history.pushState({}, '', `/?plan=${initial}`);
+          setRoute({ kind: 'diner' });
+        }}
+      />
     );
+  } else {
+    screen = <DinerView onSwitchToRestaurant={() => navigate('restaurant')} />;
   }
-  if (route.kind === 'pricing') {
-    return (
-      <div className="site-bg min-h-dvh relative">
-        <PricingPage onBack={() => navigate('diner')} />
-      </div>
-    );
-  }
-  if (route.kind === 'city') {
-    const city = findCity(route.slug);
-    if (city) {
-      return (
-        <div className="site-bg min-h-dvh relative">
-          <CityLanding
-            city={city}
-            onPlanInCity={() => {
-              // Pass the city as URL state so the diner planner pre-fills it.
-              const initial = btoa(encodeURIComponent(JSON.stringify({ city: city.fullName, vibe: 'date_night' })));
-              window.history.pushState({}, '', `/?plan=${initial}`);
-              setRoute({ kind: 'diner' });
-            }}
-          />
-        </div>
-      );
-    }
-  }
+
   return (
-    <div className="site-bg min-h-dvh relative">
-      <DinerView onSwitchToRestaurant={() => navigate('restaurant')} />
-    </div>
+    <RulesContext.Provider value={rulesCtx}>
+      <div className="site-bg min-h-dvh relative">
+        <Suspense fallback={<ScreenFallback />}>{screen}</Suspense>
+      </div>
+      {rulesOpen && <RulesOverlay appName="Eve" subtitle="How Eve works" sections={APP_RULES} onClose={closeRules} />}
+    </RulesContext.Provider>
   );
 }

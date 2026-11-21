@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Check, Sparkles, Loader2 } from 'lucide-react';
 import { EveLogo } from './EveLogo';
+import { useOpenRules } from './RulesContext';
+import { AppHeader } from '../ui-kit';
 
 const RESTAURANT_FEATURES = [
   'Daily AI content pack — Instagram, Reel, menu card, email, SMS',
@@ -27,6 +29,7 @@ interface Props {
 }
 
 export function PricingPage({ onBack }: Props) {
+  const openRules = useOpenRules();
   useEffect(() => {
     document.title = 'Eve · Pricing';
   }, []);
@@ -56,38 +59,26 @@ export function PricingPage({ onBack }: Props) {
 
   return (
     <div className="relative z-10 min-h-dvh flex flex-col">
-      <header
-        className="w-full py-2 px-3 md:py-2.5 md:px-4 border-b border-white/[0.06] bg-eve-ink/95 backdrop-blur-sm grid grid-cols-[1fr_auto_1fr] items-center gap-2"
-        role="banner"
-      >
-        <a
-          href="https://mohitgoenka.com/apps/"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-eve-cream/55 hover:text-eve-gold text-xs md:text-sm font-medium transition-colors rounded justify-self-start"
-          aria-label="Apps and Games"
-        >
-          <span className="hidden sm:inline">Apps and Games </span><span aria-hidden="true" className="text-base sm:text-[inherit]">🎮</span>
-        </a>
-        <a
-          href="/"
-          className="flex items-center justify-center gap-2 min-w-0 hover:opacity-80 transition-opacity"
-          aria-label="Eve home"
-        >
-          <span className="text-eve-cream/85 text-xs md:text-sm font-medium">Eve</span>
-          <EveLogo size={26} />
-        </a>
-        <div className="flex flex-nowrap items-center justify-end gap-1.5 sm:gap-2 shrink-0">
+      <AppHeader
+        title="Eve"
+        icon={<EveLogo size={26} />}
+        onTitleClick={() => { window.location.href = '/'; }}
+        titleLabel="Eve home"
+        onRules={openRules}
+        rulesLabel="How Eve works"
+        right={
+          <>
           <button
             onClick={onBack}
-            className="p-2 md:p-2.5 h-10 min-w-10 flex items-center justify-center bg-eve-ink-soft rounded-xl border border-white/[0.08] hover:bg-[#1a1a1e] transition-all text-xs font-semibold text-eve-cream/70"
+            className="p-2 md:p-2.5 h-10 min-w-10 flex items-center justify-center bg-eve-ink-soft rounded-xl border border-white/[0.08] hover:bg-mg-surface-2 transition-all text-xs font-semibold text-eve-cream/70"
             aria-label="Back"
             title="Back"
           >
             Back
           </button>
-        </div>
-      </header>
+          </>
+        }
+      />
 
       <main className="flex-1 max-w-5xl mx-auto w-full px-4 sm:px-6 py-8 sm:py-10 md:py-14">
         <div className="text-center mb-10 md:mb-14">
@@ -132,7 +123,7 @@ export function PricingPage({ onBack }: Props) {
             <button
               onClick={() => startCheckout('diner')}
               disabled={loadingTier !== null}
-              className="w-full inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl font-bold text-base bg-eve-ink-soft text-eve-gold border border-eve-gold/25 hover:bg-[#1a1a1e] hover:border-eve-gold/45 disabled:opacity-50 disabled:cursor-wait transition-all shadow-lg shadow-eve-gold/15"
+              className="w-full inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl font-bold text-base bg-eve-ink-soft text-eve-gold border border-eve-gold/25 hover:bg-mg-surface-2 hover:border-eve-gold/45 disabled:opacity-50 disabled:cursor-wait transition-all shadow-lg shadow-eve-gold/15"
             >
               {loadingTier === 'diner' ? (
                 <>

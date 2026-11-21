@@ -160,7 +160,7 @@ export function EveLogo({ size = 36, className = '', withWordmark = false }: Pro
       <text
         x="62"
         y="46"
-        fontFamily="'Cormorant Garamond', 'Georgia', serif"
+        fontFamily="'Cormorant Garamond Variable', 'Cormorant Garamond', 'Georgia', serif"
         fontSize="50"
         fontStyle="italic"
         fontWeight="600"
