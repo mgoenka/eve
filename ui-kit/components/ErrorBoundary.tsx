@@ -23,6 +23,8 @@ export interface ErrorBoundaryProps {
 
 interface State {
   error: Error | null;
+  /** "Reset saved data" is destructive: ask once before erasing. */
+  confirmReset?: boolean;
 }
 
 async function clearSavedData(keys?: string[]) {
@@ -85,13 +87,38 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, State> {
             <button type="button" onClick={() => window.location.reload()} className="min-h-11 rounded-mg bg-mg-gold px-4 py-2.5 font-semibold text-mg-on-gold hover:bg-mg-gold-hover">
               Reload
             </button>
-            <button
-              type="button"
-              onClick={() => { void clearSavedData(this.props.resetKeys).then(() => window.location.reload()); }}
-              className="min-h-11 rounded-mg border border-mg-border bg-mg-surface px-4 py-2.5 font-semibold text-mg-text hover:bg-mg-surface-2"
-            >
-              Reset saved data and reload
-            </button>
+            {this.state.confirmReset ? (
+              <div className="rounded-mg border border-mg-danger/40 bg-mg-danger/10 p-3 text-left">
+                <p className="text-sm text-mg-text">
+                  This erases what this app saved on this device (progress, settings, saved items). It can&rsquo;t be undone.
+                </p>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    type="button"
+                    autoFocus
+                    onClick={() => { void clearSavedData(this.props.resetKeys).then(() => window.location.reload()); }}
+                    className="min-h-11 flex-1 rounded-mg bg-mg-danger px-3 py-2 text-sm font-semibold text-white hover:opacity-90"
+                  >
+                    Erase and reload
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => this.setState({ confirmReset: false })}
+                    className="min-h-11 flex-1 rounded-mg border border-mg-border bg-mg-surface px-3 py-2 text-sm font-semibold text-mg-text hover:bg-mg-surface-2"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => this.setState({ confirmReset: true })}
+                className="min-h-11 rounded-mg border border-mg-border bg-mg-surface px-4 py-2.5 font-semibold text-mg-text hover:bg-mg-surface-2"
+              >
+                Reset saved data and reload
+              </button>
+            )}
             {hub ? (
               <a href={hub} className="min-h-11 rounded-mg px-4 py-2.5 text-sm font-medium text-mg-muted hover:text-mg-gold">
                 ← {HUB_LABEL} 🎮
