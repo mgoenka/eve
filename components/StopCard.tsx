@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { MapPin, Clock, Footprints, Sparkles, ExternalLink, BookOpen } from 'lucide-react';
+import { MapPin, Clock, Footprints, Sparkles, ExternalLink, BookOpen, RotateCcw } from 'lucide-react';
 import type { ExperienceStop, StopKind } from '../types';
 import { STOP_KINDS } from '../constants';
 import { buildReservationLinks } from '../lib/reservations';
@@ -13,6 +13,8 @@ interface Props {
   party?: number;
   highlighted?: boolean;
   dimmed?: boolean;
+  /** Repaint this card after a failed image. */
+  onRetryImage?: () => void;
 }
 
 const RESERVABLE_KINDS: StopKind[] = ['dinner', 'dessert', 'drink', 'live_music'];
@@ -47,7 +49,7 @@ const KIND_GRADIENTS: Record<StopKind, { from: string; via: string; to: string }
   activity: { from: 'from-emerald-500/25', via: 'via-teal-500/25', to: 'to-amber-400/25' },
 };
 
-export function StopCard({ stop, index, city, whenISO, startTime, party, highlighted, dimmed }: Props) {
+export function StopCard({ stop, index, city, whenISO, startTime, party, highlighted, dimmed, onRetryImage }: Props) {
   const kindMeta = STOP_KINDS.find((k) => k.kind === stop.kind);
   const grad = KIND_GRADIENTS[stop.kind] || KIND_GRADIENTS.dinner;
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${stop.name} ${city || ''}`.trim())}`;
@@ -119,8 +121,11 @@ export function StopCard({ stop, index, city, whenISO, startTime, party, highlig
               src={KIND_PLACEHOLDERS[stop.kind] || KIND_PLACEHOLDERS.dinner}
               alt=""
               aria-hidden="true"
+              width={720}
+              height={450}
               className="absolute inset-0 w-full h-full object-cover"
               loading="lazy"
+              decoding="async"
             />
             <div className={`absolute inset-0 bg-gradient-to-br ${grad.from} ${grad.via} ${grad.to} ${showSkeleton ? 'opacity-90 animate-pulse mix-blend-overlay' : 'opacity-40 mix-blend-overlay'}`} />
           </>
@@ -129,12 +134,34 @@ export function StopCard({ stop, index, city, whenISO, startTime, party, highlig
         {/* Graceful error state — never expose raw error JSON */}
         {hasError && !stop.imageData && (
           <div className="absolute inset-0 bg-gradient-to-br from-eve-plum/55 via-eve-ink/70 to-eve-plum/55 flex flex-col items-center justify-center gap-2 px-6 text-center backdrop-blur-sm">
-            <span className="font-serif italic text-eve-rose/95 text-base leading-snug">
-              "The light wouldn't quite catch this one."
-            </span>
-            <span className="text-[12px] text-eve-cream/80 italic font-serif">
-              Picture it warmer than that.
-            </span>
+            {stop.errorCode === 'image_limit' ? (
+              <>
+                <span className="font-serif italic text-eve-rose/95 text-base leading-snug">
+                  "I've painted all I can for this hour."
+                </span>
+                <span className="text-[12px] text-eve-cream/80 italic font-serif">
+                  The plan is all here. Try repainting a little later.
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="font-serif italic text-eve-rose/95 text-base leading-snug">
+                  "The light wouldn't quite catch this one."
+                </span>
+                <span className="text-[12px] text-eve-cream/80 italic font-serif">
+                  Picture it warmer than that.
+                </span>
+              </>
+            )}
+            {onRetryImage && (
+              <button
+                onClick={onRetryImage}
+                className="mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-eve-ink/70 hover:bg-eve-ink/90 border border-eve-gold/40 text-eve-gold text-xs font-semibold outline-none focus-visible:ring-2 focus-visible:ring-eve-gold"
+              >
+                <RotateCcw size={12} />
+                Repaint
+              </button>
+            )}
           </div>
         )}
 
@@ -148,6 +175,9 @@ export function StopCard({ stop, index, city, whenISO, startTime, party, highlig
             <img
               src={`data:${stop.imageMime || 'image/png'};base64,${stop.imageData}`}
               alt={stop.name}
+              width={1024}
+              height={1024}
+              decoding="async"
               className="absolute inset-0 w-full h-full object-cover scale-110 animate-fade-in"
             />
             <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-eve-ink/55 via-transparent to-eve-ink/15" />
@@ -239,7 +269,7 @@ export function StopCard({ stop, index, city, whenISO, startTime, party, highlig
                   href={link.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-eve-ink-soft hover:bg-[#1a1a1e] border border-eve-gold/25 hover:border-eve-gold/45 text-eve-gold text-[11px] font-semibold tracking-wide transition-colors"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-eve-ink-soft hover:bg-mg-surface-2 border border-eve-gold/25 hover:border-eve-gold/45 text-eve-gold text-[11px] font-semibold tracking-wide transition-colors"
                 >
                   {link.label}
                   <ExternalLink size={9} />

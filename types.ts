@@ -35,6 +35,8 @@ export interface ExperienceStop {
   imageMime?: string;
   status: 'pending' | 'generating' | 'ready' | 'error';
   error?: string;
+  /** e.g. 'image_limit' when the hourly picture budget is used up. */
+  errorCode?: string;
 }
 
 export interface ExperiencePlan {

@@ -8,6 +8,80 @@ import type {
   PostedSpecial,
   EveStory,
 } from '@/types';
+import { fetchJson, FetchError } from '../ui-kit';
+
+// ---------- Image budget (shown in the UI) ----------
+// Image responses (and the 429 when it runs out) carry the visitor's
+// remaining hourly image budget; components subscribe to show "N left".
+export interface ImageLimit {
+  limit: number;
+  remaining: number;
+  resetInSec: number;
+}
+let imageLimit: ImageLimit | null = null;
+const limitListeners = new Set<(l: ImageLimit) => void>();
+
+function publishLimit(raw: unknown) {
+  const l = raw as Partial<ImageLimit> | null | undefined;
+  if (!l || typeof l.limit !== 'number' || typeof l.remaining !== 'number') return;
+  imageLimit = { limit: l.limit, remaining: l.remaining, resetInSec: typeof l.resetInSec === 'number' ? l.resetInSec : 0 };
+  limitListeners.forEach((fn) => fn(imageLimit!));
+}
+
+export function subscribeImageLimit(fn: (l: ImageLimit) => void): () => void {
+  limitListeners.add(fn);
+  if (imageLimit) fn(imageLimit);
+  return () => limitListeners.delete(fn);
+}
+
+/** Error with a user-safe message plus the server's code (e.g. 'image_limit'). */
+export interface EveError extends Error {
+  code?: string;
+  status?: number;
+  retryable?: boolean;
+}
+
+// All API calls go through the kit's fetchJson: per-attempt timeout and
+// bounded retries (timeouts / network / 429 / 5xx). AI calls are slow
+// (search grounding, image generation), so each call sets its own timeout.
+async function call<T>(url: string, body: unknown, opts: { timeoutMs: number; retries?: number }): Promise<T> {
+  try {
+    const data = await fetchJson<T>(url, {
+      method: body === undefined ? 'GET' : 'POST',
+      body,
+      timeoutMs: opts.timeoutMs,
+      retries: opts.retries ?? 1,
+      backoffMs: 1200,
+    });
+    publishLimit((data as any)?.imageLimit);
+    return data;
+  } catch (e) {
+    if (e instanceof FetchError) {
+      const b = (e.body && typeof e.body === 'object' ? e.body : {}) as { code?: string; imageLimit?: unknown };
+      publishLimit(b.imageLimit);
+      const message =
+        e.status === 503
+          ? 'Eve is resting right now. Please try again in a little while.'
+          : e.kind === 'timeout'
+            ? 'Eve took too long to answer. Please try again.'
+            : e.message;
+      const err = new Error(message) as EveError;
+      err.code = b.code;
+      err.status = e.status;
+      err.retryable = e.retryable;
+      throw err;
+    }
+    throw e;
+  }
+}
+
+export async function refreshImageLimit(): Promise<void> {
+  try {
+    const data = await call<{ images: ImageLimit }>('/api/limits', undefined, { timeoutMs: 8_000, retries: 0 });
+    publishLimit(data?.images);
+  } catch {}
+}
+
 
 export interface PlanSkeletonRequest {
   city: string;
@@ -30,13 +104,7 @@ export interface PlanSkeletonResponse {
 }
 
 export async function planSkeleton(req: PlanSkeletonRequest): Promise<PlanSkeletonResponse> {
-  const res = await fetch('/api/plan-experience/skeleton', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(req),
-  });
-  if (!res.ok) throw new Error(`Skeleton failed: ${(await res.text()).slice(0, 200)}`);
-  return (await res.json()) as PlanSkeletonResponse;
+  return call('/api/plan-experience/skeleton', req, { timeoutMs: 75_000, retries: 0 });
 }
 
 export interface StopImageRequest {
@@ -48,13 +116,7 @@ export interface StopImageRequest {
 }
 
 export async function stopImage(req: StopImageRequest): Promise<{ imageData: string; imageMime: string }> {
-  const res = await fetch('/api/plan-experience/stop-image', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(req),
-  });
-  if (!res.ok) throw new Error(`Stop image failed: ${(await res.text()).slice(0, 200)}`);
-  return (await res.json()) as { imageData: string; imageMime: string };
+  return call('/api/plan-experience/stop-image', req, { timeoutMs: 120_000, retries: 0 });
 }
 
 export interface NarrationRequest {
@@ -64,29 +126,19 @@ export interface NarrationRequest {
 }
 
 export async function narrationText(req: NarrationRequest): Promise<{ narration: string }> {
-  const res = await fetch('/api/plan-experience/narration', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(req),
-  });
-  if (!res.ok) throw new Error(`Narration failed: ${(await res.text()).slice(0, 200)}`);
-  return (await res.json()) as { narration: string };
+  return call('/api/plan-experience/narration', req, { timeoutMs: 45_000 });
 }
 
 export async function synthesize(
   text: string,
   voiceMode: 'eve' | 'reel' = 'eve'
 ): Promise<{ audioData: string; audioMime: string }> {
-  const res = await fetch('/api/tts', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, voiceMode }),
-  });
-  if (!res.ok) throw new Error(`TTS failed: ${(await res.text()).slice(0, 200)}`);
-  return (await res.json()) as { audioData: string; audioMime: string };
+  return call('/api/tts', { text, voiceMode }, { timeoutMs: 25_000 });
 }
 
 export interface ContentPackRequest {
+  /** Skip the server cache ("Regenerate tonight's look"). */
+  fresh?: boolean;
   dishName: string;
   dishDescription: string;
   restaurantName: string;
@@ -97,13 +149,7 @@ export interface ContentPackRequest {
 }
 
 export async function generateContentPack(req: ContentPackRequest): Promise<ContentPack> {
-  const res = await fetch('/api/content-pack', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(req),
-  });
-  if (!res.ok) throw new Error(`Content pack failed: ${(await res.text()).slice(0, 200)}`);
-  return (await res.json()) as ContentPack;
+  return call('/api/content-pack', req, { timeoutMs: 180_000, retries: 0 });
 }
 
 export async function postSpecial(input: {
@@ -115,20 +161,12 @@ export async function postSpecial(input: {
   imageData?: string;
   imageMime?: string;
 }): Promise<{ ok: boolean; id: string }> {
-  const res = await fetch('/api/post-special', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
-  });
-  if (!res.ok) throw new Error(`Post special failed: ${(await res.text()).slice(0, 200)}`);
-  return (await res.json()) as { ok: boolean; id: string };
+  return call('/api/post-special', input, { timeoutMs: 30_000, retries: 0 });
 }
 
 export async function listSpecials(city?: string): Promise<{ specials: PostedSpecial[] }> {
   const url = city ? `/api/specials?city=${encodeURIComponent(city)}` : '/api/specials';
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`List specials failed: ${(await res.text()).slice(0, 200)}`);
-  return (await res.json()) as { specials: PostedSpecial[] };
+  return call<{ specials: PostedSpecial[] }>(url, undefined, { timeoutMs: 15_000 });
 }
 
 export async function eveIntro(input: {
@@ -137,13 +175,7 @@ export async function eveIntro(input: {
   party: number;
   freeText: string;
 }): Promise<{ intro: string; lines: string[] }> {
-  const res = await fetch('/api/eve-intro', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
-  });
-  if (!res.ok) throw new Error(`Intro failed: ${(await res.text()).slice(0, 200)}`);
-  return (await res.json()) as { intro: string; lines: string[] };
+  return call('/api/eve-intro', input, { timeoutMs: 45_000 });
 }
 
 export async function eveOutro(input: {
@@ -151,13 +183,7 @@ export async function eveOutro(input: {
   city: string;
   stops: Array<{ name: string; kind: string }>;
 }): Promise<{ outro: string }> {
-  const res = await fetch('/api/eve-outro', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
-  });
-  if (!res.ok) throw new Error(`Outro failed: ${(await res.text()).slice(0, 200)}`);
-  return (await res.json()) as { outro: string };
+  return call('/api/eve-outro', input, { timeoutMs: 45_000 });
 }
 
 export async function eveStory(input: {
@@ -167,13 +193,7 @@ export async function eveStory(input: {
   city: string;
   party: number;
 }): Promise<EveStory> {
-  const res = await fetch('/api/eve-story', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
-  });
-  if (!res.ok) throw new Error(`Story failed: ${(await res.text()).slice(0, 200)}`);
-  return (await res.json()) as EveStory;
+  return call('/api/eve-story', input, { timeoutMs: 45_000 });
 }
 
 export interface EveRefineResponse {
@@ -201,13 +221,7 @@ export async function eveRefine(input: {
   party: number;
   budgetUSD: number;
 }): Promise<EveRefineResponse> {
-  const res = await fetch('/api/eve-refine', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
-  });
-  if (!res.ok) throw new Error(`Refine failed: ${(await res.text()).slice(0, 200)}`);
-  return (await res.json()) as EveRefineResponse;
+  return call('/api/eve-refine', input, { timeoutMs: 75_000, retries: 0 });
 }
 
 export interface SuggestSpecialResponse {
@@ -225,14 +239,10 @@ export async function suggestSpecial(input: {
   city: string;
   cuisine: string;
   signatureDishes: string;
+  /** Skip the server cache (the "pick a different dish" button). */
+  fresh?: boolean;
 }): Promise<SuggestSpecialResponse> {
-  const res = await fetch('/api/suggest-special', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
-  });
-  if (!res.ok) throw new Error(`Suggest failed: ${(await res.text()).slice(0, 200)}`);
-  return (await res.json()) as SuggestSpecialResponse;
+  return call('/api/suggest-special', input, { timeoutMs: 75_000, retries: 0 });
 }
 
 export interface ParsedIntent {
@@ -261,33 +271,15 @@ export async function eveParseIntent(
     freeText?: string;
   }
 ): Promise<ParsedIntent> {
-  const res = await fetch('/api/eve-parse-intent', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ transcript, currentForm }),
-  });
-  if (!res.ok) throw new Error(`Parse failed: ${(await res.text()).slice(0, 200)}`);
-  return (await res.json()) as ParsedIntent;
+  return call<ParsedIntent>('/api/eve-parse-intent', { transcript, currentForm }, { timeoutMs: 45_000 });
 }
 
 export async function eveAvatar(
   mood: 'devoted' | 'listening' | 'speaking' | 'thinking' | 'longing' = 'devoted'
 ): Promise<{ imageData: string; imageMime: string }> {
-  const res = await fetch('/api/eve-avatar', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mood }),
-  });
-  if (!res.ok) throw new Error(`Avatar failed: ${(await res.text()).slice(0, 200)}`);
-  return (await res.json()) as { imageData: string; imageMime: string };
+  return call('/api/eve-avatar', { mood }, { timeoutMs: 120_000, retries: 0 });
 }
 
 export async function reverseGeocode(lat: number, lng: number): Promise<{ city: string }> {
-  const res = await fetch('/api/reverse-geocode', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ lat, lng }),
-  });
-  if (!res.ok) throw new Error(`Geocode failed: ${(await res.text()).slice(0, 200)}`);
-  return (await res.json()) as { city: string };
+  return call<{ city: string }>('/api/reverse-geocode', { lat, lng }, { timeoutMs: 45_000 });
 }

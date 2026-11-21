@@ -1,16 +1,29 @@
 import { useEffect, useRef, useState } from 'react';
-import { Sparkles, Wand2, RotateCcw, Download, Copy, Check, ChefHat, Send, Lightbulb, Loader2, Instagram, TrendingUp, Link as LinkIcon } from 'lucide-react';
+import { Sparkles, Wand2, RotateCcw, Download, Copy, Check, ChefHat, Send, Lightbulb, Loader2, TrendingUp, Link as LinkIcon } from 'lucide-react';
 import { CUISINES, DEMO_RESTAURANTS } from '../constants';
 import type { Cuisine, ContentPack, RestaurantBrand } from '../types';
 import { generateContentPack, postSpecial, synthesize, suggestSpecial } from '../services/eveService';
 import type { SuggestSpecialResponse } from '../services/eveService';
 import { EveLogo } from './EveLogo';
+import { useOpenRules } from './RulesContext';
+import { AppHeader, IconButton } from '../ui-kit';
 
 interface Props {
   onSwitchToDiner: () => void;
 }
 
 const STORAGE_KEY = 'eve.restaurantBrand';
+
+// lucide-react 1.x dropped brand marks, so the Instagram glyph lives here.
+function InstagramGlyph({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
+      <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
+      <line x1="17.5" y1="6.5" x2="17.51" y2="6.5" />
+    </svg>
+  );
+}
 
 function loadBrand(): RestaurantBrand | null {
   if (typeof window === 'undefined') return null;
@@ -59,6 +72,7 @@ function ghostClass(value: string, ghost: string): string {
 }
 
 export function RestaurantView({ onSwitchToDiner }: Props) {
+  const openRules = useOpenRules();
   const stored = loadBrand();
   const seed = DEMO_RESTAURANTS[0];
 
@@ -154,6 +168,9 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
   }, []);
 
   const generate = async () => {
+    // "Regenerate" asks for a new pack; a first generate may reuse an
+    // identical one the server already made.
+    const regenerating = !!pack;
     setError(null);
     setPack(null);
     setReelAudio(null);
@@ -189,6 +206,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
         voice,
         city,
         signatureDishes: signature,
+        fresh: regenerating,
       });
       setPack(result);
 
@@ -213,6 +231,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
         city: city.trim(),
         cuisine,
         signatureDishes: signature,
+        fresh: true,
       });
       setSuggestion(result);
       setDishName(result.dishName);
@@ -345,40 +364,25 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
   // Single unified page: brand setup + tonight's dish + content pack.
   return (
     <div className="relative z-10 min-h-dvh flex flex-col">
-      <header
-        className="w-full py-2 px-3 md:py-2.5 md:px-4 border-b border-white/[0.06] bg-eve-ink/95 backdrop-blur-sm grid grid-cols-[1fr_auto_1fr] items-center gap-2"
-        role="banner"
-      >
-        <a
-          href="https://mohitgoenka.com/apps/"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-eve-cream/55 hover:text-eve-gold text-xs md:text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink rounded justify-self-start"
-          aria-label="Apps and Games"
-        >
-          <span className="hidden sm:inline">Apps and Games </span><span aria-hidden="true" className="text-base sm:text-[inherit]">🎮</span>
-        </a>
-        <a
-          href="/restaurant"
-          className="flex items-center justify-center gap-2 min-w-0 hover:opacity-80 transition-opacity"
-          title="Eve · For Restaurants"
-          aria-label="Eve · For Restaurants"
-        >
-          <span className="text-eve-cream/85 text-xs md:text-sm font-medium whitespace-nowrap">Eve</span>
-          <EveLogo size={26} />
-          <span className="hidden md:inline text-[11px] text-eve-cream/45 ml-1">restaurants</span>
-        </a>
-        <div className="flex flex-nowrap items-center justify-end gap-1.5 sm:gap-2 shrink-0">
-          <button
+      <AppHeader
+        title={<>Eve<span className="hidden md:inline"> · restaurants</span></>}
+        icon={<EveLogo size={26} />}
+        onTitleClick={() => { window.location.href = '/restaurant'; }}
+        titleLabel="Eve · For Restaurants"
+        onRules={openRules}
+        rulesLabel="How Eve works"
+        right={
+          <>
+          <IconButton
             onClick={onSwitchToDiner}
-            className="p-2 md:p-2.5 h-10 min-w-10 flex items-center justify-center bg-eve-ink-soft rounded-xl border border-white/[0.08] hover:bg-[#1a1a1e] transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink"
             aria-label="For diners"
             title="For diners"
           >
             <Sparkles size={18} className="text-eve-cream/70" />
-          </button>
-        </div>
-      </header>
+          </IconButton>
+          </>
+        }
+      />
 
       <main className="flex-1 max-w-4xl mx-auto w-full px-4 md:px-8 py-8">
         <div className="mb-7">
@@ -431,7 +435,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
             </div>
             <div>
               <label className="block text-[11px] tracking-wide text-eve-cream/65 font-medium mb-1.5">
-                Cuisine <span className="opacity-50">(optional — Eve will infer)</span>
+                Cuisine <span className="opacity-75">(optional — Eve will infer)</span>
               </label>
               <input
                 type="text"
@@ -448,7 +452,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
             </div>
             <div>
               <label className="block text-[11px] tracking-wide text-eve-cream/65 font-medium mb-1.5">
-                Brand voice <span className="opacity-50">(optional)</span>
+                Brand voice <span className="opacity-75">(optional)</span>
               </label>
               <input
                 type="text"
@@ -463,7 +467,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
 
           <div className="mt-4">
             <label className="block text-[11px] tracking-wide text-eve-cream/65 font-medium mb-1.5">
-              Signature dishes <span className="opacity-50">(optional)</span>
+              Signature dishes <span className="opacity-75">(optional)</span>
             </label>
             <textarea
               rows={2}
@@ -528,7 +532,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
               </div>
               <div className="md:col-span-2">
                 <label className="block text-[11px] tracking-wide text-eve-cream/65 font-medium mb-1.5">
-                  Tonight's note <span className="opacity-50">(optional)</span>
+                  Tonight's note <span className="opacity-75">(optional)</span>
                 </label>
                 <input
                   value={dishDescription}
@@ -576,7 +580,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                 className={`inline-flex items-center gap-2 px-7 py-3.5 rounded-xl font-bold text-base transition-all border outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink hover:scale-[1.02] active:scale-[0.98] ${
                   generating
                     ? 'bg-eve-ink-soft text-eve-gold cursor-wait border-eve-gold/30'
-                    : 'bg-eve-ink-soft text-eve-gold border-eve-gold/25 hover:bg-[#1a1a1e] hover:border-eve-gold/45 disabled:bg-eve-ink disabled:text-eve-cream/35 disabled:border-white/10 disabled:cursor-not-allowed shadow-lg shadow-eve-gold/15'
+                    : 'bg-eve-ink-soft text-eve-gold border-eve-gold/25 hover:bg-mg-surface-2 hover:border-eve-gold/45 disabled:bg-eve-ink disabled:text-eve-cream/35 disabled:border-white/10 disabled:cursor-not-allowed shadow-lg shadow-eve-gold/15'
                 }`}
               >
                 {generating ? <Loader2 size={16} className="animate-spin" /> : <ChefHat size={18} />}
@@ -663,7 +667,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                     ) : copied === 'ig_share' ? (
                       <Check size={10} />
                     ) : (
-                      <Instagram size={10} />
+                      <InstagramGlyph size={10} />
                     )}
                     {igPublishing
                       ? 'Posting…'
