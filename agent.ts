@@ -102,7 +102,12 @@ export function makePlacesSearchTool(ai: GoogleGenAI, textModel: string): Tool {
       const response = await ai.models.generateContent({
         model: textModel,
         contents: prompt,
-        config: { temperature: 0.4, tools: [{ googleSearch: {} }] },
+        config: {
+          temperature: 0.4,
+          tools: [{ googleSearch: {} }],
+          maxOutputTokens: 1024,
+          httpOptions: { timeout: 40_000, retryOptions: { attempts: 2 } },
+        },
       });
       return { details: ((response.text || '').trim() || '').slice(0, 600) };
     },
@@ -134,7 +139,10 @@ Photoreal but slightly painterly, like Bon Appetit / Cereal Magazine. NO text, N
       const response = await ai.models.generateContent({
         model: imageModel,
         contents: prompt,
-        config: { responseModalities: ['TEXT', 'IMAGE'] },
+        config: {
+          responseModalities: ['TEXT', 'IMAGE'],
+          httpOptions: { timeout: 55_000, retryOptions: { attempts: 2 } },
+        },
       });
       const parts = response.candidates?.[0]?.content?.parts || [];
       for (const p of parts as Array<any>) {
@@ -157,7 +165,7 @@ export function makeVoiceLineTool(geminiKey: string): Tool {
     required: ['text'],
     async run(input: { text: string }) {
       const ttsBody = {
-        input: { text: (input.text || '').slice(0, 4500) },
+        input: { text: (input.text || '').slice(0, 400) },
         voice: { languageCode: 'en-US', name: 'en-US-Chirp3-HD-Aoede' },
         audioConfig: { audioEncoding: 'MP3', speakingRate: 0.96, pitch: -0.5 },
       };
@@ -169,6 +177,7 @@ export function makeVoiceLineTool(geminiKey: string): Tool {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey },
           body: JSON.stringify(ttsBody),
+          signal: AbortSignal.timeout(20_000),
         }
       );
       if (!r.ok) return { error: `TTS HTTP ${r.status}` };

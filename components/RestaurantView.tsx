@@ -41,6 +41,18 @@ function saveBrand(b: RestaurantBrand) {
   } catch {}
 }
 
+// AI output is untrusted: the email body arrives as HTML, so it is parsed in
+// an inert document (no scripts run, nothing loads) and shown as plain text.
+function emailParagraphs(html: string): string[] {
+  try {
+    const doc = new DOMParser().parseFromString(html || '', 'text/html');
+    const paras = [...doc.body.querySelectorAll('p')].map((p) => (p.textContent || '').trim()).filter(Boolean);
+    return paras.length ? paras : [(doc.body.textContent || '').trim()];
+  } catch {
+    return [String(html || '').replace(/<[^>]+>/g, '')];
+  }
+}
+
 function downloadDataUrl(filename: string, mime: string, base64: string) {
   const link = document.createElement('a');
   link.href = `data:${mime};base64,${base64}`;
@@ -117,7 +129,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
         if (cancelled) return;
         // Server brand existence implies the IG token is on the server side.
         // We expose only a boolean to the client.
-        if (data.brand?.instagramBusinessAccountId) setIgConnected(true);
+        if (data.brand?.igConnected) setIgConnected(true);
       } catch {}
     })();
     return () => {
@@ -824,10 +836,11 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                 </div>
                 <div>
                   <p className="text-[10px] tracking-wide text-eve-cream/55 mb-1 italic font-serif">Email body</p>
-                  <div
-                    className="text-[13px] text-eve-cream/85 leading-relaxed prose-eve"
-                    dangerouslySetInnerHTML={{ __html: pack.emailBlast.bodyHtml }}
-                  />
+                  <div className="text-[13px] text-eve-cream/85 leading-relaxed prose-eve space-y-2">
+                    {emailParagraphs(pack.emailBlast.bodyHtml).map((para, i) => (
+                      <p key={i}>{para}</p>
+                    ))}
+                  </div>
                 </div>
                 <div className="pt-4 border-t border-white/10">
                   <p className="text-[10px] tracking-wide text-eve-cream/55 mb-1 italic font-serif">SMS blast</p>

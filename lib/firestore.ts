@@ -54,6 +54,8 @@ export interface RestaurantBrandDoc {
   signatureDishes: string;
   instagramAccessToken?: string;
   instagramBusinessAccountId?: string;
+  /** sha256 of the publish key held in the connecting browser's httpOnly cookie. */
+  instagramPublishKeyHash?: string;
   stripeCustomerId?: string;
   stripeSubscriptionId?: string;
   subscriptionStatus?: 'active' | 'past_due' | 'canceled' | 'trialing' | 'unpaid' | null;

@@ -1,4 +1,6 @@
 import express from 'express';
+import helmet from 'helmet';
+import crypto from 'crypto';
 import compression from 'compression';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -24,10 +26,47 @@ app.disable('x-powered-by');
 // client address (the right-most X-Forwarded-For hop, which clients can't forge).
 app.set('trust proxy', 1);
 app.use(compression());
-// The Stripe webhook needs the raw body to verify its signature, so the JSON
-// parser must skip it (otherwise express.raw() below receives nothing).
-const jsonParser = express.json({ limit: '12mb' });
-app.use((req, res, next) => (req.path === '/api/stripe/webhook' ? next() : jsonParser(req, res, next)));
+// Security headers. CSP: everything is same-origin except the Unsplash
+// placeholder photos and the Google Fonts used by the static pitch deck.
+// AI images and TTS audio arrive as data: URLs. Stripe Checkout, Maps,
+// OpenTable/Resy/Tock and Instagram are plain navigations (no scripts).
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        'default-src': ["'self'"],
+        'script-src': ["'self'"],
+        'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+        'font-src': ["'self'", 'https://fonts.gstatic.com'],
+        'img-src': ["'self'", 'data:', 'blob:', 'https://images.unsplash.com'],
+        'media-src': ["'self'", 'data:', 'blob:'],
+        'connect-src': ["'self'"],
+        'worker-src': ["'self'"],
+        'manifest-src': ["'self'"],
+        'frame-src': ["'none'"],
+        'frame-ancestors': ["'none'"],
+        'object-src': ["'none'"],
+        'base-uri': ["'self'"],
+        'form-action': ["'self'"],
+        'upgrade-insecure-requests': [],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+    // Same-origin requests keep their Referer (used by the API origin check).
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  })
+);
+
+// Body limits: small JSON everywhere; only posting a special carries an
+// image. The Stripe webhook needs the raw body to verify its signature, so
+// the JSON parser skips it (express.raw() on that route reads it).
+const jsonSmall = express.json({ limit: '100kb' });
+const jsonImage = express.json({ limit: '6mb' });
+app.use((req, res, next) => {
+  if (req.path === '/api/stripe/webhook') return next();
+  return (req.path === '/api/post-special' ? jsonImage : jsonSmall)(req, res, next);
+});
 
 if (!GEMINI_API_KEY) {
   console.warn('GEMINI_API_KEY: not set — /api/* will return 503');
@@ -43,6 +82,53 @@ function jsonError(res: express.Response, code: number, message: string) {
     message = 'Eve couldn\u2019t finish that just now. Please try again.';
   }
   res.status(code).json({ error: message });
+}
+
+// ---------- Input validation ----------
+// Every endpoint takes a fixed request shape: strings are trimmed and capped,
+// enums fall back to a default, numbers are clamped, arrays are bounded.
+// Clients never choose models, prompts, tools or token limits.
+function str(v: unknown, max: number): string {
+  return typeof v === 'string' ? v.trim().slice(0, max) : '';
+}
+function intIn(v: unknown, fallback: number, min: number, max: number): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round(Math.min(max, Math.max(min, n))) : fallback;
+}
+const VIBE_IDS = new Set<string>(VIBES.map((v) => v.id));
+const STOP_KIND_IDS = new Set(['dinner', 'dessert', 'drink', 'walk', 'live_music', 'view', 'activity']);
+const DIETARY_IDS = new Set<string>(DIETARY_PREFERENCES.map((d) => d.id));
+function vibeIn(v: unknown): string {
+  return typeof v === 'string' && VIBE_IDS.has(v) ? v : 'date_night';
+}
+function kindIn(v: unknown): string {
+  return typeof v === 'string' && STOP_KIND_IDS.has(v) ? v : 'dinner';
+}
+function dietaryIn(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((d): d is string => typeof d === 'string' && DIETARY_IDS.has(d)).slice(0, 8) : [];
+}
+interface StopIn {
+  kind: string;
+  name: string;
+  oneLineVibe: string;
+  whyThisFits: string;
+  approxArrival: string;
+  signatureItem: string;
+}
+function stopsIn(v: unknown): StopIn[] {
+  if (!Array.isArray(v)) return [];
+  return v.slice(0, 6).flatMap((s: any) => {
+    const name = str(s?.name, 120);
+    if (!name) return [];
+    return [{
+      kind: kindIn(s?.kind),
+      name,
+      oneLineVibe: str(s?.oneLineVibe, 240),
+      whyThisFits: str(s?.whyThisFits, 300),
+      approxArrival: str(s?.approxArrival, 20),
+      signatureItem: str(s?.signatureItem, 160),
+    }];
+  });
 }
 
 function clean(text: string): string {
@@ -280,6 +366,7 @@ const EXEMPT_AI_PATHS = new Set([
 ]);
 
 const ALLOWED_EVE_ORIGINS = new Set(['eve.mohitgoenka.com', 'localhost', '127.0.0.1']);
+const PUBLIC_BASE_URL = process.env.NODE_ENV === 'production' ? 'https://eve.mohitgoenka.com' : `http://localhost:${PORT}`;
 const aiBuckets = new Map<string, { count: number; resetAt: number }>();
 
 function clientIp(req: express.Request): string {
@@ -291,16 +378,19 @@ function hostFrom(header: string | undefined): string | null {
   try { return new URL(header).hostname.toLowerCase(); } catch { return null; }
 }
 
+// Same-origin only (no CORS headers are ever sent, so other sites can't read
+// responses). A request passes when its Origin, or for GETs without one its
+// Sec-Fetch-Site / Referer, says it came from Eve itself: the public domain
+// or the host it was served from (the Cloud Run URL). The Host header alone
+// is never enough, since every request to this server carries it.
 function isAllowedEveOrigin(req: express.Request): boolean {
   if (process.env.NODE_ENV !== 'production') return true;
-  const originHost = hostFrom(req.get('origin'));
-  const refererHost = hostFrom(req.get('referer'));
-  const host = (req.get('x-forwarded-host') || req.get('host') || '').split(':')[0].toLowerCase();
-  return Boolean(
-    (originHost && ALLOWED_EVE_ORIGINS.has(originHost)) ||
-    (refererHost && ALLOWED_EVE_ORIGINS.has(refererHost)) ||
-    (host && ALLOWED_EVE_ORIGINS.has(host))
-  );
+  const host = (req.get('host') || '').split(':')[0].toLowerCase();
+  const ok = (h: string | null) => !!h && (ALLOWED_EVE_ORIGINS.has(h) || h === host);
+  const origin = req.get('origin');
+  if (origin) return ok(hostFrom(origin));
+  if (req.get('sec-fetch-site') === 'same-origin') return true;
+  return ok(hostFrom(req.get('referer')));
 }
 
 // A single evening plan bursts many /api/* calls in ~30-60s (intro, intent,
@@ -368,12 +458,31 @@ app.post('/api/agent/run', async (req, res) => {
     return jsonError(res, 400, 'plan must be a non-empty array of { tool, input }');
   }
   if (plan.length > 6) return jsonError(res, 400, 'plan may have at most 6 steps');
-  const sceneSteps = plan.filter((s: any) => s?.tool === 'sceneCard').length;
+  // Fixed tools with fixed, capped inputs: the caller can't pick a model,
+  // prompt, token limit or URL; voice lines are short.
+  const TOOLS = new Set(['placesSearch', 'sceneCard', 'voiceLine']);
+  const steps = plan.map((st: any) => {
+    const i = st?.input && typeof st.input === 'object' ? st.input : {};
+    return {
+      tool: TOOLS.has(st?.tool) ? st.tool : 'unknown',
+      input: {
+        name: str(i.name, 120),
+        city: str(i.city, 120),
+        kind: kindIn(i.kind),
+        vibe: vibeIn(i.vibe),
+        oneLineVibe: str(i.oneLineVibe, 240),
+        venueDetails: str(i.venueDetails, 600),
+        text: str(i.text, 400),
+      },
+    };
+  });
+  if (steps.some((st) => st.tool === 'unknown')) return jsonError(res, 400, 'unknown tool');
+  const sceneSteps = steps.filter((st) => st.tool === 'sceneCard').length;
   if (sceneSteps && !takeImages(req, res, sceneSteps)) return;
   try {
     const runtime = new AgentRuntime(ai);
     const agent = buildEveBrainAgent(ai, GEMINI_API_KEY);
-    const result = await runtime.runDeterministic(agent, plan);
+    const result = await runtime.runDeterministic(agent, steps);
     res.json({
       agent: agent.name,
       tools: agent.tools.map((t) => ({ name: t.name, description: t.description })),
@@ -388,10 +497,10 @@ app.post('/api/agent/run', async (req, res) => {
 app.post('/api/eve-intro', async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
-  const vibe: string = (req.body?.vibe || 'date_night').trim();
-  const city: string = (req.body?.city || '').trim();
-  const party: number = Number(req.body?.party) || 2;
-  const freeText: string = (req.body?.freeText || '').trim();
+  const vibe: string = vibeIn(req.body?.vibe);
+  const city: string = str(req.body?.city, 120);
+  const party: number = intIn(req.body?.party, 2, 1, 20);
+  const freeText: string = str(req.body?.freeText, 500);
 
   const vibePersona: Record<string, string> = {
     date_night:
@@ -462,9 +571,9 @@ Return strict JSON only:
 app.post('/api/eve-outro', async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
-  const vibe: string = (req.body?.vibe || 'date_night').trim();
-  const stops: any[] = req.body?.stops || [];
-  const city: string = (req.body?.city || '').trim();
+  const vibe: string = vibeIn(req.body?.vibe);
+  const stops = stopsIn(req.body?.stops);
+  const city: string = str(req.body?.city, 120);
 
   const stopsText = stops.map((s) => `${s.name} (${s.kind})`).join(' → ') || '...';
 
@@ -509,11 +618,11 @@ Output ONLY the line itself. No quotes.`;
 app.post('/api/eve-story', async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
-  const title: string = (req.body?.title || '').trim();
-  const stops: any[] = req.body?.stops || [];
-  const vibe: string = (req.body?.vibe || 'date_night').trim();
-  const city: string = (req.body?.city || '').trim();
-  const party: number = Number(req.body?.party) || 2;
+  const title: string = str(req.body?.title, 160);
+  const stops = stopsIn(req.body?.stops);
+  const vibe: string = vibeIn(req.body?.vibe);
+  const city: string = str(req.body?.city, 120);
+  const party: number = intIn(req.body?.party, 2, 1, 20);
 
   if (!stops.length) return jsonError(res, 400, 'stops required');
 
@@ -599,13 +708,13 @@ Total length across all beats: aim for 130-180 words. Sound spoken. Avoid em das
 app.post('/api/eve-refine', async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
-  const userMessage: string = (req.body?.message || '').trim();
-  const previousPlan: any = req.body?.previousPlan || {};
-  const vibe: string = (req.body?.vibe || 'date_night').trim();
-  const city: string = (req.body?.city || '').trim();
-  const dietary: string[] = req.body?.dietary || [];
-  const party: number = Number(req.body?.party) || 2;
-  const budgetUSD: number = Number(req.body?.budgetUSD) || 200;
+  const userMessage: string = str(req.body?.message, 500);
+  const previousPlan = { stops: stopsIn(req.body?.previousPlan?.stops) };
+  const vibe: string = vibeIn(req.body?.vibe);
+  const city: string = str(req.body?.city, 120);
+  const dietary = dietaryIn(req.body?.dietary);
+  const party: number = intIn(req.body?.party, 2, 1, 20);
+  const budgetUSD = intIn(req.body?.budgetUSD, 200, 10, 20000);
 
   if (!userMessage) return jsonError(res, 400, 'message required');
 
@@ -656,8 +765,17 @@ Return strict JSON only:
 app.post('/api/eve-parse-intent', async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
-  const transcript: string = (req.body?.transcript || '').trim();
-  const currentForm: any = req.body?.currentForm || {};
+  const transcript: string = str(req.body?.transcript, 1000);
+  const cf = req.body?.currentForm && typeof req.body.currentForm === 'object' ? req.body.currentForm : {};
+  const currentForm = {
+    location: str(cf.location, 120),
+    vibe: VIBE_IDS.has(cf.vibe) ? cf.vibe : '',
+    party: cf.party === undefined ? '' : intIn(cf.party, 2, 1, 20),
+    dietary: dietaryIn(cf.dietary),
+    budgetPerPerson: cf.budgetPerPerson === undefined ? '' : intIn(cf.budgetPerPerson, 80, 5, 2000),
+    cuisinePref: str(cf.cuisinePref, 60),
+    freeText: str(cf.freeText, 500),
+  };
 
   if (!transcript) return jsonError(res, 400, 'transcript required');
 
@@ -740,7 +858,7 @@ Output JSON ONLY. No markdown fences. No prose before or after. First character 
 app.post('/api/eve-avatar', async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
-  const mood: string = (req.body?.mood || 'devoted').trim();
+  const mood: string = str(req.body?.mood, 20) || 'devoted';
   const moodGuide: Record<string, string> = {
     devoted: 'soft attentive expression, eyes lowered just slightly, warm and patient',
     listening: 'tilted head, lips parted softly, fully attentive',
@@ -802,7 +920,7 @@ app.post('/api/reverse-geocode', async (req, res) => {
   const lat: number = Number(req.body?.lat);
   const lng: number = Number(req.body?.lng);
 
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
     return jsonError(res, 400, 'lat and lng required');
   }
 
@@ -825,7 +943,7 @@ app.post('/api/reverse-geocode', async (req, res) => {
 });
 
 app.get('/api/specials', async (req, res) => {
-  const cityFilter = (req.query?.city || '').toString();
+  const cityFilter = str(req.query?.city, 80);
   try {
     const specials = cityFilter
       ? await firestore.listSpecialsForCity(cityFilter, 25)
@@ -839,17 +957,17 @@ app.get('/api/specials', async (req, res) => {
 app.post('/api/plan-experience/skeleton', async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
-  const city: string = (req.body?.city || '').trim();
-  const vibe: string = (req.body?.vibe || 'date_night').trim();
-  const party: number = Number(req.body?.party) || 2;
-  const dietary: string[] = req.body?.dietary || [];
-  const budgetPerPersonUSD: number = Number(req.body?.budgetPerPersonUSD) || Number(req.body?.budgetUSD) || 80;
+  const city: string = str(req.body?.city, 120);
+  const vibe: string = vibeIn(req.body?.vibe);
+  const party: number = intIn(req.body?.party, 2, 1, 20);
+  const dietary = dietaryIn(req.body?.dietary);
+  const budgetPerPersonUSD = intIn(req.body?.budgetPerPersonUSD ?? req.body?.budgetUSD, 80, 5, 2000);
   const totalBudget = budgetPerPersonUSD * party;
-  const freeText: string = (req.body?.freeText || '').trim();
-  const cuisinePref: string = (req.body?.cuisinePref || '').trim();
-  const whenISO: string = (req.body?.whenISO || '').trim();
+  const freeText: string = str(req.body?.freeText, 500);
+  const cuisinePref: string = str(req.body?.cuisinePref, 60);
+  const whenISO: string = str(req.body?.whenISO, 10);
   // Start time of the evening as 24-hour "HH:MM" (e.g. "19:30"). Optional.
-  const startTime: string = (req.body?.startTime || '').trim();
+  const startTime: string = str(req.body?.startTime, 5);
   // Total length of the evening, in hours. Drives stop count.
   const durationHoursRaw = Number(req.body?.durationHours);
   const durationHours = Number.isFinite(durationHoursRaw) && durationHoursRaw > 0
@@ -884,7 +1002,7 @@ app.post('/api/plan-experience/skeleton', async (req, res) => {
   const vibeMeta = VIBES.find((v) => v.id === vibe) || VIBES[0];
   const cuisineLine = cuisinePref ? `Preferred cuisine for the dinner anchor: ${cuisinePref}.` : '';
   let whenLine = '';
-  if (whenISO) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(whenISO)) {
     const target = new Date(whenISO + 'T00:00:00');
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -1036,12 +1154,12 @@ Constraints:
 app.post('/api/plan-experience/stop-image', async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
-  const name: string = (req.body?.name || '').trim();
-  const kind: string = (req.body?.kind || 'dinner').trim();
-  const oneLineVibe: string = (req.body?.oneLineVibe || '').trim();
-  const city: string = (req.body?.city || '').trim();
-  const vibe: string = (req.body?.vibe || 'date_night').trim();
-  const accent: string = (req.body?.accent || '').trim();
+  const name: string = str(req.body?.name, 120);
+  const kind: string = kindIn(req.body?.kind);
+  const oneLineVibe: string = str(req.body?.oneLineVibe, 240);
+  const city: string = str(req.body?.city, 120);
+  const vibe: string = vibeIn(req.body?.vibe);
+  const accent: string = str(req.body?.accent, 40);
 
   if (!name) return jsonError(res, 400, 'name required');
 
@@ -1131,9 +1249,9 @@ CRITICAL composition rules:
 app.post('/api/plan-experience/narration', async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
-  const title: string = (req.body?.title || '').trim();
-  const stops: any[] = req.body?.stops || [];
-  const vibe: string = (req.body?.vibe || 'date_night').trim();
+  const title: string = str(req.body?.title, 160);
+  const stops = stopsIn(req.body?.stops);
+  const vibe: string = vibeIn(req.body?.vibe);
   const vibeMeta = VIBES.find((v) => v.id === vibe) || VIBES[0];
 
   if (!stops.length) return jsonError(res, 400, 'stops required');
@@ -1167,13 +1285,13 @@ Write the monologue in plain prose suitable for text-to-speech. Use natural paus
 app.post('/api/content-pack', async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
-  const dishName: string = (req.body?.dishName || '').trim();
-  const dishDescription: string = (req.body?.dishDescription || '').trim();
-  const restaurantName: string = (req.body?.restaurantName || '').trim();
-  const cuisine: string = (req.body?.cuisine || 'fusion').trim();
-  const voice: string = (req.body?.voice || '').trim();
-  const city: string = (req.body?.city || '').trim();
-  const signatureDishes: string = (req.body?.signatureDishes || '').trim();
+  const dishName: string = str(req.body?.dishName, 120);
+  const dishDescription: string = str(req.body?.dishDescription, 400);
+  const restaurantName: string = str(req.body?.restaurantName, 120);
+  const cuisine: string = str(req.body?.cuisine, 40) || 'fusion';
+  const voice: string = str(req.body?.voice, 300);
+  const city: string = str(req.body?.city, 120);
+  const signatureDishes: string = str(req.body?.signatureDishes, 400);
 
   if (!dishName || !restaurantName) {
     return jsonError(res, 400, 'dishName and restaurantName required');
@@ -1396,10 +1514,10 @@ Strict JSON only:
 app.post('/api/suggest-special', async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
-  const restaurantName: string = (req.body?.restaurantName || '').trim();
-  const city: string = (req.body?.city || '').trim();
-  let cuisine: string = (req.body?.cuisine || '').trim();
-  let signatureDishes: string = (req.body?.signatureDishes || '').trim();
+  const restaurantName: string = str(req.body?.restaurantName, 120);
+  const city: string = str(req.body?.city, 120);
+  let cuisine: string = str(req.body?.cuisine, 40);
+  let signatureDishes: string = str(req.body?.signatureDishes, 400);
 
   if (!restaurantName || !city) {
     return jsonError(res, 400, 'restaurantName and city required');
@@ -1491,13 +1609,23 @@ Constraints:
 });
 
 app.post('/api/post-special', async (req, res) => {
-  const restaurantName: string = (req.body?.restaurantName || '').trim();
-  const city: string = (req.body?.city || '').trim();
-  const cuisine: string = (req.body?.cuisine || 'fusion').trim();
-  const dishName: string = (req.body?.dishName || '').trim();
-  const caption: string = (req.body?.caption || '').trim();
-  const imageData: string | undefined = req.body?.imageData;
-  const imageMime: string | undefined = req.body?.imageMime;
+  const restaurantName: string = str(req.body?.restaurantName, 120);
+  const city: string = str(req.body?.city, 120);
+  const cuisine: string = str(req.body?.cuisine, 40) || 'fusion';
+  const dishName: string = str(req.body?.dishName, 120);
+  const caption: string = str(req.body?.caption, 2200);
+  // Only a real base64 PNG/JPEG/WebP (<= ~4.5 MB) is stored with a special.
+  const rawImage = req.body?.imageData;
+  const rawMime = req.body?.imageMime;
+  const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+  const imageOk =
+    typeof rawImage === 'string' &&
+    rawImage.length <= 6_000_000 &&
+    /^[A-Za-z0-9+/]+={0,2}$/.test(rawImage) &&
+    typeof rawMime === 'string' &&
+    IMAGE_MIMES.has(rawMime);
+  const imageData: string | undefined = imageOk ? rawImage : undefined;
+  const imageMime: string | undefined = imageOk ? rawMime : undefined;
 
   if (!restaurantName || !dishName || !city) {
     return jsonError(res, 400, 'restaurantName, dishName, city required');
@@ -1521,38 +1649,28 @@ app.post('/api/post-special', async (req, res) => {
 
 // ---------- Brand persistence (replaces localStorage) ----------
 
+// Brand ids are public slugs ("name-city"), so this only says whether
+// Instagram is connected. Tokens, billing ids and keys never leave the server.
+// (Brands are written only by the Instagram OAuth callback and the Stripe
+// webhook; there is no unauthenticated write endpoint.)
+const BRAND_ID_RE = /^[a-z0-9-]{1,80}$/;
+
 app.get('/api/restaurant/brand/:id', async (req, res) => {
+  if (!BRAND_ID_RE.test(req.params.id)) return jsonError(res, 400, 'bad brand id');
   try {
     const brand = await firestore.getBrand(req.params.id);
-    if (!brand) return res.json({ brand: null });
-    // Never echo secret tokens to the client
-    const { instagramAccessToken, ...safe } = brand;
-    void instagramAccessToken;
-    res.json({ brand: safe });
+    res.json({ brand: brand ? { igConnected: !!brand.instagramBusinessAccountId } : null });
   } catch (err: any) {
     jsonError(res, 500, err?.message || 'getBrand failed');
   }
 });
 
-app.post('/api/restaurant/brand/:id', async (req, res) => {
-  try {
-    const allowed = ['name', 'city', 'cuisine', 'voice', 'signatureDishes', 'ownerUid'] as const;
-    const data: any = {};
-    for (const key of allowed) {
-      if (typeof req.body?.[key] !== 'undefined') data[key] = req.body[key];
-    }
-    await firestore.saveBrand(req.params.id, data);
-    res.json({ ok: true });
-  } catch (err: any) {
-    jsonError(res, 500, err?.message || 'saveBrand failed');
-  }
-});
-
 app.get('/api/restaurant/metrics/:name', async (req, res) => {
   try {
-    const city = (req.query?.city || '').toString();
-    const days = Math.max(1, Math.min(30, Number(req.query?.days) || 7));
-    const metrics = await firestore.getMetricsForBrand(req.params.name, city, days);
+    const name = str(req.params.name, 120);
+    const city = str(req.query?.city, 120);
+    const days = intIn(req.query?.days, 7, 1, 30);
+    const metrics = await firestore.getMetricsForBrand(name, city, days);
     res.json(metrics);
   } catch (err: any) {
     jsonError(res, 500, err?.message || 'metrics failed');
@@ -1571,13 +1689,17 @@ app.post('/api/stripe/create-checkout-session', async (req, res) => {
   }
   try {
     const tier: 'restaurant' | 'diner' = req.body?.tier === 'restaurant' ? 'restaurant' : 'diner';
-    const returnPath: string = (req.body?.returnPath || '/pricing').toString();
-    const origin = req.headers.origin || `${req.protocol}://${req.get('host')}`;
+    // Redirects only ever go back to Eve: a fixed base URL and a plain
+    // in-app path (no open redirect through Checkout).
+    const rawPath = str(req.body?.returnPath, 80);
+    const returnPath = /^\/[a-z0-9/-]*$/.test(rawPath) && !rawPath.startsWith('//') ? rawPath : '/pricing';
+    const base = PUBLIC_BASE_URL;
+    const email = str(req.body?.email, 200);
     const session = await stripeLib.createCheckoutSession({
       tier,
-      successUrl: `${origin}/pricing?status=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancelUrl: `${origin}${returnPath}?status=canceled`,
-      customerEmail: req.body?.email,
+      successUrl: `${base}/pricing?status=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancelUrl: `${base}${returnPath}?status=canceled`,
+      customerEmail: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : undefined,
       metadata: { tier, returnPath },
     });
     res.json({ url: session.url });
@@ -1589,7 +1711,7 @@ app.post('/api/stripe/create-checkout-session', async (req, res) => {
 // Stripe needs the raw body to validate webhook signatures.
 app.post(
   '/api/stripe/webhook',
-  express.raw({ type: 'application/json' }),
+  express.raw({ type: 'application/json', limit: '1mb' }),
   async (req, res) => {
     const stripe = stripeLib.getStripe();
     const sig = req.headers['stripe-signature'] as string | undefined;
@@ -1649,15 +1771,51 @@ app.post(
 );
 
 // ---------- Instagram OAuth + publish ----------
+const IG_COOKIE = 'eve_ig';
+// OAuth state is HMAC-signed and expires in 15 minutes, so it can't be forged
+// to attach an account to someone else's brand.
+const STATE_SECRET = process.env.META_APP_SECRET || crypto.randomBytes(32).toString('hex');
+function sha256(v: string): string {
+  return crypto.createHash('sha256').update(v).digest('hex');
+}
+function safeEqual(a: string, b: string): boolean {
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+}
+function signState(brandId: string): string {
+  const body = Buffer.from(JSON.stringify({ brandId, ts: Date.now() })).toString('base64url');
+  const mac = crypto.createHmac('sha256', STATE_SECRET).update(body).digest('base64url');
+  return `${body}.${mac}`;
+}
+function verifyState(state: string): string | null {
+  const [body, mac] = state.split('.');
+  if (!body || !mac) return null;
+  const expected = crypto.createHmac('sha256', STATE_SECRET).update(body).digest('base64url');
+  if (!safeEqual(mac, expected)) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    if (Date.now() - Number(parsed.ts) > 15 * 60 * 1000) return null;
+    return typeof parsed.brandId === 'string' && BRAND_ID_RE.test(parsed.brandId) ? parsed.brandId : null;
+  } catch {
+    return null;
+  }
+}
+function readCookie(req: express.Request, name: string): string | null {
+  for (const part of (req.get('cookie') || '').split(';')) {
+    const [k, ...v] = part.trim().split('=');
+    if (k === name) return decodeURIComponent(v.join('='));
+  }
+  return null;
+}
 
 app.get('/api/auth/instagram/start', (req, res) => {
   if (!instagramLib.isInstagramConfigured()) {
     return jsonError(res, 503, 'Instagram publishing is not enabled yet — copy-share works in the meantime.');
   }
-  const brandId = (req.query?.brandId || '').toString();
-  if (!brandId) return jsonError(res, 400, 'brandId required');
-  const state = Buffer.from(JSON.stringify({ brandId, ts: Date.now() })).toString('base64url');
-  res.redirect(instagramLib.buildAuthUrl(state));
+  const brandId = str(req.query?.brandId, 80);
+  if (!BRAND_ID_RE.test(brandId)) return jsonError(res, 400, 'brandId required');
+  res.redirect(instagramLib.buildAuthUrl(signState(brandId)));
 });
 
 app.get('/api/auth/instagram/callback', async (req, res) => {
@@ -1667,13 +1825,8 @@ app.get('/api/auth/instagram/callback', async (req, res) => {
   const code = (req.query?.code || '').toString();
   const stateRaw = (req.query?.state || '').toString();
   if (!code || !stateRaw) return res.status(400).send('missing code or state');
-  let brandId = '';
-  try {
-    const parsed = JSON.parse(Buffer.from(stateRaw, 'base64url').toString('utf8'));
-    brandId = parsed.brandId;
-  } catch {
-    return res.status(400).send('bad state');
-  }
+  const brandId = verifyState(stateRaw);
+  if (!brandId) return res.status(400).send('bad state');
   try {
     const shortLived = await instagramLib.exchangeCodeForToken(code);
     const { token: longLived } = await instagramLib.exchangeForLongLivedToken(shortLived);
@@ -1681,9 +1834,20 @@ app.get('/api/auth/instagram/callback', async (req, res) => {
     if (!igAccount) {
       return res.redirect('/restaurant?ig=no_business_account');
     }
+    // Publishing needs proof that this browser connected the account: a
+    // random key in an httpOnly cookie, stored server-side only as a hash.
+    const publishKey = crypto.randomBytes(24).toString('base64url');
     await firestore.saveBrand(brandId, {
       instagramAccessToken: igAccount.pageAccessToken,
       instagramBusinessAccountId: igAccount.igBusinessAccountId,
+      instagramPublishKeyHash: sha256(publishKey),
+    });
+    res.cookie(IG_COOKIE, `${brandId}.${publishKey}`, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/api/instagram',
+      maxAge: 60 * 24 * 60 * 60 * 1000,
     });
     res.redirect('/restaurant?ig=connected');
   } catch (err: any) {
@@ -1696,16 +1860,28 @@ app.post('/api/instagram/publish', async (req, res) => {
   if (!instagramLib.isInstagramConfigured()) {
     return jsonError(res, 503, 'Instagram publishing not enabled. Use copy-share for now.');
   }
-  const brandId: string = (req.body?.brandId || '').trim();
-  const imageUrl: string = (req.body?.imageUrl || '').trim();
-  const caption: string = (req.body?.caption || '').trim();
-  if (!brandId || !imageUrl || !caption) {
+  const brandId: string = str(req.body?.brandId, 80);
+  const imageUrl: string = str(req.body?.imageUrl, 2000);
+  const caption: string = str(req.body?.caption, 2200);
+  if (!BRAND_ID_RE.test(brandId) || !imageUrl || !caption) {
     return jsonError(res, 400, 'brandId, imageUrl, caption required');
   }
+  // Meta fetches the image itself; only public https URLs are passed on.
+  let imageHost = '';
+  try {
+    const u = new URL(imageUrl);
+    if (u.protocol === 'https:') imageHost = u.hostname;
+  } catch {}
+  if (!imageHost) return jsonError(res, 400, 'imageUrl must be a public https URL');
   try {
     const brand = await firestore.getBrand(brandId);
     if (!brand?.instagramAccessToken || !brand.instagramBusinessAccountId) {
       return jsonError(res, 400, 'Brand has not connected Instagram yet.');
+    }
+    const cookieKey = readCookie(req, IG_COOKIE);
+    const [cookieBrand, key] = cookieKey ? cookieKey.split('.') : [];
+    if (cookieBrand !== brandId || !key || !brand.instagramPublishKeyHash || !safeEqual(sha256(key), brand.instagramPublishKeyHash)) {
+      return jsonError(res, 403, 'Connect Instagram from this browser to publish.');
     }
     const result = await instagramLib.publishImageToInstagram({
       igBusinessAccountId: brand.instagramBusinessAccountId,
@@ -1734,8 +1910,8 @@ app.post('/api/reservations/check', async (req, res) => {
     // Without Gemini, optimistically allow all platforms.
     return res.json({ opentable: true, resy: true, tock: true, source: 'fallback' });
   }
-  const restaurantName: string = (req.body?.restaurantName || '').trim();
-  const city: string = (req.body?.city || '').trim();
+  const restaurantName: string = str(req.body?.restaurantName, 120);
+  const city: string = str(req.body?.city, 120);
   if (!restaurantName) return jsonError(res, 400, 'restaurantName required');
 
   const reservationKey = cacheKey(restaurantName, city);
@@ -1798,8 +1974,8 @@ const ttsCache = new TtlCache<{ audioData: string; audioMime: string }>({
 app.post('/api/tts', async (req, res) => {
   if (!GEMINI_API_KEY) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
-  const text: string = (req.body?.text || '').trim();
-  const voiceMode: string = (req.body?.voiceMode || 'eve').trim();
+  const text: string = str(req.body?.text, 1500);
+  const voiceMode: string = (req.body?.voiceMode === 'reel' ? 'reel' : 'eve');
   if (!text) return jsonError(res, 400, 'text required');
   const ttsKey = `${voiceMode === 'reel' ? 'reel' : 'eve'}|${text.slice(0, 4500)}`;
   const cachedAudio = ttsCache.get(ttsKey);
@@ -1928,6 +2104,15 @@ app.use(
 app.get('/{*splat}', (_req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+});
+
+// Anything unexpected (bad JSON, oversized body, thrown errors): a generic
+// JSON reply, never a stack trace or upstream error text.
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const status = typeof err?.status === 'number' && err.status >= 400 && err.status < 500 ? err.status : 500;
+  if (status >= 500) console.error('unhandled error:', err?.message || err);
+  if (res.headersSent) return;
+  res.status(status).json({ error: status === 413 ? 'That request is too large.' : status < 500 ? 'Bad request.' : 'Something went wrong. Please try again.' });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
