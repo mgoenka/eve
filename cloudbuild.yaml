@@ -3,9 +3,17 @@ substitutions:
   _REPOSITORY: cloud-run-images
 
 steps:
+  # Reuse layers from the last image when they still match (faster, cheaper builds).
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args: ['-c', 'docker pull ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/eve:latest || exit 0']
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
+      - '--cache-from'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/eve:latest'
+      - '--build-arg'
+      - 'BUILDKIT_INLINE_CACHE=1'
       - '-t'
       - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/eve:$BUILD_ID'
       - '-t'
@@ -32,10 +40,16 @@ steps:
       - '--allow-unauthenticated'
       - '--port'
       - '8080'
+      # Image generation happens in the Gemini API, not here: the server only
+      # relays base64 results and keeps small bounded caches (~110 MB max),
+      # so 512Mi / 1 vCPU is plenty. CPU boost speeds up cold starts.
       - '--memory'
-      - '1Gi'
+      - '512Mi'
       - '--cpu'
-      - '2'
+      - '1'
+      - '--cpu-boost'
+      - '--max-instances'
+      - '3'
       - '--timeout'
       - '600'
       - '--set-secrets'

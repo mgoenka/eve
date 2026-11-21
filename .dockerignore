@@ -1,7 +1,41 @@
+# from app-platform/templates (dockerignore) + Eve specifics at the end
 node_modules
-dist
+**/node_modules
 .git
-.env
-.env.local
-*.log
+.gitignore
+.github
+.vscode
+.idea
 .DS_Store
+*.log
+npm-debug.log*
+# secrets — never send to the Docker build context
+.env*
+!.env.example
+*.pem
+*.key
+service-account*.json
+*credentials*.json
+# not needed in the image
+dist-ssr
+coverage
+screenshots
+shots
+tests
+test
+smoke
+playwright-report
+test-results
+docs
+*.md
+!README.md
+migrated_prompt_history
+.gcloudignore
+cloudbuild.yaml
+# Eve: build output and the Capacitor native shells are not needed in the image
+dist
+android
+ios
+scripts/seed-demo.sh
+RECORD_DEMO.md
+SETUP.md

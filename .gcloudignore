@@ -1,0 +1,34 @@
+# from app-platform/templates (gcloudignore) + Eve specifics at the end
+# NOTE: a .gcloudignore REPLACES .gitignore for gcloud uploads, so everything secret must be listed here too.
+.gcloudignore
+.git
+.gitignore
+.github
+node_modules
+**/node_modules
+.vscode
+.idea
+.DS_Store
+*.log
+# secrets — never upload
+.env*
+!.env.example
+*.pem
+*.key
+service-account*.json
+*credentials*.json
+# not needed for the build
+dist
+dist-ssr
+coverage
+screenshots
+shots
+tests
+smoke
+playwright-report
+test-results
+docs
+migrated_prompt_history
+# Eve: the Capacitor native shells are not needed for the Cloud Run build
+android
+ios

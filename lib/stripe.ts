@@ -26,7 +26,7 @@ const STRIPE_PRICE_DINER_PREMIUM = process.env.STRIPE_PRICE_DINER_PREMIUM || '';
 
 let stripe: Stripe | null = null;
 if (STRIPE_SECRET_KEY) {
-  stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: '2026-04-22.dahlia' });
+  stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: '2026-11-18.endive' });
 }
 
 export function isStripeConfigured(): boolean {

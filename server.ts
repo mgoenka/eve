@@ -2,12 +2,13 @@ import express from 'express';
 import compression from 'compression';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import { CUISINES, VIBES, DIETARY_PREFERENCES, DEMO_RESTAURANTS } from './constants';
 import { AgentRuntime, buildEveBrainAgent } from './agent';
 import * as firestore from './lib/firestore';
 import * as stripeLib from './lib/stripe';
 import * as instagramLib from './lib/instagram';
+import { TtlCache, cacheKey } from './lib/ttlCache';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -18,8 +19,15 @@ const TEXT_MODEL = 'gemini-flash-latest';
 const IMAGE_MODEL = 'gemini-2.5-flash-image';
 
 const app = express();
+app.disable('x-powered-by');
+// Cloud Run puts exactly one proxy in front of us, so req.ip is the real
+// client address (the right-most X-Forwarded-For hop, which clients can't forge).
+app.set('trust proxy', 1);
 app.use(compression());
-app.use(express.json({ limit: '12mb' }));
+// The Stripe webhook needs the raw body to verify its signature, so the JSON
+// parser must skip it (otherwise express.raw() below receives nothing).
+const jsonParser = express.json({ limit: '12mb' });
+app.use((req, res, next) => (req.path === '/api/stripe/webhook' ? next() : jsonParser(req, res, next)));
 
 if (!GEMINI_API_KEY) {
   console.warn('GEMINI_API_KEY: not set — /api/* will return 503');
@@ -28,6 +36,12 @@ if (!GEMINI_API_KEY) {
 const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 
 function jsonError(res: express.Response, code: number, message: string) {
+  // Upstream (Gemini / TTS) failure details stay in the server log; users get
+  // a calm, generic line. 4xx and 503 messages are written for users already.
+  if (code >= 500 && code !== 503) {
+    console.warn(`[${code}] ${message}`);
+    message = 'Eve couldn\u2019t finish that just now. Please try again.';
+  }
   res.status(code).json({ error: message });
 }
 
@@ -97,6 +111,164 @@ function imagePart(mimeType: string, data: string) {
   return { inlineData: { mimeType, data } };
 }
 
+// ---------- Gemini call helpers (cost + speed guards) ----------
+//
+// Every text call gets a hard timeout, bounded SDK retries, a maxOutputTokens
+// ceiling and the lowest thinking level. Thinking tokens count toward
+// maxOutputTokens, so the ceilings are generous enough that JSON never gets
+// cut off mid-object.
+const TEXT_TIMEOUT_MS = 25_000;
+const GROUNDED_TIMEOUT_MS = 40_000;
+const IMAGE_TIMEOUT_MS = 55_000;
+const RETRY = { attempts: 2 };
+
+// If the model behind gemini-flash-latest ever rejects thinkingLevel, stop
+// sending it instead of failing every request.
+let thinkingLevelSupported = true;
+
+async function generateText(opts: {
+  contents: string;
+  maxOutputTokens: number;
+  config?: Record<string, any>;
+  schema?: Record<string, any>;
+  timeoutMs?: number;
+}) {
+  if (!ai) throw new Error('GEMINI_API_KEY not configured');
+  const config: Record<string, any> = {
+    ...(opts.config || {}),
+    maxOutputTokens: opts.maxOutputTokens,
+    httpOptions: { timeout: opts.timeoutMs ?? TEXT_TIMEOUT_MS, retryOptions: RETRY },
+  };
+  if (opts.schema) {
+    config.responseMimeType = 'application/json';
+    config.responseSchema = opts.schema;
+  }
+  if (thinkingLevelSupported) {
+    try {
+      return await ai.models.generateContent({
+        model: TEXT_MODEL,
+        contents: opts.contents,
+        config: { ...config, thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } },
+      });
+    } catch (err: any) {
+      if (!/thinking/i.test(String(err?.message || ''))) throw err;
+      thinkingLevelSupported = false;
+      console.warn(`thinkingLevel rejected by ${TEXT_MODEL}; continuing without it`);
+    }
+  }
+  return ai.models.generateContent({ model: TEXT_MODEL, contents: opts.contents, config });
+}
+
+/** Search-grounded text call (venue research, live lookups). */
+function generateGrounded(contents: string, maxOutputTokens: number, temperature: number) {
+  return generateText({
+    contents,
+    maxOutputTokens,
+    timeoutMs: GROUNDED_TIMEOUT_MS,
+    config: { temperature, tools: [{ googleSearch: {} }] },
+  });
+}
+
+interface GeneratedImage {
+  imageData: string;
+  imageMime: string;
+}
+
+async function generateImage(prompt: string): Promise<GeneratedImage | null> {
+  if (!ai) throw new Error('GEMINI_API_KEY not configured');
+  const response = await ai.models.generateContent({
+    model: IMAGE_MODEL,
+    contents: prompt,
+    config: {
+      responseModalities: ['TEXT', 'IMAGE'],
+      httpOptions: { timeout: IMAGE_TIMEOUT_MS, retryOptions: RETRY },
+    },
+  });
+  const parts = response.candidates?.[0]?.content?.parts || [];
+  for (const p of parts as Array<any>) {
+    if (p?.inlineData?.data && p?.inlineData?.mimeType) {
+      return { imageData: p.inlineData.data, imageMime: p.inlineData.mimeType };
+    }
+  }
+  return null;
+}
+
+// ---------- Server-side caches for identical requests ----------
+// Images are big (~1-2 MB of base64 each), so the image caches are bounded by
+// bytes as well as entries to stay well inside a 512 MiB instance
+// (all caches together top out around 110 MB).
+const HOUR = 60 * 60 * 1000;
+const imageBytes = (v: { imageData?: string }) => (v.imageData ? v.imageData.length : 0);
+const stopImageCache = new TtlCache<GeneratedImage>({ maxEntries: 100, ttlMs: 24 * HOUR, maxBytes: 48 * 1024 * 1024, sizeOf: imageBytes });
+const avatarCache = new TtlCache<GeneratedImage>({ maxEntries: 8, ttlMs: 24 * HOUR, maxBytes: 8 * 1024 * 1024, sizeOf: imageBytes });
+const contentPackCache = new TtlCache<{ body: any; bytes: number }>({
+  maxEntries: 12,
+  ttlMs: 6 * HOUR,
+  maxBytes: 32 * 1024 * 1024,
+  sizeOf: (v) => v.bytes,
+});
+const venueDetailsCache = new TtlCache<string>({ maxEntries: 500, ttlMs: 24 * HOUR });
+const suggestCache = new TtlCache<any>({ maxEntries: 300, ttlMs: 6 * HOUR });
+const geocodeCache = new TtlCache<string>({ maxEntries: 500, ttlMs: 7 * 24 * HOUR });
+
+// ---------- Image-generation budget (per IP, per hour) ----------
+// Image generation is the expensive part of Eve. Cache hits are free; every
+// fresh image draws from a small hourly per-IP budget that the UI displays.
+const IMAGE_BUDGET_PER_HOUR = 40;
+const imageBuckets = new Map<string, { used: number; resetAt: number }>();
+
+function imageBudget(req: express.Request) {
+  const key = clientIp(req);
+  const now = Date.now();
+  let b = imageBuckets.get(key);
+  if (!b || b.resetAt <= now) {
+    b = { used: 0, resetAt: now + HOUR };
+    imageBuckets.set(key, b);
+  }
+  if (imageBuckets.size > 5000) {
+    for (const [k, v] of imageBuckets) if (v.resetAt <= now) imageBuckets.delete(k);
+  }
+  return b;
+}
+
+function imageLimitInfo(req: express.Request) {
+  const b = imageBudget(req);
+  return {
+    limit: IMAGE_BUDGET_PER_HOUR,
+    remaining: Math.max(0, IMAGE_BUDGET_PER_HOUR - b.used),
+    resetInSec: Math.max(0, Math.ceil((b.resetAt - Date.now()) / 1000)),
+  };
+}
+
+/** Image responses carry the visitor's remaining budget so the UI can show it. */
+function sendWithLimit(req: express.Request, res: express.Response, body: Record<string, any>) {
+  res.json({ ...body, imageLimit: imageLimitInfo(req) });
+}
+
+/** Reserve `n` fresh images; on failure sends a 429 and returns false. */
+function takeImages(req: express.Request, res: express.Response, n = 1): boolean {
+  const b = imageBudget(req);
+  if (b.used + n > IMAGE_BUDGET_PER_HOUR) {
+    const info = imageLimitInfo(req);
+    res.set('Retry-After', String(info.resetInSec));
+    res.status(429).json({
+      error: `Eve has painted her ${IMAGE_BUDGET_PER_HOUR} pictures for this hour. More in ${Math.ceil(info.resetInSec / 60)} min.`,
+      code: 'image_limit',
+      ...info,
+      imageLimit: info,
+    });
+    return false;
+  }
+  b.used += n;
+  return true;
+}
+
+/** Give back reserved images that were never generated (errors, empty output). */
+function refundImages(req: express.Request, n = 1) {
+  const b = imageBudget(req);
+  b.used = Math.max(0, b.used - n);
+}
+
 // Rate limiting + origin check for AI endpoints.
 // Stripe webhook and Instagram OAuth callbacks are exempt — they are called by
 // external services (Stripe/Meta) and must remain reachable from outside.
@@ -111,8 +283,7 @@ const ALLOWED_EVE_ORIGINS = new Set(['eve.mohitgoenka.com', 'localhost', '127.0.
 const aiBuckets = new Map<string, { count: number; resetAt: number }>();
 
 function clientIp(req: express.Request): string {
-  const fwd = req.get('x-forwarded-for');
-  return fwd ? fwd.split(',')[0].trim() : req.ip || 'unknown';
+  return req.ip || req.socket.remoteAddress || 'unknown';
 }
 
 function hostFrom(header: string | undefined): string | null {
@@ -141,6 +312,9 @@ function checkAiRateLimit(req: express.Request): boolean {
   const key = clientIp(req);
   const now = Date.now();
   const bucket = aiBuckets.get(key);
+  if (aiBuckets.size > 5000) {
+    for (const [k, v] of aiBuckets) if (v.resetAt <= now) aiBuckets.delete(k);
+  }
   if (!bucket || bucket.resetAt <= now) {
     aiBuckets.set(key, { count: 1, resetAt: now + 60_000 });
     return true;
@@ -160,13 +334,19 @@ app.use('/api/', (req: express.Request, res: express.Response, next: express.Nex
   next();
 });
 
+// Remaining image budget for this visitor, shown under the plan button.
+app.get('/api/limits', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ images: imageLimitInfo(req), requestsPerMinute: AI_REQUESTS_PER_MINUTE });
+});
+
 app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
     hasKey: !!GEMINI_API_KEY,
     architecture: {
       runtime: 'Cloud Run gen2',
-      sdk: '@google/genai v1.44',
+      sdk: '@google/genai v3',
       models: {
         text: TEXT_MODEL,
         image: IMAGE_MODEL,
@@ -187,6 +367,9 @@ app.post('/api/agent/run', async (req, res) => {
   if (!Array.isArray(plan) || plan.length === 0) {
     return jsonError(res, 400, 'plan must be a non-empty array of { tool, input }');
   }
+  if (plan.length > 6) return jsonError(res, 400, 'plan may have at most 6 steps');
+  const sceneSteps = plan.filter((s: any) => s?.tool === 'sceneCard').length;
+  if (sceneSteps && !takeImages(req, res, sceneSteps)) return;
   try {
     const runtime = new AgentRuntime(ai);
     const agent = buildEveBrainAgent(ai, GEMINI_API_KEY);
@@ -254,10 +437,15 @@ Return strict JSON only:
 }`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: TEXT_MODEL,
+    const response = await generateText({
       contents: prompt,
+      maxOutputTokens: 1024,
       config: { temperature: 0.95, topP: 0.95 },
+      schema: {
+        type: Type.OBJECT,
+        properties: { lines: { type: Type.ARRAY, items: { type: Type.STRING } } },
+        required: ['lines'],
+      },
     });
     const parsed = safeParseJson<{ lines: string[] }>(response.text || '');
     const lines = parsed?.lines && Array.isArray(parsed.lines) ? parsed.lines.slice(0, 4) : [];
@@ -305,9 +493,9 @@ Rules:
 Output ONLY the line itself. No quotes.`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: TEXT_MODEL,
+    const response = await generateText({
       contents: prompt,
+      maxOutputTokens: 512,
       config: { temperature: 0.95 },
     });
     const outro = (response.text || '').trim().replace(/^["']|["']$/g, '');
@@ -378,10 +566,26 @@ Structure the response as JSON with FIVE narrative beats woven around the three 
 Total length across all beats: aim for 130-180 words. Sound spoken. Avoid em dashes. Avoid the word "night" — use "evening". Output strict JSON only.`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: TEXT_MODEL,
+    const beat = { type: Type.STRING };
+    const response = await generateText({
       contents: prompt,
+      maxOutputTokens: 2048,
       config: { temperature: 0.92, topP: 0.95 },
+      schema: {
+        type: Type.OBJECT,
+        properties: {
+          opening: beat,
+          atStop1: beat,
+          transition1to2: beat,
+          atStop2: beat,
+          transition2to3: beat,
+          atStop3: beat,
+          closing: beat,
+          moodArc: beat,
+          weatherCue: beat,
+        },
+        required: ['opening', 'atStop1', 'transition1to2', 'atStop2', 'transition2to3', 'atStop3', 'closing', 'moodArc', 'weatherCue'],
+      },
     });
     const parsed = safeParseJson(response.text || '');
     if (!parsed) return jsonError(res, 502, 'Story returned non-JSON');
@@ -436,20 +640,9 @@ Return strict JSON only:
   try {
     let response: any;
     try {
-      response = await ai.models.generateContent({
-        model: TEXT_MODEL,
-        contents: prompt,
-        config: {
-          temperature: 0.85,
-          tools: [{ googleSearch: {} }],
-        },
-      });
+      response = await generateGrounded(prompt, 4096, 0.85);
     } catch {
-      response = await ai.models.generateContent({
-        model: TEXT_MODEL,
-        contents: prompt,
-        config: { temperature: 0.85 },
-      });
+      response = await generateText({ contents: prompt, maxOutputTokens: 4096, config: { temperature: 0.85 } });
     }
     const parsed = safeParseJson(response.text || '');
     if (!parsed) return jsonError(res, 502, 'Refine returned non-JSON');
@@ -509,10 +702,31 @@ Tone for spokenReply: tender, devoted, occasionally a wistful joke at your own e
 Output JSON ONLY. No markdown fences. No prose before or after. First character is { and last is }.`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: TEXT_MODEL,
+    const response = await generateText({
       contents: prompt,
+      maxOutputTokens: 1536,
       config: { temperature: 0.85 },
+      schema: {
+        type: Type.OBJECT,
+        properties: {
+          extracted: {
+            type: Type.OBJECT,
+            properties: {
+              location: { type: Type.STRING, nullable: true },
+              vibe: { type: Type.STRING, nullable: true },
+              party: { type: Type.INTEGER, nullable: true },
+              dietary: { type: Type.ARRAY, items: { type: Type.STRING } },
+              budgetPerPerson: { type: Type.NUMBER, nullable: true },
+              cuisinePref: { type: Type.STRING, nullable: true },
+              freeText: { type: Type.STRING, nullable: true },
+            },
+            required: ['location', 'vibe', 'party', 'dietary', 'budgetPerPerson', 'cuisinePref', 'freeText'],
+          },
+          isComplete: { type: Type.BOOLEAN },
+          spokenReply: { type: Type.STRING },
+        },
+        required: ['extracted', 'isComplete', 'spokenReply'],
+      },
     });
     const parsed = safeParseJson(response.text || '');
     if (!parsed) return jsonError(res, 502, 'Parser returned non-JSON');
@@ -558,24 +772,25 @@ Strict constraints:
 - Square aspect ratio framing, subject vertically centered with deep plum at top and bottom edges
 - Output ONE image only`;
 
+  // Same mood -> same prompt, so one painting per mood serves everyone.
+  const avatarKey = cacheKey(mood in moodGuide ? mood : 'devoted');
+  const cachedAvatar = avatarCache.get(avatarKey);
+  if (cachedAvatar) {
+    res.set('X-Eve-Cache', 'hit');
+    return sendWithLimit(req, res, cachedAvatar);
+  }
+  if (!takeImages(req, res)) return;
+
   try {
-    const response = await ai.models.generateContent({
-      model: IMAGE_MODEL,
-      contents: prompt,
-      config: { responseModalities: ['TEXT', 'IMAGE'] },
-    });
-    const parts = response.candidates?.[0]?.content?.parts || [];
-    let imageData: string | undefined;
-    let imageMime: string | undefined;
-    for (const p of parts as Array<any>) {
-      if (p?.inlineData?.data && p?.inlineData?.mimeType && !imageData) {
-        imageData = p.inlineData.data;
-        imageMime = p.inlineData.mimeType;
-      }
+    const img = await generateImage(prompt);
+    if (!img) {
+      refundImages(req);
+      return jsonError(res, 502, 'No avatar image returned');
     }
-    if (!imageData) return jsonError(res, 502, 'No avatar image returned');
-    res.json({ imageData, imageMime });
+    avatarCache.set(avatarKey, img);
+    sendWithLimit(req, res, img);
   } catch (err: any) {
+    refundImages(req);
     console.error('eve-avatar failed:', err?.message || err);
     jsonError(res, 500, `Avatar failed: ${err?.message || 'unknown'}`);
   }
@@ -591,15 +806,17 @@ app.post('/api/reverse-geocode', async (req, res) => {
     return jsonError(res, 400, 'lat and lng required');
   }
 
+  // ~100 m grid: nearby visitors share one lookup.
+  const geoKey = `${lat.toFixed(3)},${lng.toFixed(3)}`;
+  const cachedPlace = geocodeCache.get(geoKey);
+  if (cachedPlace) return res.json({ city: cachedPlace });
+
   const prompt = `What city, neighborhood, or area is at coordinates ${lat.toFixed(4)}, ${lng.toFixed(4)}? Return ONLY the place name in the format "City, ST" or "Neighborhood, City, ST" — nothing else, no commentary, no markdown.`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: TEXT_MODEL,
-      contents: prompt,
-      config: { temperature: 0.2 },
-    });
+    const response = await generateText({ contents: prompt, maxOutputTokens: 256, config: { temperature: 0.2 } });
     const place = (response.text || '').trim().replace(/^["']|["']$/g, '');
+    if (place) geocodeCache.set(geoKey, place);
     res.json({ city: place });
   } catch (err: any) {
     console.error('reverse-geocode failed:', err?.message || err);
@@ -746,11 +963,12 @@ Schema:
     let groundedSources: string[] = [];
 
     try {
-      response = await ai.models.generateContent({
-        model: TEXT_MODEL,
+      response = await generateText({
         contents:
           prompt +
           '\n\nIMPORTANT: Use Google Search to verify each venue you propose actually exists in the area, with the correct cuisine and dietary fit. Only output venues you have confirmed via search. After Search, return ONLY the JSON described above, nothing else.',
+        maxOutputTokens: 4096,
+        timeoutMs: GROUNDED_TIMEOUT_MS,
         config: {
           temperature: 0.7,
           topP: 0.9,
@@ -771,9 +989,9 @@ Schema:
       }
     } catch (toolErr: any) {
       console.warn('Search-grounded skeleton failed, falling back to non-grounded:', toolErr?.message || toolErr);
-      response = await ai.models.generateContent({
-        model: TEXT_MODEL,
+      response = await generateText({
         contents: prompt,
+        maxOutputTokens: 4096,
         config: { temperature: 0.85, topP: 0.92 },
       });
     }
@@ -793,6 +1011,9 @@ async function researchVenueDetails(
   kind: string
 ): Promise<string> {
   if (!ai) return '';
+  const detailsKey = cacheKey(name, city, kind);
+  const cachedDetails = venueDetailsCache.get(detailsKey);
+  if (cachedDetails !== undefined) return cachedDetails;
   const prompt = `Search the web for "${name}" in "${city}". In ONE paragraph (max 55 words), describe what the place actually looks like and what to expect — concrete sensory cues only:
 - Interior design / decor / lighting style
 - One signature dish OR signature visual element they are known for (depending on stop kind: ${kind})
@@ -803,15 +1024,10 @@ Constraints:
 - If you cannot confirm details, give general cues for that kind of place in ${city} and prefix with "Generally:".
 - Output ONLY the paragraph. No headings, no commentary, no preamble.`;
   try {
-    const response = await ai.models.generateContent({
-      model: TEXT_MODEL,
-      contents: prompt,
-      config: {
-        temperature: 0.4,
-        tools: [{ googleSearch: {} }],
-      },
-    });
-    return ((response.text || '').trim() || '').slice(0, 600);
+    const response = await generateGrounded(prompt, 1024, 0.4);
+    const details = ((response.text || '').trim() || '').slice(0, 600);
+    if (details) venueDetailsCache.set(detailsKey, details);
+    return details;
   } catch {
     return '';
   }
@@ -863,6 +1079,16 @@ app.post('/api/plan-experience/stop-image', async (req, res) => {
   };
   const sceneStyle = kindStyle[kind] || kindStyle.dinner;
 
+  // Identical venue card request -> serve the painting we already made
+  // (refines that keep a stop, repeat plans, shared links).
+  const stopKey = cacheKey(name, kind, city, vibe, oneLineVibe);
+  const cachedStop = stopImageCache.get(stopKey);
+  if (cachedStop) {
+    res.set('X-Eve-Cache', 'hit');
+    return sendWithLimit(req, res, cachedStop);
+  }
+  if (!takeImages(req, res)) return;
+
   const venueDetails = await researchVenueDetails(name, city, kind);
   const venueLine = venueDetails
     ? `Real venue details (use these to ground the imagery): ${venueDetails}`
@@ -888,25 +1114,15 @@ CRITICAL composition rules:
 - Square aspect ratio. Subject extends to or is cropped by the edges of the frame.`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: IMAGE_MODEL,
-      contents: prompt,
-      config: { responseModalities: ['TEXT', 'IMAGE'] },
-    });
-    const parts = response.candidates?.[0]?.content?.parts || [];
-    let imageData: string | undefined;
-    let imageMime: string | undefined;
-    for (const p of parts as Array<any>) {
-      if (p?.inlineData?.data && p?.inlineData?.mimeType) {
-        if (!imageData) {
-          imageData = p.inlineData.data;
-          imageMime = p.inlineData.mimeType;
-        }
-      }
+    const img = await generateImage(prompt);
+    if (!img) {
+      refundImages(req);
+      return jsonError(res, 502, 'No image returned');
     }
-    if (!imageData) return jsonError(res, 502, 'No image returned');
-    res.json({ imageData, imageMime });
+    stopImageCache.set(stopKey, img);
+    sendWithLimit(req, res, img);
   } catch (err: any) {
+    refundImages(req);
     console.error('stop-image failed:', err?.message || err);
     jsonError(res, 500, `Stop image failed: ${err?.message || 'unknown'}`);
   }
@@ -939,11 +1155,7 @@ ${stopsText}
 Write the monologue in plain prose suitable for text-to-speech. Use natural pauses (commas and periods). End with a short, warm send-off line. Output ONLY the monologue text, no commentary.`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: TEXT_MODEL,
-      contents: prompt,
-      config: { temperature: 0.7 },
-    });
+    const response = await generateText({ contents: prompt, maxOutputTokens: 1024, config: { temperature: 0.7 } });
     const text = (response.text || '').trim();
     res.json({ narration: text });
   } catch (err: any) {
@@ -966,6 +1178,17 @@ app.post('/api/content-pack', async (req, res) => {
   if (!dishName || !restaurantName) {
     return jsonError(res, 400, 'dishName and restaurantName required');
   }
+
+  // A content pack is 3 text calls + 4 images. Identical inputs return the
+  // pack we already made; a fresh one reserves its 4 images up front.
+  const packKey = cacheKey(dishName, dishDescription, restaurantName, cuisine, voice, city, signatureDishes);
+  const cachedPack = req.body?.fresh ? undefined : contentPackCache.get(packKey);
+  if (cachedPack) {
+    res.set('X-Eve-Cache', 'hit');
+    return sendWithLimit(req, res, cachedPack.body);
+  }
+  const PACK_IMAGES = 4;
+  if (!takeImages(req, res, PACK_IMAGES)) return;
 
   const sharedContext = `Restaurant: ${restaurantName} (${cuisine}, ${city})
 Brand voice: ${voice || 'warm, specific, ingredient-led'}
@@ -996,14 +1219,34 @@ Generate marketing copy across 4 channels for tonight. Stay in the brand voice. 
 
   let copyData: any = null;
   try {
-    const copyResp = await ai.models.generateContent({
-      model: TEXT_MODEL,
+    const str = { type: Type.STRING };
+    const strList = { type: Type.ARRAY, items: { type: Type.STRING } };
+    const copyResp = await generateText({
       contents: copyPrompt,
+      maxOutputTokens: 3072,
       config: { temperature: 0.8 },
+      schema: {
+        type: Type.OBJECT,
+        properties: {
+          instagram: { type: Type.OBJECT, properties: { caption: str, hashtags: strList }, required: ['caption', 'hashtags'] },
+          menuCard: {
+            type: Type.OBJECT,
+            properties: { name: str, description: str, suggestedPrice: str, allergenTags: strList },
+            required: ['name', 'description', 'suggestedPrice', 'allergenTags'],
+          },
+          email: { type: Type.OBJECT, properties: { subject: str, bodyHtml: str }, required: ['subject', 'bodyHtml'] },
+          sms: str,
+        },
+        required: ['instagram', 'menuCard', 'email', 'sms'],
+      },
     });
     copyData = safeParseJson(copyResp.text || '');
-    if (!copyData) return jsonError(res, 502, 'Model returned non-JSON copy');
+    if (!copyData) {
+      refundImages(req, PACK_IMAGES);
+      return jsonError(res, 502, 'Model returned non-JSON copy');
+    }
   } catch (err: any) {
+    refundImages(req, PACK_IMAGES);
     console.error('content-pack/copy failed:', err?.message || err);
     return jsonError(res, 500, `Copy generation failed: ${err?.message || 'unknown'}`);
   }
@@ -1038,10 +1281,25 @@ Strict JSON only:
 
   let reelData: any = null;
   try {
-    const reelResp = await ai.models.generateContent({
-      model: TEXT_MODEL,
+    const reelResp = await generateText({
       contents: reelStoryPrompt,
+      maxOutputTokens: 1536,
       config: { temperature: 0.85 },
+      schema: {
+        type: Type.OBJECT,
+        properties: {
+          scenes: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: { description: { type: Type.STRING }, voiceover: { type: Type.STRING } },
+              required: ['description', 'voiceover'],
+            },
+          },
+          fullVoiceoverScript: { type: Type.STRING },
+        },
+        required: ['scenes', 'fullVoiceoverScript'],
+      },
     });
     reelData = safeParseJson(reelResp.text || '');
     if (!reelData) {
@@ -1068,36 +1326,22 @@ Strict JSON only:
   let heroImageData: string | undefined;
   let heroImageMime: string | undefined;
   try {
-    const heroResp = await ai.models.generateContent({
-      model: IMAGE_MODEL,
-      contents: heroImagePrompt,
-      config: { responseModalities: ['TEXT', 'IMAGE'] },
-    });
-    const parts = heroResp.candidates?.[0]?.content?.parts || [];
-    for (const p of parts as Array<any>) {
-      if (p?.inlineData?.data && p?.inlineData?.mimeType && !heroImageData) {
-        heroImageData = p.inlineData.data;
-        heroImageMime = p.inlineData.mimeType;
-      }
+    const hero = await generateImage(heroImagePrompt);
+    if (hero) {
+      heroImageData = hero.imageData;
+      heroImageMime = hero.imageMime;
     }
   } catch (err: any) {
     console.warn('hero image generation failed:', err?.message || err);
   }
 
   const sceneImages: { imageData?: string; imageMime?: string }[] = await Promise.all(
-    (reelData.scenes || []).map(async (scene: any) => {
+    (reelData.scenes || []).slice(0, 3).map(async (scene: any) => {
       try {
-        const sceneResp = await ai.models.generateContent({
-          model: IMAGE_MODEL,
-          contents: `${sharedContext}\n\nScene from a 15-second Reel: ${scene.description}.\nEditorial food/restaurant photography style. Warm dusk light.\n\nCRITICAL: Image MUST be full-bleed with NO white background, NO cream background, NO pale studio backdrop, NO white border. Fill all four edges with the scene — deep shadow, dim ambient warmth, or out-of-focus interior. NO text, NO logos. Square aspect ratio.`,
-          config: { responseModalities: ['TEXT', 'IMAGE'] },
-        });
-        const parts = sceneResp.candidates?.[0]?.content?.parts || [];
-        for (const p of parts as Array<any>) {
-          if (p?.inlineData?.data && p?.inlineData?.mimeType) {
-            return { imageData: p.inlineData.data, imageMime: p.inlineData.mimeType };
-          }
-        }
+        const img = await generateImage(
+          `${sharedContext}\n\nScene from a 15-second Reel: ${scene.description}.\nEditorial food/restaurant photography style. Warm dusk light.\n\nCRITICAL: Image MUST be full-bleed with NO white background, NO cream background, NO pale studio backdrop, NO white border. Fill all four edges with the scene — deep shadow, dim ambient warmth, or out-of-focus interior. NO text, NO logos. Square aspect ratio.`
+        );
+        if (img) return img;
       } catch (err: any) {
         console.warn('reel scene image failed:', err?.message || err);
       }
@@ -1112,7 +1356,10 @@ Strict JSON only:
     imageMime: sceneImages[i]?.imageMime,
   }));
 
-  res.json({
+  const madeImages = (heroImageData ? 1 : 0) + sceneImages.filter((s) => s.imageData).length;
+  refundImages(req, Math.max(0, PACK_IMAGES - madeImages));
+
+  const packBody = {
     dishName,
     instagramPost: {
       caption: copyData?.instagram?.caption || '',
@@ -1137,7 +1384,13 @@ Strict JSON only:
       bodyHtml: copyData?.email?.bodyHtml || '',
     },
     smsBlast: copyData?.sms || '',
-  });
+  };
+  // Only cache complete packs so a partial failure can be retried.
+  if (madeImages === PACK_IMAGES) {
+    const bytes = (heroImageData?.length || 0) + sceneImages.reduce((n, s) => n + (s.imageData?.length || 0), 0);
+    contentPackCache.set(packKey, { body: packBody, bytes });
+  }
+  sendWithLimit(req, res, packBody);
 });
 
 app.post('/api/suggest-special', async (req, res) => {
@@ -1152,6 +1405,17 @@ app.post('/api/suggest-special', async (req, res) => {
     return jsonError(res, 400, 'restaurantName and city required');
   }
 
+  // The restaurant page asks for a suggestion on every visit; identical
+  // lookups are served from memory. "Pick a different dish" sends fresh:true.
+  const suggestKey = cacheKey(restaurantName, city, cuisine, signatureDishes);
+  if (!req.body?.fresh) {
+    const cachedSuggest = suggestCache.get(suggestKey);
+    if (cachedSuggest) {
+      res.set('X-Eve-Cache', 'hit');
+      return res.json(cachedSuggest);
+    }
+  }
+
   // Infer cuisine + signature dishes if missing, via Search
   if (!cuisine || !signatureDishes) {
     try {
@@ -1161,11 +1425,7 @@ app.post('/api/suggest-special', async (req, res) => {
   "signatureDishes": "comma-separated list of 3-5 dishes the restaurant is most known for, based on what reviewers and the menu emphasize"
 }
 If you cannot find the restaurant, infer plausibly from the name and return your best guess.`;
-      const inferResp = await ai.models.generateContent({
-        model: TEXT_MODEL,
-        contents: inferPrompt,
-        config: { temperature: 0.3, tools: [{ googleSearch: {} }] },
-      });
+      const inferResp = await generateGrounded(inferPrompt, 1024, 0.3);
       const inferred = safeParseJson<{ cuisine?: string; signatureDishes?: string }>(inferResp.text || '');
       if (!cuisine && inferred?.cuisine) cuisine = inferred.cuisine.trim().toLowerCase();
       if (!signatureDishes && inferred?.signatureDishes) signatureDishes = inferred.signatureDishes.trim();
@@ -1214,25 +1474,16 @@ Constraints:
     let response: any;
     let usedSearch = false;
     try {
-      response = await ai.models.generateContent({
-        model: TEXT_MODEL,
-        contents: prompt,
-        config: {
-          temperature: 0.6,
-          tools: [{ googleSearch: {} }],
-        },
-      });
+      response = await generateGrounded(prompt, 3072, 0.6);
       usedSearch = true;
     } catch {
-      response = await ai.models.generateContent({
-        model: TEXT_MODEL,
-        contents: prompt,
-        config: { temperature: 0.6 },
-      });
+      response = await generateText({ contents: prompt, maxOutputTokens: 3072, config: { temperature: 0.6 } });
     }
     const parsed = safeParseJson(response.text || '');
     if (!parsed) return jsonError(res, 502, 'Suggest returned non-JSON');
-    res.json({ ...parsed, usedSearch });
+    const body = { ...parsed, usedSearch };
+    suggestCache.set(suggestKey, body);
+    res.json(body);
   } catch (err: any) {
     console.error('suggest-special failed:', err?.message || err);
     jsonError(res, 500, `Suggest failed: ${err?.message || 'unknown'}`);
@@ -1473,8 +1724,10 @@ app.post('/api/instagram/publish', async (req, res) => {
 // Given a restaurant name + city, returns which of OpenTable / Resy / Tock
 // actually have the venue listed. Uses Gemini Flash with Google Search
 // grounding so the answer is real-time. Cached in-process for 12 hours.
-const RESERVATION_CACHE = new Map<string, { value: { opentable: boolean; resy: boolean; tock: boolean }; ts: number }>();
-const RESERVATION_CACHE_TTL = 12 * 60 * 60 * 1000;
+const RESERVATION_CACHE = new TtlCache<{ opentable: boolean; resy: boolean; tock: boolean }>({
+  maxEntries: 1000,
+  ttlMs: 12 * 60 * 60 * 1000,
+});
 
 app.post('/api/reservations/check', async (req, res) => {
   if (!ai) {
@@ -1485,11 +1738,9 @@ app.post('/api/reservations/check', async (req, res) => {
   const city: string = (req.body?.city || '').trim();
   if (!restaurantName) return jsonError(res, 400, 'restaurantName required');
 
-  const cacheKey = `${restaurantName.toLowerCase()}|${city.toLowerCase()}`;
-  const cached = RESERVATION_CACHE.get(cacheKey);
-  if (cached && Date.now() - cached.ts < RESERVATION_CACHE_TTL) {
-    return res.json({ ...cached.value, source: 'cache' });
-  }
+  const reservationKey = cacheKey(restaurantName, city);
+  const cached = RESERVATION_CACHE.get(reservationKey);
+  if (cached) return res.json({ ...cached, source: 'cache' });
 
   const prompt = `For the restaurant "${restaurantName}" in ${city || 'the United States'}, which of these reservation platforms actually list it for booking? Answer based on real Google Search results, not assumptions. If the restaurant takes walk-ins only or uses its own website (no platform), all three should be false.
 
@@ -1503,21 +1754,14 @@ Return STRICT JSON only, no prose, no markdown:
 First character of your response is { and last is }.`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: TEXT_MODEL,
-      contents: prompt,
-      config: {
-        temperature: 0.1,
-        tools: [{ googleSearch: {} }],
-      },
-    });
+    const response = await generateGrounded(prompt, 1024, 0.1);
     const parsed = safeParseJson(response.text || '');
     const value = {
       opentable: !!parsed?.opentable,
       resy: !!parsed?.resy,
       tock: !!parsed?.tock,
     };
-    RESERVATION_CACHE.set(cacheKey, { value, ts: Date.now() });
+    RESERVATION_CACHE.set(reservationKey, value);
     res.json({ ...value, source: 'live' });
   } catch (err: any) {
     console.warn('[reservations] check failed:', err?.message || err);
@@ -1542,12 +1786,29 @@ app.get('/sitemap.xml', (_req, res) => {
   res.send(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls}</urlset>`);
 });
 
+// Eve repeats many lines (per-vibe filler while she plans, reel scripts), so
+// identical text + voice is synthesized once and served from memory.
+const ttsCache = new TtlCache<{ audioData: string; audioMime: string }>({
+  maxEntries: 400,
+  ttlMs: 24 * HOUR,
+  maxBytes: 16 * 1024 * 1024,
+  sizeOf: (v) => v.audioData.length,
+});
+
 app.post('/api/tts', async (req, res) => {
   if (!GEMINI_API_KEY) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
   const text: string = (req.body?.text || '').trim();
   const voiceMode: string = (req.body?.voiceMode || 'eve').trim();
   if (!text) return jsonError(res, 400, 'text required');
+  const ttsKey = `${voiceMode === 'reel' ? 'reel' : 'eve'}|${text.slice(0, 4500)}`;
+  const cachedAudio = ttsCache.get(ttsKey);
+  if (cachedAudio) return res.json(cachedAudio);
+  const sendAudio = (audioData: string) => {
+    const body = { audioData, audioMime: 'audio/mpeg' };
+    if (audioData) ttsCache.set(ttsKey, body);
+    res.json(body);
+  };
 
   // For Eve's main voice we use Neural2-F (warm female) with SSML prosody so
   // we can actually control pace, pitch, and pause timing — Studio voices
@@ -1606,6 +1867,7 @@ app.post('/api/tts', async (req, res) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
         body: JSON.stringify(ttsBody),
+        signal: AbortSignal.timeout(20_000),
       }
     );
     if (!ttsRes.ok) {
@@ -1621,6 +1883,7 @@ app.post('/api/tts', async (req, res) => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
           body: JSON.stringify(fallbackBody),
+          signal: AbortSignal.timeout(20_000),
         }
       );
       if (!fallbackRes.ok) {
@@ -1628,22 +1891,42 @@ app.post('/api/tts', async (req, res) => {
         return jsonError(res, 502, `TTS failed: ${fallbackErr.slice(0, 200)}`);
       }
       const fallbackJson = (await fallbackRes.json()) as { audioContent?: string };
-      return res.json({ audioData: fallbackJson.audioContent || '', audioMime: 'audio/mpeg' });
+      return sendAudio(fallbackJson.audioContent || '');
     }
     const ttsJson = (await ttsRes.json()) as { audioContent?: string };
-    res.json({ audioData: ttsJson.audioContent || '', audioMime: 'audio/mpeg' });
+    sendAudio(ttsJson.audioContent || '');
   } catch (err: any) {
     console.error('tts failed:', err?.message || err);
     jsonError(res, 500, `TTS failed: ${err?.message || 'unknown'}`);
   }
 });
 
+app.get('/robots.txt', (_req, res) => {
+  res.type('text/plain').send('User-agent: *\nAllow: /\nDisallow: /api/\nSitemap: https://eve.mohitgoenka.com/sitemap.xml\n');
+});
+
+// Unknown API routes are JSON 404s, never the SPA shell.
+app.use('/api', (_req, res) => jsonError(res, 404, 'Not found'));
+
+// Hashed build output is immutable; the shell, service worker and manifest
+// must always revalidate so a deploy is picked up on the next visit.
 app.use(
   '/assets',
-  express.static(path.join(__dirname, 'dist/assets'), { maxAge: '1y', immutable: true })
+  express.static(path.join(__dirname, 'dist/assets'), { maxAge: '1y', immutable: true, fallthrough: false })
 );
-app.use(express.static(path.join(__dirname, 'dist')));
-app.get('*', (_req, res) => {
+const NO_CACHE_FILES = new Set(['index.html', 'sw.js', 'manifest.webmanifest']);
+app.use(
+  express.static(path.join(__dirname, 'dist'), {
+    index: false,
+    setHeaders(res, filePath) {
+      const base = path.basename(filePath);
+      if (NO_CACHE_FILES.has(base) || base.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache');
+      else res.setHeader('Cache-Control', 'public, max-age=86400');
+    },
+  })
+);
+app.get('/{*splat}', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache');
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 

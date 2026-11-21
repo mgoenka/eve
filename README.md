@@ -105,7 +105,7 @@ Full technical deep-dive (sequence diagram, conversation FSM, engineering invari
 ## Tech stack
 
 - **Frontend:** React 19 · Vite 6 · TypeScript · Tailwind v4 (`@tailwindcss/vite`) · Lucide icons · Syne + DM Sans + Cormorant Garamond
-- **Backend:** Node 20 · Express · `@google/genai` v1.44 SDK · TSX runtime
+- **Backend:** Node 26 · Express 5 · `@google/genai` v3 SDK · TSX runtime · per-IP image budget + in-memory caches for identical requests
 - **AI:** Gemini 2.5 Flash Image (interleaved text+image), Gemini 2.5 Flash (planning, copy, narration, persona, intent parsing), Google Search built-in tool (grounding), Cloud TTS Neural2-F voice with SSML prosody
 - **Infra:** Cloud Run gen2 (2 CPU / 1 GiB) · Cloud Build · Secret Manager · Artifact Registry · Cloud DNS
 - **Custom domain:** `eve.mohitgoenka.com` via Cloud Run domain mapping + Cloud DNS

@@ -3,28 +3,30 @@
 // configured (no GOOGLE_CLOUD_PROJECT or service account credentials),
 // so local dev still works.
 
-import { Firestore } from '@google-cloud/firestore';
+import type { Firestore } from '@google-cloud/firestore';
 
-let db: Firestore | null = null;
-let initAttempted = false;
+let dbPromise: Promise<Firestore | null> | null = null;
 
-function getDb(): Firestore | null {
-  if (initAttempted) return db;
-  initAttempted = true;
-  try {
-    // Cloud Run automatically authenticates via the service account.
-    // Locally, GOOGLE_APPLICATION_CREDENTIALS or `gcloud auth
-    // application-default login` works.
-    db = new Firestore({
-      projectId: process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT,
-      ignoreUndefinedProperties: true,
-    });
-    return db;
-  } catch (err: any) {
-    console.warn('[firestore] not configured — falling back to in-memory:', err?.message || err);
-    db = null;
-    return null;
-  }
+// The Firestore SDK (gRPC + protobufs) is heavy, so it is loaded on first use
+// instead of at boot. That keeps Cloud Run cold starts fast.
+function getDb(): Promise<Firestore | null> {
+  if (dbPromise) return dbPromise;
+  dbPromise = (async () => {
+    try {
+      const { Firestore } = await import('@google-cloud/firestore');
+      // Cloud Run automatically authenticates via the service account.
+      // Locally, GOOGLE_APPLICATION_CREDENTIALS or `gcloud auth
+      // application-default login` works.
+      return new Firestore({
+        projectId: process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT,
+        ignoreUndefinedProperties: true,
+      });
+    } catch (err: any) {
+      console.warn('[firestore] not configured — falling back to in-memory:', err?.message || err);
+      return null;
+    }
+  })();
+  return dbPromise;
 }
 
 export interface PostedSpecialDoc {
@@ -66,7 +68,7 @@ const memoryBrands = new Map<string, RestaurantBrandDoc>();
 // ---------- Specials (the dining index) ----------
 
 export async function listSpecials(limit = 50): Promise<PostedSpecialDoc[]> {
-  const d = getDb();
+  const d = await getDb();
   if (!d) return memorySpecials.slice(-limit).reverse();
   try {
     const snap = await d
@@ -90,7 +92,7 @@ export async function listSpecialsForCity(citySegment: string, limit = 25): Prom
 }
 
 export async function addSpecial(s: PostedSpecialDoc): Promise<string> {
-  const d = getDb();
+  const d = await getDb();
   const enriched: PostedSpecialDoc = {
     ...s,
     views: 0,
@@ -119,16 +121,15 @@ export async function bumpSpecialMetric(
   metric: 'views' | 'planInclusions' | 'clickThroughs',
   by: number = 1
 ): Promise<void> {
-  const d = getDb();
+  const d = await getDb();
   if (!d) {
     const found = memorySpecials.find((s) => s.id === id);
     if (found) (found as any)[metric] = ((found as any)[metric] || 0) + by;
     return;
   }
   try {
-    await d.collection('specials').doc(id).update({
-      [metric]: (Firestore as any).FieldValue?.increment?.(by) ?? by,
-    });
+    const { FieldValue } = await import('@google-cloud/firestore');
+    await d.collection('specials').doc(id).update({ [metric]: FieldValue.increment(by) });
   } catch (err: any) {
     // Fall through silently — analytics are non-critical
     console.warn('[firestore] bumpSpecialMetric failed:', err?.message || err);
@@ -138,7 +139,7 @@ export async function bumpSpecialMetric(
 // ---------- Restaurant brands ----------
 
 export async function getBrand(id: string): Promise<RestaurantBrandDoc | null> {
-  const d = getDb();
+  const d = await getDb();
   if (!d) return memoryBrands.get(id) || null;
   try {
     const snap = await d.collection('brands').doc(id).get();
@@ -152,7 +153,7 @@ export async function getBrand(id: string): Promise<RestaurantBrandDoc | null> {
 
 export async function saveBrand(id: string, data: Partial<RestaurantBrandDoc>): Promise<void> {
   const now = new Date().toISOString();
-  const d = getDb();
+  const d = await getDb();
   if (!d) {
     const existing = memoryBrands.get(id);
     memoryBrands.set(id, {
