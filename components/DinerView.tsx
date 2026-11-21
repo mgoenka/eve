@@ -1524,10 +1524,10 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
 
   if (phase === 'input') {
     return (
-      <div className="relative z-10 min-h-screen flex flex-col">
+      <div className="relative z-10 min-h-dvh flex flex-col">
         <audio ref={eveAudioRef} preload="auto" />
         <header
-          className="w-full py-2 px-3 md:py-2.5 md:px-4 border-b border-white/[0.06] bg-eve-ink/95 backdrop-blur-sm grid grid-cols-3 items-center gap-2"
+          className="w-full py-2 px-3 md:py-2.5 md:px-4 border-b border-white/[0.06] bg-eve-ink/95 backdrop-blur-sm grid grid-cols-[1fr_auto_1fr] items-center gap-2"
           role="banner"
         >
           <a
@@ -1537,7 +1537,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
             className="text-eve-cream/55 hover:text-eve-gold text-xs md:text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink rounded justify-self-start"
             aria-label="Apps and Games"
           >
-            Apps and Games <span aria-hidden="true">🎮</span>
+            <span className="hidden sm:inline">Apps and Games </span><span aria-hidden="true" className="text-base sm:text-[inherit]">🎮</span>
           </a>
           <a
             href="/"
@@ -1548,7 +1548,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
             <span className="text-eve-cream/85 text-xs md:text-sm font-medium whitespace-nowrap">Eve</span>
             <EveLogo size={26} />
           </a>
-          <div className="flex items-center justify-end gap-2">
+          <div className="flex flex-nowrap items-center justify-end gap-1.5 sm:gap-2 shrink-0">
             {muted ? (
               <button
                 onClick={() => {
@@ -1558,13 +1558,13 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                   setUserMuted(false);
                   playGreetingOnce(true);
                 }}
-                className="inline-flex items-center gap-1.5 px-3 md:px-3.5 h-9 md:h-10 rounded-xl bg-eve-gold text-eve-ink hover:bg-yellow-300 transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink shadow-[0_0_18px_rgba(245,197,66,0.28)] text-xs font-bold uppercase tracking-wider"
+                className="inline-flex items-center gap-1.5 px-3 md:px-3.5 h-10 rounded-xl bg-eve-gold text-eve-ink hover:bg-yellow-300 transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink shadow-[0_0_18px_rgba(245,197,66,0.28)] text-xs font-bold uppercase tracking-wider"
                 title="Turn on mic + sound and start talking with Eve"
                 aria-label="Activate Eve"
               >
                 <Mic size={14} />
                 <Volume2 size={14} />
-                <span>Activate</span>
+                <span className="hidden sm:inline">Activate</span>
               </button>
             ) : (
               <button
@@ -1574,7 +1574,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                   setMuted(true);
                   setUserMuted(true);
                 }}
-                className="p-2 md:p-2.5 h-9 md:h-10 flex items-center justify-center bg-eve-ink-soft rounded-xl border border-white/[0.08] hover:bg-[#1a1a1e] transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink"
+                className="p-2 md:p-2.5 h-10 min-w-10 flex items-center justify-center bg-eve-ink-soft rounded-xl border border-white/[0.08] hover:bg-[#1a1a1e] transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink"
                 title="Mute Eve and turn off mic"
                 aria-label="Deactivate Eve"
               >
@@ -1583,7 +1583,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
             )}
             <button
               onClick={onSwitchToRestaurant}
-              className="p-2 md:p-2.5 h-9 md:h-10 flex items-center justify-center bg-eve-ink-soft rounded-xl border border-white/[0.08] hover:bg-[#1a1a1e] transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink"
+              className="p-2 md:p-2.5 h-10 min-w-10 flex items-center justify-center bg-eve-ink-soft rounded-xl border border-white/[0.08] hover:bg-[#1a1a1e] transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink"
               aria-label="For restaurants"
               title="For restaurants"
             >
@@ -1592,7 +1592,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           </div>
         </header>
 
-        <main className="flex-1 max-w-3xl mx-auto w-full px-6 py-6 md:py-12">
+        <main className="flex-1 max-w-3xl mx-auto w-full px-4 sm:px-6 py-6 md:py-12">
           <div className="text-center mb-8 md:mb-10">
             {eveAvatarUrl && (
               <div className="flex justify-center mb-5">
@@ -1999,12 +1999,12 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   }
 
   return (
-    <div className="relative z-10 min-h-screen flex flex-col">
+    <div className="relative z-10 min-h-dvh flex flex-col">
       <audio ref={audioRef} preload="auto" />
       <audio ref={eveAudioRef} preload="auto" />
 
       <header
-        className="w-full py-2 px-3 md:py-2.5 md:px-4 border-b border-white/[0.06] bg-eve-ink/95 backdrop-blur-sm grid grid-cols-3 items-center gap-2"
+        className="w-full py-2 px-3 md:py-2.5 md:px-4 border-b border-white/[0.06] bg-eve-ink/95 backdrop-blur-sm grid grid-cols-[1fr_auto_1fr] items-center gap-2"
         role="banner"
       >
         <a
@@ -2014,7 +2014,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           className="text-eve-cream/55 hover:text-eve-gold text-xs md:text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink rounded justify-self-start"
           aria-label="Apps and Games"
         >
-          Apps and Games <span aria-hidden="true">🎮</span>
+          <span className="hidden sm:inline">Apps and Games </span><span aria-hidden="true" className="text-base sm:text-[inherit]">🎮</span>
         </a>
         <button
           onClick={reset}
@@ -2025,11 +2025,11 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           <span className="text-eve-cream/85 text-xs md:text-sm font-medium whitespace-nowrap">Eve</span>
           <EveLogo size={26} />
         </button>
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex flex-nowrap items-center justify-end gap-1.5 sm:gap-2 shrink-0">
           {phase === 'ready' && stops.length > 0 && (
             <button
               onClick={sharePlan}
-              className="p-2 md:p-2.5 h-9 md:h-10 flex items-center justify-center bg-eve-ink-soft rounded-xl border border-white/[0.08] hover:bg-[#1a1a1e] transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink"
+              className="p-2 md:p-2.5 h-10 min-w-10 flex items-center justify-center bg-eve-ink-soft rounded-xl border border-white/[0.08] hover:bg-[#1a1a1e] transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink"
               aria-label={shareCopied ? 'Plan copied' : 'Share plan'}
               title={shareCopied ? 'Copied!' : 'Share this evening'}
             >
@@ -2038,7 +2038,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           )}
           <button
             onClick={reset}
-            className="p-2 md:p-2.5 h-9 md:h-10 flex items-center justify-center bg-eve-ink-soft rounded-xl border border-white/[0.08] hover:bg-[#1a1a1e] transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink"
+            className="p-2 md:p-2.5 h-10 min-w-10 flex items-center justify-center bg-eve-ink-soft rounded-xl border border-white/[0.08] hover:bg-[#1a1a1e] transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink"
             aria-label="Edit plan"
             title="Edit plan"
           >
@@ -2053,12 +2053,12 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                 setUserMuted(false);
                 playGreetingOnce(true);
               }}
-              className="inline-flex items-center gap-1.5 px-3 md:px-3.5 h-9 md:h-10 rounded-xl bg-eve-gold text-eve-ink hover:bg-yellow-300 transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink shadow-[0_0_18px_rgba(245,197,66,0.28)] text-xs font-bold uppercase tracking-wider"
+              className="inline-flex items-center gap-1.5 px-3 md:px-3.5 h-10 rounded-xl bg-eve-gold text-eve-ink hover:bg-yellow-300 transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink shadow-[0_0_18px_rgba(245,197,66,0.28)] text-xs font-bold uppercase tracking-wider"
               title="Turn on Eve's voice"
               aria-label="Activate Eve"
             >
               <Mic size={14} />
-              <span>Activate</span>
+              <span className="hidden sm:inline">Activate</span>
             </button>
           ) : (
             <button
@@ -2068,7 +2068,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                 setMuted(true);
                 setUserMuted(true);
               }}
-              className="p-2 md:p-2.5 h-9 md:h-10 flex items-center justify-center bg-eve-ink-soft rounded-xl border border-white/[0.08] hover:bg-[#1a1a1e] transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink"
+              className="p-2 md:p-2.5 h-10 min-w-10 flex items-center justify-center bg-eve-ink-soft rounded-xl border border-white/[0.08] hover:bg-[#1a1a1e] transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink"
               title="Mute Eve"
               aria-label="Mute Eve"
             >

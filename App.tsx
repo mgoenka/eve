@@ -49,14 +49,14 @@ export default function App() {
 
   if (route.kind === 'restaurant') {
     return (
-      <div className="site-bg min-h-screen relative">
+      <div className="site-bg min-h-dvh relative">
         <RestaurantView onSwitchToDiner={() => navigate('diner')} />
       </div>
     );
   }
   if (route.kind === 'pricing') {
     return (
-      <div className="site-bg min-h-screen relative">
+      <div className="site-bg min-h-dvh relative">
         <PricingPage onBack={() => navigate('diner')} />
       </div>
     );
@@ -65,7 +65,7 @@ export default function App() {
     const city = findCity(route.slug);
     if (city) {
       return (
-        <div className="site-bg min-h-screen relative">
+        <div className="site-bg min-h-dvh relative">
           <CityLanding
             city={city}
             onPlanInCity={() => {
@@ -80,7 +80,7 @@ export default function App() {
     }
   }
   return (
-    <div className="site-bg min-h-screen relative">
+    <div className="site-bg min-h-dvh relative">
       <DinerView onSwitchToRestaurant={() => navigate('restaurant')} />
     </div>
   );

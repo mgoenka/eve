@@ -55,9 +55,9 @@ export function PricingPage({ onBack }: Props) {
   };
 
   return (
-    <div className="relative z-10 min-h-screen flex flex-col">
+    <div className="relative z-10 min-h-dvh flex flex-col">
       <header
-        className="w-full py-2 px-3 md:py-2.5 md:px-4 border-b border-white/[0.06] bg-eve-ink/95 backdrop-blur-sm grid grid-cols-3 items-center gap-2"
+        className="w-full py-2 px-3 md:py-2.5 md:px-4 border-b border-white/[0.06] bg-eve-ink/95 backdrop-blur-sm grid grid-cols-[1fr_auto_1fr] items-center gap-2"
         role="banner"
       >
         <a
@@ -67,7 +67,7 @@ export function PricingPage({ onBack }: Props) {
           className="text-eve-cream/55 hover:text-eve-gold text-xs md:text-sm font-medium transition-colors rounded justify-self-start"
           aria-label="Apps and Games"
         >
-          Apps and Games <span aria-hidden="true">🎮</span>
+          <span className="hidden sm:inline">Apps and Games </span><span aria-hidden="true" className="text-base sm:text-[inherit]">🎮</span>
         </a>
         <a
           href="/"
@@ -77,10 +77,10 @@ export function PricingPage({ onBack }: Props) {
           <span className="text-eve-cream/85 text-xs md:text-sm font-medium">Eve</span>
           <EveLogo size={26} />
         </a>
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex flex-nowrap items-center justify-end gap-1.5 sm:gap-2 shrink-0">
           <button
             onClick={onBack}
-            className="p-2 md:p-2.5 h-9 md:h-10 flex items-center justify-center bg-eve-ink-soft rounded-xl border border-white/[0.08] hover:bg-[#1a1a1e] transition-all text-xs font-semibold text-eve-cream/70"
+            className="p-2 md:p-2.5 h-10 min-w-10 flex items-center justify-center bg-eve-ink-soft rounded-xl border border-white/[0.08] hover:bg-[#1a1a1e] transition-all text-xs font-semibold text-eve-cream/70"
             aria-label="Back"
             title="Back"
           >
@@ -89,7 +89,7 @@ export function PricingPage({ onBack }: Props) {
         </div>
       </header>
 
-      <main className="flex-1 max-w-5xl mx-auto w-full px-6 py-10 md:py-14">
+      <main className="flex-1 max-w-5xl mx-auto w-full px-4 sm:px-6 py-8 sm:py-10 md:py-14">
         <div className="text-center mb-10 md:mb-14">
           <p className="text-[12px] tracking-[0.4em] uppercase text-eve-gold/85 mb-3 font-header font-semibold">
             Pricing
@@ -119,7 +119,7 @@ export function PricingPage({ onBack }: Props) {
               <span className="text-eve-cream/55 text-sm">/ month</span>
             </div>
             <p className="text-eve-cream/70 text-sm leading-relaxed mb-5">
-              For people who don\u2019t want to think about Saturday night ever again.
+              For people who don’t want to think about Saturday night ever again.
             </p>
             <ul className="space-y-2 mb-7 flex-1">
               {DINER_FEATURES.map((f) => (
@@ -161,7 +161,7 @@ export function PricingPage({ onBack }: Props) {
               <span className="text-eve-cream/55 text-sm">/ month / location</span>
             </div>
             <p className="text-eve-cream/70 text-sm leading-relaxed mb-5">
-              The marketing department you can\u2019t afford. AI-native, on-brand, in 60 seconds a day.
+              The marketing department you can’t afford. AI-native, on-brand, in 60 seconds a day.
             </p>
             <ul className="space-y-2 mb-7 flex-1">
               {RESTAURANT_FEATURES.map((f) => (
@@ -205,19 +205,19 @@ export function PricingPage({ onBack }: Props) {
           <div className="space-y-3">
             <details className="rounded-2xl bg-white/[0.03] border border-white/10 px-5 py-4 group">
               <summary className="cursor-pointer text-eve-cream/95 font-medium text-sm">Do I have to know how to write to use Restaurant Pro?</summary>
-              <p className="mt-2 text-eve-cream/70 text-sm leading-relaxed">No. Eve infers your cuisine, brand voice, and signature dishes from your name and city. You can edit if you want — most people don\u2019t.</p>
+              <p className="mt-2 text-eve-cream/70 text-sm leading-relaxed">No. Eve infers your cuisine, brand voice, and signature dishes from your name and city. You can edit if you want — most people don’t.</p>
             </details>
             <details className="rounded-2xl bg-white/[0.03] border border-white/10 px-5 py-4 group">
               <summary className="cursor-pointer text-eve-cream/95 font-medium text-sm">Do you charge per content pack generated?</summary>
-              <p className="mt-2 text-eve-cream/70 text-sm leading-relaxed">No. $99 covers unlimited regenerations every month, on every location. Make 30 versions of tonight\u2019s dish until one feels right.</p>
+              <p className="mt-2 text-eve-cream/70 text-sm leading-relaxed">No. $99 covers unlimited regenerations every month, on every location. Make 30 versions of tonight’s dish until one feels right.</p>
             </details>
             <details className="rounded-2xl bg-white/[0.03] border border-white/10 px-5 py-4 group">
               <summary className="cursor-pointer text-eve-cream/95 font-medium text-sm">Can I cancel anytime?</summary>
-              <p className="mt-2 text-eve-cream/70 text-sm leading-relaxed">Yes. One click. No "we\u2019d hate to see you go" obstacle course.</p>
+              <p className="mt-2 text-eve-cream/70 text-sm leading-relaxed">Yes. One click. No "we’d hate to see you go" obstacle course.</p>
             </details>
             <details className="rounded-2xl bg-white/[0.03] border border-white/10 px-5 py-4 group">
               <summary className="cursor-pointer text-eve-cream/95 font-medium text-sm">When does Diner Premium come out of free trial?</summary>
-              <p className="mt-2 text-eve-cream/70 text-sm leading-relaxed">All diner planning is free during launch. Premium is a paid layer on top once that opens — you\u2019ll see it before you\u2019re charged.</p>
+              <p className="mt-2 text-eve-cream/70 text-sm leading-relaxed">All diner planning is free during launch. Premium is a paid layer on top once that opens — you’ll see it before you’re charged.</p>
             </details>
           </div>
         </section>

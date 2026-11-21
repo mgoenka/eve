@@ -344,9 +344,9 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
 
   // Single unified page: brand setup + tonight's dish + content pack.
   return (
-    <div className="relative z-10 min-h-screen flex flex-col">
+    <div className="relative z-10 min-h-dvh flex flex-col">
       <header
-        className="w-full py-2 px-3 md:py-2.5 md:px-4 border-b border-white/[0.06] bg-eve-ink/95 backdrop-blur-sm grid grid-cols-3 items-center gap-2"
+        className="w-full py-2 px-3 md:py-2.5 md:px-4 border-b border-white/[0.06] bg-eve-ink/95 backdrop-blur-sm grid grid-cols-[1fr_auto_1fr] items-center gap-2"
         role="banner"
       >
         <a
@@ -356,7 +356,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
           className="text-eve-cream/55 hover:text-eve-gold text-xs md:text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink rounded justify-self-start"
           aria-label="Apps and Games"
         >
-          Apps and Games <span aria-hidden="true">🎮</span>
+          <span className="hidden sm:inline">Apps and Games </span><span aria-hidden="true" className="text-base sm:text-[inherit]">🎮</span>
         </a>
         <a
           href="/restaurant"
@@ -368,10 +368,10 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
           <EveLogo size={26} />
           <span className="hidden md:inline text-[11px] text-eve-cream/45 ml-1">restaurants</span>
         </a>
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex flex-nowrap items-center justify-end gap-1.5 sm:gap-2 shrink-0">
           <button
             onClick={onSwitchToDiner}
-            className="p-2 md:p-2.5 h-9 md:h-10 flex items-center justify-center bg-eve-ink-soft rounded-xl border border-white/[0.08] hover:bg-[#1a1a1e] transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink"
+            className="p-2 md:p-2.5 h-10 min-w-10 flex items-center justify-center bg-eve-ink-soft rounded-xl border border-white/[0.08] hover:bg-[#1a1a1e] transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink"
             aria-label="For diners"
             title="For diners"
           >
