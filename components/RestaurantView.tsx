@@ -652,7 +652,8 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
               )}
             </div>
 
-            {evePulse && (
+            {/* Illustrative numbers, not live metrics: never shown inside the native app. */}
+            {evePulse && !isNativeApp() && (
               <div className="mt-5 p-4 rounded-2xl border border-eve-rose/35 bg-gradient-to-br from-eve-rose/8 to-eve-gold/5 animate-fade-in">
                 <p className="text-[12px] tracking-wide text-eve-rose italic font-serif mb-3 inline-flex items-center gap-1.5">
                   <TrendingUp size={12} />

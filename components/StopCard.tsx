@@ -210,7 +210,7 @@ export function StopCard({ stop, index, city, whenISO, startTime, party, highlig
             kind="stop"
             label={`Report stop ${index + 1}`}
             content={() =>
-              `Stop ${index + 1}: ${stop.name} (${stop.kind}, ${stop.approxArrival})\n${stop.oneLineVibe}\n${stop.whyThisFits}${
+              `Stop ${index + 1}: ${stop.name} (${stop.kind}, ${stop.approxArrival})${stop.isEveOriginal ? ' [Eve Original: special published by a restaurant]' : ''}\n${stop.oneLineVibe}\n${stop.whyThisFits}${
                 stop.signatureItem ? `\nOrder or try: ${stop.signatureItem}` : ''
               }${stop.imageData ? `\nImage: AI-painted scene of ${stop.name}` : ''}`
             }

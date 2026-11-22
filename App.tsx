@@ -2,7 +2,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { DinerView } from './components/DinerView';
 import { findCity, CITIES } from './data/cities';
 import { RulesContext } from './components/RulesContext';
-import { RulesOverlay, aiContentRuleSection, lazyWithRetry, type RuleSection } from './ui-kit';
+import { RulesOverlay, aiContentRuleSection, isNativeApp, lazyWithRetry, type RuleSection } from './ui-kit';
 import { DataPage, EveSettings } from './components/AccountData';
 
 // Secondary screens load on demand so the planner opens fast.
@@ -26,10 +26,16 @@ const APP_RULES: RuleSection[] = [
   {
     title: 'Talk to Eve',
     icon: '🎙️',
-    items: [
-      'Tap Activate to turn on Eve’s voice and the mic. Tell Eve what kind of evening you want; she asks for anything she still needs.',
-      'Talk over her any time to cut in. Tap the speaker to mute her and turn the mic off.',
-    ],
+    // No speech recognition inside the Android app: Eve speaks, you type.
+    items: isNativeApp()
+      ? [
+          'Tap Activate to turn on Eve’s voice. Type what kind of evening you want; she asks for anything she still needs.',
+          'Tap the speaker to mute her.',
+        ]
+      : [
+          'Tap Activate to turn on Eve’s voice and the mic. Tell Eve what kind of evening you want; she asks for anything she still needs.',
+          'Talk over her any time to cut in. Tap the speaker to mute her and turn the mic off.',
+        ],
   },
   {
     title: 'Your evening',

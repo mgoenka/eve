@@ -64,7 +64,7 @@ import type { SavedEvening } from '../services/savedEvenings';
 import { StopCard } from './StopCard';
 import { EveLogo } from './EveLogo';
 import { useOpenRules, useOpenSettings } from './RulesContext';
-import { AppHeader, IconButton, ReportContentButton, shareOrCopy, useToast } from '../ui-kit';
+import { AppHeader, IconButton, ReportContentButton, isNativeApp, shareOrCopy, useToast } from '../ui-kit';
 
 interface Props {
   onSwitchToRestaurant: () => void;
@@ -461,7 +461,9 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
       (typeof window !== 'undefined' &&
         ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)) ||
       null;
-    if (!SR) {
+    // Android WebView has no working speech recognition (and the app has no mic permission):
+    // inside the app Eve still talks, and you type to her.
+    if (!SR || isNativeApp()) {
       setVoiceUnsupported(true);
       return;
     }
