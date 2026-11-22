@@ -2,6 +2,7 @@
 import { Component } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import { HUB_LABEL, HUB_URL } from '../utils/constants';
+import { isNativeApp } from '../utils/native';
 import { isChunkLoadError, reloadOnceForNewVersion } from '../utils/lazyWithRetry';
 import { safeRemove } from '../utils/storage';
 
@@ -74,7 +75,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, State> {
     const { error } = this.state;
     if (!error) return this.props.children;
     if (this.props.fallback) return this.props.fallback(error, this.reset);
-    const hub = this.props.hubHref === undefined ? HUB_URL : this.props.hubHref;
+    const hub = isNativeApp() ? false : this.props.hubHref === undefined ? HUB_URL : this.props.hubHref;
     return (
       <div role="alert" className="flex min-h-dvh items-center justify-center bg-mg-bg px-4 py-10 text-mg-text">
         <div className="w-full max-w-md rounded-mg-lg border border-mg-border bg-mg-elevated p-6 text-center shadow-mg-card sm:p-8">

@@ -125,7 +125,7 @@ colors and sizes the apps use today; on phones the hub link collapses to 🎮.
 | `icon` | image URL / node / `null` | `'/favicon.svg'` |
 | `onTitleClick` | `() => void` | plain title |
 | `confirmBack` / `confirmText` | boolean / string | `false` / `'Go back?'` (red pulsing two-tap back) |
-| `hubHref` | string \| false | `'https://mohitgoenka.com/apps/'` (false omits) |
+| `hubHref` | string \| false | `'https://mohitgoenka.com/apps/'` (false omits; always hidden when `isNativeApp()`) |
 | `hubLabel` / `hubNewTab` | string / boolean | `'Apps and Games'` / `true` (as today) |
 | `onRules` / `rulesLabel` | `() => void` / string | Help (?) button shown when set / `'Help'` |
 | `onSettings` | `() => void` | gear button shown when set |
@@ -244,6 +244,40 @@ Props: `appName`, `hubHref` (hub; `false` hides), `resetKeys`, `fallback(error, 
 Banner shows only while offline: `message`, `position` `bottom|top`. `OfflinePill` is the small header pill
 (AppHeader shows it automatically).
 
+### `ReportContentButton` / `ReportContentDialog` (report AI content)
+Google Play requires a way to flag offensive or inaccurate AI-generated content **without leaving the app**. Put a
+`ReportContentButton` next to every piece of AI output (question, clue, board, survey answers, puzzle, item, wheel,
+recipe, plan, itinerary, AI image, AI chat reply). It opens a small dialog: pick a reason (Offensive or hateful ·
+Inappropriate or unsafe · Wrong or misleading · Something else), optional note (300 chars), **Send report** → success
+toast; errors stay in the dialog with the server's user-safe message. After a successful report the button shows
+"Reported" until the content changes.
+
+| prop | type | default |
+| --- | --- | --- |
+| `app` | string — the repo/subdomain id on the server allow-list (`'spinner'`, `'jeopardy'`, `'eve'`…) | — |
+| `kind` | string — `'question'`, `'clue'`, `'board'`, `'answers'`, `'puzzle'`, `'item'`, `'wheel'`, `'recipe'`, `'plan'`, `'itinerary'`, `'image'`, `'chat'`… | — |
+| `content` | string \| `() => string` — the AI text (or a description/URL of an AI image); read when the dialog opens | — |
+| `variant` | `'icon'` (small ghost flag, 32px + hit area) · `'link'` (flag + "Report content" text) · `'menuitem'` (row for a "⋯" menu) | `'icon'` |
+| `label` / `title` | button text or aria-label / dialog title | `'Report content'` / `'Report AI content'` |
+| `contentKey` | identity for the "Reported" state when `content` is a function | — |
+| `onReported` | `() => void` | — |
+
+Clicks and keys inside the dialog don't reach the app (no accidental buzz/flip/space shortcuts while typing).
+Keep it subtle in game UIs (host screen / results / a "⋯" menu), but reachable. `ReportContentDialog` is the
+controlled version (`open`, `onClose`, same `app`/`kind`/`content`) for your own menus.
+`aiContentRuleSection(what, where)` returns a ready rules section for `GAME_RULES` / `APP_RULES`:
+
+```tsx
+<ReportContentButton app="jeopardy" kind="clue" content={`${clue.category} — ${clue.question} → ${clue.answer}`} />
+<ReportContentButton app="recipe" kind="recipe" variant="link" content={() => recipeToText(recipe)} contentKey={recipe.id} />
+const GAME_RULES = [...rules, aiContentRuleSection('clues and answers', "on the host screen (flag next to each clue)")];
+```
+
+**CSP:** the report is a cross-origin `fetch` to `https://mohitgoenka.com/api/report-content` (no credentials), so the
+app's Content-Security-Policy must allow it: `'connect-src': ["'self'", 'https://mohitgoenka.com']`.
+The server accepts only `https://*.mohitgoenka.com` origins, an allow-listed `app`, the reason enum and capped
+lengths, and rate-limits per IP (10/hour) and globally.
+
 ### `LazyQRCode` / `QRCode`
 Pure SVG QR code from a vendored MIT encoder (uqr, license in `vendor/uqr.js`). Encodes locally — the value is never
 sent anywhere. `LazyQRCode` splits the encoder (~4 kB gz) into its own chunk with a same-size skeleton.
@@ -252,7 +286,7 @@ Props: `value`, `size` (200), `ecc` `L|M|Q|H` ('M'), `margin` (2 modules), `colo
 
 ### Icons
 `HelpIcon`, `SettingsIcon`, `CloseIcon`, `DownloadIcon`, `ShareIcon`, `CopyIcon`, `CheckIcon`, `AlertIcon`, `InfoIcon`,
-`WifiOffIcon`, `VolumeOnIcon`, `VolumeOffIcon`, `RefreshIcon` — inline SVG, `size` prop (18), `currentColor`.
+`WifiOffIcon`, `VolumeOnIcon`, `VolumeOffIcon`, `RefreshIcon`, `FlagIcon`, `MoreIcon` — inline SVG, `size` prop (18), `currentColor`.
 Apps can keep lucide-react for everything else.
 
 ## 6. Hooks
@@ -291,6 +325,17 @@ Apps can keep lucide-react for everything else.
 - `registerServiceWorker({ url = '/sw.js', onUpdate?, message = 'Update available', enabled?, checkIntervalMs = 30 min })`
   — production only (https or localhost); sticky "Update available — Reload" toast; Reload posts `SKIP_WAITING` to the
   waiting worker and reloads once on `controllerchange`. `onUpdate(reg, apply)` returning `false` suppresses the toast.
+- `isNativeApp()` — `true` inside Mohit's native wrappers (Capacitor apps that load the live site; their WebView user
+  agent contains `MohitGoenkaApp/`, e.g. `MohitGoenkaApp/Android`). `nativePlatform()` → `'android' | 'ios' | null`.
+  `goToHub({ newTab? })` navigates to the hub on the web and does nothing (returns `false`) in the app.
+  The kit already uses it: `AppHeader` and `ErrorBoundary` hide the "Apps and Games" hub link in the app.
+  Apps should also use it to: hide their own hub links / title-click-to-hub, hide any "install this app" (PWA) hint,
+  and hide web purchase / pricing / Stripe checkout CTAs (Play payments policy — the app must work on the free tier).
+  Keep everything else identical. Test with a spoofed UA (CDP `Network.setUserAgentOverride` / Chrome
+  `--user-agent="… MohitGoenkaApp/Android"`).
+- `reportContent({ app, kind, content, reason, note? })` — the call behind `ReportContentButton`; resolves on success,
+  throws `FetchError`. Sends only those fields plus `platform` (`'web'`/`'android'`), trimmed to `REPORT_LIMITS`
+  (`content` 1200, `note` 300 chars) with control characters stripped. `REPORT_REASONS` lists the reasons.
 - `HUB_URL` (`https://mohitgoenka.com/apps/`), `HUB_LABEL`, `PRIVACY_URL`, `COPYRIGHT`, `cx(...)`,
   `safeGet/safeSet/safeRemove/readJson` (storage that never throws), `getSettings/setSettings`.
 

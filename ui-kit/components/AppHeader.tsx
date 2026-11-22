@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { useOnline } from '../hooks/useOnline';
 import { HUB_LABEL, HUB_URL } from '../utils/constants';
 import { cx } from '../utils/cx';
+import { isNativeApp } from '../utils/native';
 import { HelpIcon, SettingsIcon } from './icons';
 import { IconButton } from './IconButton';
 import { OfflinePill } from './OfflineBanner';
@@ -20,7 +21,7 @@ export interface AppHeaderProps {
   confirmBack?: boolean;
   /** Text shown when confirmBack. Default "Go back?". */
   confirmText?: string;
-  /** Back-to-hub link. Default the hub (mohitgoenka.com/apps/); pass false/null to omit it. */
+  /** Back-to-hub link. Default the hub (mohitgoenka.com/apps/); pass false/null to omit it. Always hidden inside the native app. */
   hubHref?: string | false | null;
   /** Default "Apps and Games" (label hidden on phones, 🎮 always shown). */
   hubLabel?: string;
@@ -93,7 +94,7 @@ export function AppHeader({
     >
       <div className="flex min-w-0 items-center justify-self-start">
         {left ??
-          (hubHref ? (
+          (hubHref && !isNativeApp() ? (
             <a
               href={hubHref}
               {...(hubNewTab ? { target: '_blank', rel: 'noopener noreferrer' } : {})}

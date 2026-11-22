@@ -30,6 +30,8 @@ export { EmptyState } from './components/EmptyState';
 export type { EmptyStateProps } from './components/EmptyState';
 export { OfflineBanner, OfflinePill } from './components/OfflineBanner';
 export type { OfflineBannerProps } from './components/OfflineBanner';
+export { ReportContentButton, ReportContentDialog, aiContentRuleSection } from './components/ReportContentButton';
+export type { ReportContentButtonProps, ReportContentDialogProps } from './components/ReportContentButton';
 export { LazyQRCode } from './components/LazyQRCode';
 export type { QRCodeProps } from './components/QRCode';
 // Static QRCode (pulls the encoder into the importing chunk): import { QRCode } from './ui-kit/components/QRCode'
@@ -60,3 +62,6 @@ export { lazyWithRetry, importWithRetry, isChunkLoadError, reloadOnceForNewVersi
 export { registerServiceWorker } from './utils/serviceWorker';
 export type { RegisterServiceWorkerOptions } from './utils/serviceWorker';
 export { safeGet, safeSet, safeRemove, readJson } from './utils/storage';
+export { isNativeApp, nativePlatform, goToHub, NATIVE_UA_TOKEN } from './utils/native';
+export { reportContent, REPORT_CONTENT_URL, REPORT_REASONS, REPORT_LIMITS } from './utils/reportContent';
+export type { ReportContentInput, ReportReason } from './utils/reportContent';
