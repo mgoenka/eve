@@ -69,7 +69,7 @@ export function CreditsSheet() {
       open={s.sheetOpen}
       onClose={closeCreditsSheet}
       title="AI credits"
-      description="AI features in the app run on prepaid credits."
+      description={viaPlay ? 'AI features in the app run on prepaid credits.' : 'AI features on mohitgoenka.com run on prepaid credits.'}
       size="sm"
       footer={
         <Button variant="secondary" fullWidth onClick={closeCreditsSheet}>
@@ -99,6 +99,7 @@ export function CreditsSheet() {
             <li key={pack.id} className="flex min-h-14 items-center justify-between gap-3 rounded-mg border border-mg-border bg-mg-surface px-4 py-2.5">
               <div className="min-w-0">
                 <div className="text-base font-semibold tabular-nums text-mg-text">{fmt(pack.credits)} credits</div>
+                {viaPlay ? null : <div className="text-xs text-mg-subtle">+ tax where it applies</div>}
               </div>
               <Button
                 size="sm"
@@ -117,7 +118,7 @@ export function CreditsSheet() {
 
       {unavailable ? (
         <div role="alert" className="mt-3 rounded-mg-sm border border-mg-border-strong bg-mg-surface-2 px-3 py-2 text-sm text-mg-text-2">
-          Purchases are unavailable on this device right now.{viaPlay ? ' Make sure the Google Play Store is installed and you’re signed in, then' : ' Please'}{' '}
+          {viaPlay ? 'Purchases are unavailable on this device right now. Make sure the Google Play Store is installed and you’re signed in, then' : 'Purchases are unavailable right now. Please'}{' '}
           <button type="button" className="font-semibold text-mg-gold underline underline-offset-2" onClick={() => void loadPrices(true)}>
             try again
           </button>
@@ -126,21 +127,25 @@ export function CreditsSheet() {
       ) : null}
       {s.pending ? (
         <p role="status" className="mt-3 text-sm text-mg-text-2">
-          A payment is pending{viaPlay ? ' at Google Play' : ''}. Your credits are added as soon as it completes.
+          A payment is pending{viaPlay ? ' at Google Play' : ' at checkout'}. Your credits are added as soon as it completes.
         </p>
       ) : null}
 
       <p className="mt-4 text-xs leading-relaxed text-mg-subtle">
         Each AI action uses credits for what the AI really costs (Google Gemini) — usually 1–10 credits, more for long lists or
-        images. Repeats served from cache are free. Credits don’t expire{viaPlay ? ' and are for this app. Paid through Google Play.' : '.'}
+        images. Repeats served from cache are free.{' '}
+        {viaPlay
+          ? 'Credits don’t expire and are for this app. Paid through Google Play.'
+          : 'Credits don’t expire and work in all of Mohit’s apps and games in this browser. Secure checkout by Stripe (sold through Link): prices in US dollars, with sales tax or VAT added at checkout where it applies.'}
       </p>
     </Modal>
   );
 }
 
 /**
- * Mount once near the root (inside ToastProvider). In the Android app it loads the balance, recovers
- * purchases that weren't credited yet, and hosts the sheet; on the website it renders nothing.
+ * Mount once near the root (inside ToastProvider). Loads the balance, finishes purchases (Play: unconsumed
+ * tokens; web: the return from Stripe Checkout) and hosts the sheet. Renders nothing while the server
+ * doesn't meter this page (the website with the web credits switch off).
  */
 export function AiCreditsHost() {
   useEffect(() => {

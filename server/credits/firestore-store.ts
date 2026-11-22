@@ -3,15 +3,17 @@
 // `gcloud auth application-default login`), or the emulator when FIRESTORE_EMULATOR_HOST is set.
 //
 // aiCreditAccounts/{walletKey}                    { kind, app, id, balance, holds{}, totals{}, createdAt, updatedAt }
-//   walletKey = "android:<package>:<appUserId>" (later "web:<walletId>")
+//   walletKey = "android:<package>:<appUserId>" or "web:<walletId>" (shared by every *.mohitgoenka.com app)
 // aiCreditAccounts/{walletKey}/ledger/{autoId}    append-only LedgerEntry (never updated or deleted by code)
 // aiCreditPurchases/{provider}:{sha256(extId)}    { account, provider, productId, orderId, credits, finalized, createdAt, finalizedAt }
-// aiCreditOrders/{provider}:{secondaryId}         { purchaseKey, account }   (Play orderId: second idempotency key)
+// aiCreditOrders/{provider}:{secondaryId}         { purchaseKey, account }   (Play orderId / Stripe payment intent)
+// aiCreditStarterIps/{sha256(salt+address)}       { count, windowStart }     (web starter grants per address)
+// aiCreditConfig/web                              { enabled }                (the web credits switch)
 //
 // Only the server touches these (no client SDK, no security-rule access needed). The package is
 // imported lazily so web-only traffic and apps without Firestore never load it.
 import type { DocumentReference, Firestore, Transaction } from '@google-cloud/firestore';
-import { COLLECTIONS } from './config.ts';
+import { COLLECTIONS, WEB_SWITCH_DOC } from './config.ts';
 import { liveHeld } from './store.ts';
 import type { AccountMeta, AccountState, ChargeInput, CreditPurchaseInput, CreditStore, LedgerEntry, PurchaseRecord } from './store.ts';
 
@@ -215,5 +217,71 @@ export class FirestoreCreditStore implements CreditStore {
   async markFinalized(purchaseKey: string, now: Date): Promise<void> {
     const db = await this.db();
     await db.collection(COLLECTIONS.purchases).doc(purchaseKey).update({ finalized: true, finalizedAt: now.toISOString() });
+  }
+
+  async grant(key: string, meta: AccountMeta, credits: number, reason: string, now: Date) {
+    const { db, account, ledger } = await this.refs(key);
+    return db.runTransaction(async (tx) => {
+      const { doc, created } = await FirestoreCreditStore.load(tx, account, meta, 0, now);
+      const balance = doc.balance + credits;
+      const at = now.toISOString();
+      if (created) tx.create(account, { ...doc, balance, totals: { ...doc.totals, granted: credits } });
+      else tx.update(account, { balance, 'totals.granted': (doc.totals?.granted ?? 0) + credits, updatedAt: at });
+      const e: LedgerEntry = { type: 'grant', credits, balanceAfter: balance, at, reason };
+      tx.create(ledger(), e);
+      return { balance };
+    });
+  }
+
+  async claimStarter(addressKey: string, limit: number, windowMs: number, now: Date) {
+    const db = await this.db();
+    const ref = db.collection(COLLECTIONS.starterIps).doc(addressKey);
+    return db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const t = now.getTime();
+      const cur = snap.exists ? (snap.data() as { count?: number; windowStart?: number }) : null;
+      const fresh = !cur || (cur.windowStart ?? 0) + windowMs <= t;
+      const count = fresh ? 0 : (cur?.count ?? 0);
+      if (count >= limit) return false;
+      tx.set(ref, { count: count + 1, windowStart: fresh ? t : (cur?.windowStart ?? t) });
+      return true;
+    });
+  }
+
+  async reversePurchase(find: { purchaseKey?: string; secondaryKey?: string }, fraction: number, reason: string, now: Date) {
+    const db = await this.db();
+    let purchaseKey = find.purchaseKey;
+    if (!purchaseKey && find.secondaryKey) {
+      const s = await db.collection(COLLECTIONS.externalIds).doc(find.secondaryKey).get();
+      purchaseKey = (s.data() as { purchaseKey?: string } | undefined)?.purchaseKey;
+    }
+    if (!purchaseKey) return null;
+    const purchaseRef = db.collection(COLLECTIONS.purchases).doc(purchaseKey);
+    return db.runTransaction(async (tx) => {
+      const pSnap = await tx.get(purchaseRef);
+      if (!pSnap.exists) return null;
+      const rec = pSnap.data() as PurchaseRecord;
+      const accRef = db.collection(COLLECTIONS.accounts).doc(rec.account);
+      const aSnap = await tx.get(accRef);
+      if (!aSnap.exists) return null;
+      const doc = aSnap.data() as AccountDoc;
+      const target = Math.min(rec.credits, Math.max(0, Math.round(rec.credits * Math.min(1, Math.max(0, fraction)))));
+      const delta = target - (rec.reversedCredits ?? 0);
+      if (delta <= 0) return { reversed: 0, balance: doc.balance, account: rec.account };
+      const balance = doc.balance - delta;
+      const at = now.toISOString();
+      tx.update(accRef, { balance, updatedAt: at });
+      tx.update(purchaseRef, { reversedCredits: target, reversedAt: at });
+      const e: LedgerEntry = { type: 'reversal', credits: -delta, balanceAfter: balance, at, reason, productId: rec.productId, provider: rec.provider };
+      if (rec.orderId) e.orderId = rec.orderId;
+      tx.create(accRef.collection('ledger').doc(), e);
+      return { reversed: delta, balance, account: rec.account };
+    });
+  }
+
+  async webEnabled(): Promise<boolean> {
+    const db = await this.db();
+    const snap = await db.collection(WEB_SWITCH_DOC.collection).doc(WEB_SWITCH_DOC.id).get();
+    return snap.exists && (snap.data() as { enabled?: unknown }).enabled === true;
   }
 }

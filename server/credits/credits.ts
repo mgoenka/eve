@@ -1,11 +1,12 @@
 /* generated from app-platform/server-kit/credits — edit there and re-sync. */
-// Prepaid AI credits. Today only the Android (Play) apps pay; the website is never affected.
+// Prepaid AI credits: the Android (Play) apps always; the websites once the web switch is on.
 //
-// Three seams keep web credits (Stripe Checkout + a shared web wallet cookie) a small follow-up:
-//  1. Wallets: walletFor(req) -> "android:<package>:<appUserId>" today, "web:<walletId>" later (resolveWebWallet).
-//  2. Who pays: ONE policy function, mustPay(). Default: only native-app requests with an app user id.
-//  3. Purchases: creditPurchase({ wallet, provider, externalId, packId }) is idempotent on (provider, externalId);
-//     Play verification (verifyPlay) is one adapter in front of it, Stripe webhooks will be another.
+//  1. Wallets: walletFor(req) -> "android:<package>:<appUserId>" (Android app) or "web:<walletId>" (the
+//     mg_wallet cookie on .mohitgoenka.com, shared by every app; credits.middleware mints it).
+//  2. Who pays: ONE policy function, mustPay(). Default: Android requests with an app user id, and web
+//     requests while aiCreditConfig/web.enabled is true. Switch off: the websites are free, as before.
+//  3. Purchases: creditPurchase({ wallet, provider, externalId, packId }) is idempotent on (provider, externalId).
+//     Adapters: verifyPlay (Play Billing token) and Stripe Checkout (confirm on return + signed webhook).
 import { createHash, randomBytes } from 'node:crypto';
 import {
   APP_USER_HEADER,
@@ -16,6 +17,11 @@ import {
   HOLD_TTL_MS,
   NATIVE_UA_TOKEN,
   STARTER_CREDITS,
+  WEB_COOKIE_DOMAIN,
+  WEB_STARTER_PER_IP,
+  WEB_STARTER_WINDOW_MS,
+  WEB_WALLET_COOKIE,
+  WEB_WALLET_MAX_AGE_S,
   packById,
   packsFor,
 } from './config.ts';
@@ -27,6 +33,8 @@ import { MemoryCreditStore } from './store.ts';
 import type { AccountMeta, CreditStore } from './store.ts';
 import { GooglePlayApi, PlayApiError } from './play.ts';
 import type { PlayApi } from './play.ts';
+import { StripeApiError, StripeRestApi, verifyStripeSignature } from './stripe.ts';
+import type { StripeApi, StripeCheckoutSession, StripeEvent } from './stripe.ts';
 
 // ---------------------------------------------------------------- types (framework-agnostic)
 
@@ -41,7 +49,8 @@ export interface ReqLike {
 export interface ResLike {
   status(code: number): ResLike;
   json(body: unknown): unknown;
-  setHeader(name: string, value: string | number): unknown;
+  setHeader(name: string, value: string | number | string[]): unknown;
+  getHeader?(name: string): unknown;
 }
 
 export type WalletKind = 'android' | 'web';
@@ -57,6 +66,8 @@ export interface Wallet {
   app: string;
   /** Where this wallet buys packs: Play inside the Android app, Stripe on the web. */
   provider: PaymentProvider;
+  /** Client address of the request (web: limits starter grants per address). */
+  address?: string;
 }
 /** Older name for a wallet the current request pays from. */
 export type CreditContext = Wallet;
@@ -73,11 +84,16 @@ export interface PayContext {
   /** The wallet this request identified (null: none). */
   wallet: Wallet | null;
   packageName: string;
+  /** The web credits switch is on. */
+  webEnabled: boolean;
 }
 export type PayPolicy = (c: PayContext) => boolean;
 
-/** Today's rule: only requests from the Android app with an app user id pay. The website stays free. */
-export const defaultPayPolicy: PayPolicy = ({ native, wallet }) => native && wallet?.kind === 'android';
+/**
+ * Android requests with an app user id pay. Web requests pay while the web switch is on (a web request
+ * without a wallet cookie then gets 402 wallet_required; the kit fetches the balance, which mints one).
+ */
+export const defaultPayPolicy: PayPolicy = ({ native, wallet, webEnabled }) => (native ? wallet?.kind === 'android' : webEnabled);
 
 export class CreditsError extends Error {
   readonly status: number;
@@ -139,10 +155,17 @@ export interface CreditsOptions {
   store?: CreditStore;
   /** Play Developer API. Default: GooglePlayApi (ADC). */
   play?: PlayApi;
-  /** Who must pay. Default defaultPayPolicy (native app only). Switch web on per app later. */
+  /** Who must pay. Default defaultPayPolicy. */
   mustPay?: PayPolicy;
-  /** Web wallet id from the request (later: the shared mg_wallet cookie). Default: no web wallets. */
+  /** Web wallet id from the request. Default: the mg_wallet cookie. */
   resolveWebWallet?: (req: ReqLike) => string | null;
+  /** Stripe Checkout (web packs). Default: StripeRestApi (keys from env or Secret Manager). */
+  stripe?: StripeApi;
+  /**
+   * Web credits: 'switch' (default) follows Firestore aiCreditConfig/web.enabled (cached 1 min);
+   * 'on' / 'off' force it (also CREDITS_WEB=on|off in the environment).
+   */
+  web?: 'switch' | 'on' | 'off';
   /**
    * Native user agent WITHOUT an app user id (app builds from before AI credits): 'free' treats them
    * like the website (default, so old installs keep working); 'block' answers 426 update_required.
@@ -163,6 +186,64 @@ export const mask = (s: string) => (s ? s.slice(0, 6) + '…' : '');
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 const clientIp = (req: ReqLike) => req.ip || req.socket?.remoteAddress || 'unknown';
 const WEB_WALLET_RE = /^[A-Za-z0-9_-]{22,64}$/;
+const SESSION_RE = /^cs_(test|live)_[A-Za-z0-9]{10,250}$/;
+
+/** Value of one cookie from the Cookie header ('' when absent). */
+export function readCookie(req: ReqLike, name: string): string {
+  for (const part of header(req, 'cookie').split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0 && part.slice(0, i).trim() === name) {
+      try {
+        return decodeURIComponent(part.slice(i + 1).trim());
+      } catch {
+        return '';
+      }
+    }
+  }
+  return '';
+}
+
+const hostOf = (req: ReqLike) => header(req, 'host').toLowerCase().replace(/:\d+$/, '');
+const onAppDomain = (host: string) => host === WEB_COOKIE_DOMAIN || host.endsWith('.' + WEB_COOKIE_DOMAIN);
+const isLocalHost = (host: string) => host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+
+/** Set-Cookie value for the web wallet: on *.mohitgoenka.com shared by every app (Domain=.mohitgoenka.com). */
+export function walletCookie(req: ReqLike, id: string): string {
+  const host = hostOf(req);
+  const base = `${WEB_WALLET_COOKIE}=${id}; Path=/; Max-Age=${WEB_WALLET_MAX_AGE_S}; HttpOnly; SameSite=Lax`;
+  if (onAppDomain(host)) return `${base}; Domain=.${WEB_COOKIE_DOMAIN}; Secure`;
+  return isLocalHost(host) ? base : `${base}; Secure`;
+}
+
+function appendCookie(res: ResLike, cookie: string) {
+  const prev = res.getHeader?.('Set-Cookie');
+  const name = cookie.slice(0, cookie.indexOf('=') + 1);
+  const list = (prev === undefined || prev === null ? [] : Array.isArray(prev) ? prev.map(String) : [String(prev)]).filter((c) => !c.startsWith(name));
+  res.setHeader('Set-Cookie', list.length ? [...list, cookie] : cookie);
+}
+
+/** Starter-grant counter key for a client address: IPv4 as is, IPv6 by its /64. Salted hash, never the address. */
+function addressKey(ip: string): string {
+  let a = ip.replace(/^::ffff:/, '');
+  if (a.includes(':')) a = a.split(':').slice(0, 4).join(':') + '::/64';
+  return sha256('mg-credits-starter:' + a);
+}
+
+/** returnUrl for Stripe: https on *.mohitgoenka.com (or localhost outside production), no fragment. */
+export function safeReturnUrl(raw: unknown): string | null {
+  if (typeof raw !== 'string' || raw.length > 2000) return null;
+  try {
+    const u = new URL(raw);
+    const h = u.hostname.toLowerCase();
+    const prod = u.protocol === 'https:' && onAppDomain(h);
+    const local = process.env.NODE_ENV !== 'production' && isLocalHost(h) && (u.protocol === 'http:' || u.protocol === 'https:');
+    if (!prod && !local) return null;
+    u.hash = '';
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
 const SECONDARY_RE = /^[A-Za-z0-9.\-_]{1,100}$/;
 
 class Window {
@@ -197,8 +278,46 @@ export function createCredits(options: CreditsOptions) {
   const now = options.now ?? (() => new Date());
   const store: CreditStore = options.store ?? (process.env.CREDITS_STORE === 'memory' ? new MemoryCreditStore() : new FirestoreCreditStore());
   const play: PlayApi = options.play ?? new GooglePlayApi();
+  let stripeApi: StripeApi | null = options.stripe ?? null;
+  const stripe = () => (stripeApi ??= new StripeRestApi());
   const mustPay = options.mustPay ?? defaultPayPolicy;
   const legacy = options.legacyNativeClients ?? 'block';
+  const resolveWebWallet = options.resolveWebWallet ?? ((req: ReqLike) => readCookie(req, WEB_WALLET_COOKIE) || null);
+
+  // ---- the web switch (one Firestore doc for every app, cached 1 min; errors keep the last value)
+  const envWeb = process.env.CREDITS_WEB === 'on' ? 'on' : process.env.CREDITS_WEB === 'off' ? 'off' : null;
+  const webMode = options.web ?? envWeb ?? 'switch';
+  let webOn = webMode === 'on';
+  let webCheckedAt = 0;
+  let webRefresh: Promise<boolean> | null = null;
+  function webEnabled(): Promise<boolean> {
+    if (webMode !== 'switch') return Promise.resolve(webMode === 'on');
+    if (Date.now() - webCheckedAt < 60_000) return Promise.resolve(webOn);
+    webRefresh ??= store
+      .webEnabled()
+      .then((v) => {
+        if (v !== webOn) console.log(`[credits] ${app}: web credits ${v ? 'ON' : 'off'}`);
+        webOn = v;
+        webCheckedAt = Date.now();
+        return v;
+      })
+      .catch((err) => {
+        console.warn('[credits] web switch read failed', (err as Error)?.message);
+        webCheckedAt = Date.now() - 45_000; // retry in ~15 s
+        return webOn;
+      })
+      .finally(() => {
+        webRefresh = null;
+      });
+    return webRefresh;
+  }
+  /** Synchronous view (refreshes in the background when stale). */
+  const webEnabledNow = () => {
+    if (webMode !== 'switch') return webMode === 'on';
+    if (Date.now() - webCheckedAt >= 60_000) void webEnabled();
+    return webOn;
+  };
+  if (webMode === 'switch') void webEnabled();
   if (process.env.CREDITS_STORE === 'memory' && process.env.NODE_ENV === 'production') {
     console.error('[credits] CREDITS_STORE=memory in production: balances are lost on restart');
   }
@@ -206,12 +325,33 @@ export function createCredits(options: CreditsOptions) {
   const balanceLimit = new Window(60, 60_000);
   const purchaseIpLimit = new Window(10, 60_000);
   const purchaseUserLimit = new Window(30, 60 * 60_000);
+  const checkoutIpLimit = new Window(10, 60_000);
+  const checkoutWalletLimit = new Window(20, 60 * 60_000);
+  const confirmIpLimit = new Window(30, 60_000);
 
   const meta = (w: Wallet): AccountMeta => ({ kind: w.kind, app: w.app, id: w.id });
+  /** Android wallets get the starter on creation; web wallets only through the per-address claim (prepareWeb). */
+  const starterFor = (w: Wallet) => (w.kind === 'web' ? 0 : STARTER_CREDITS);
+  const webWallet = (id: string, address?: string): Wallet => ({ kind: 'web', key: walletKey.web(id), id, app: '*', provider: 'stripe', ...(address ? { address } : {}) });
+
+  /** Web wallets known to exist on this instance (skips a Firestore round trip per AI call). */
+  const knownWeb = new Set<string>();
+  /** Create a new web wallet; it gets the starter credits only while its address hasn't claimed WEB_STARTER_PER_IP. */
+  async function prepareWeb(wallet: Wallet) {
+    if (wallet.kind !== 'web' || knownWeb.has(wallet.key)) return;
+    const s = await store.ensure(wallet.key, meta(wallet), 0, now());
+    if (s.created) {
+      const ok = await store.claimStarter(addressKey(wallet.address ?? 'unknown'), WEB_STARTER_PER_IP, WEB_STARTER_WINDOW_MS, now());
+      if (ok) await store.grant(wallet.key, meta(wallet), STARTER_CREDITS, 'starter', now());
+      console.log(`[credits] ${app}: new web wallet ${mask(wallet.id)} (${ok ? '+' + STARTER_CREDITS + ' starter' : 'no starter: address limit'})`);
+    }
+    if (knownWeb.size > 50_000) knownWeb.clear();
+    knownWeb.add(wallet.key);
+  }
 
   /**
    * The wallet a request identifies, whether or not it must pay. Android: UA token + valid X-MG-App-User.
-   * Web: options.resolveWebWallet (none today). Throws CreditsError 400 for a malformed app user id,
+   * Web: the mg_wallet cookie (resolveWebWallet). Throws CreditsError 400 for a malformed app user id,
    * 426 for app builds without an id when legacyNativeClients is 'block'.
    */
   function walletFor(req: ReqLike): Wallet | null {
@@ -225,18 +365,18 @@ export function createCredits(options: CreditsOptions) {
       if (!APP_USER_RE.test(id)) throw new CreditsError(400, 'invalid_app_user');
       return { kind: 'android', key: walletKey.android(pkg, id), id, app: pkg, provider: 'play' };
     }
-    const webId = options.resolveWebWallet?.(req) ?? null;
-    if (webId && WEB_WALLET_RE.test(webId)) return { kind: 'web', key: walletKey.web(webId), id: webId, app: '*', provider: 'stripe' };
+    const webId = resolveWebWallet(req);
+    if (webId && WEB_WALLET_RE.test(webId)) return webWallet(webId, clientIp(req));
     return null;
   }
 
   /**
-   * The wallet this request must pay from, or null when it doesn't pay (the website today).
-   * Throws 402 wallet_required if the policy says pay but the request has no wallet (future web enforcement).
+   * The wallet this request must pay from, or null when it doesn't pay (web with the switch off).
+   * Throws 402 wallet_required if the policy says pay but the request has no wallet (web without a cookie).
    */
   function identify(req: ReqLike): Wallet | null {
     const wallet = walletFor(req);
-    if (!mustPay({ native: isNativeRequest(req), wallet, packageName: pkg })) return null;
+    if (!mustPay({ native: isNativeRequest(req), wallet, packageName: pkg, webEnabled: webEnabledNow() })) return null;
     if (!wallet) throw new CreditsError(402, 'wallet_required');
     return wallet;
   }
@@ -268,7 +408,8 @@ export function createCredits(options: CreditsOptions) {
     const estimate = Math.max(1, Math.ceil(Number.isFinite(opts.estimate) ? opts.estimate : 1));
     let reserved;
     try {
-      reserved = await store.reserve(wallet.key, meta(wallet), STARTER_CREDITS, holdId, estimate, HOLD_TTL_MS, now());
+      await prepareWeb(wallet);
+      reserved = await store.reserve(wallet.key, meta(wallet), starterFor(wallet), holdId, estimate, HOLD_TTL_MS, now());
     } catch (err) {
       console.error('[credits] reserve failed for', mask(wallet.id), (err as Error)?.message);
       throw new CreditsError(503, 'credits_unavailable');
@@ -312,9 +453,10 @@ export function createCredits(options: CreditsOptions) {
   }
 
   async function balance(wallet: Wallet) {
-    const s = await store.ensure(wallet.key, meta(wallet), STARTER_CREDITS, now());
-    if (s.created) console.log(`[credits] ${app}: new ${wallet.kind} wallet ${mask(wallet.id)} (+${STARTER_CREDITS} starter)`);
-    return {
+    await prepareWeb(wallet);
+    const s = await store.ensure(wallet.key, meta(wallet), starterFor(wallet), now());
+    if (s.created) console.log(`[credits] ${app}: new ${wallet.kind} wallet ${mask(wallet.id)} (+${starterFor(wallet)} starter)`);
+    const body: Record<string, unknown> = {
       enforced: true,
       balance: s.balance,
       available: s.available,
@@ -323,6 +465,13 @@ export function createCredits(options: CreditsOptions) {
       provider: wallet.provider,
       packs: packsFor(wallet.provider).map((p) => ({ id: p.id, credits: p.credits, priceUsd: p.priceUsd })),
     };
+    if (wallet.kind === 'web') {
+      body.checkout = await stripe()
+        .configured()
+        .catch(() => false);
+      body.taxNote = 'Prices in US dollars; sales tax or VAT is added at checkout where it applies.';
+    }
+    return body as { enforced: true; balance: number; available: number } & Record<string, unknown>;
   }
 
   const purchaseKeyOf = (provider: PaymentProvider, externalId: string) => `${provider}:${sha256(externalId)}`;
@@ -341,7 +490,7 @@ export function createCredits(options: CreditsOptions) {
       {
         key: p.wallet.key,
         meta: meta(p.wallet),
-        starter: STARTER_CREDITS,
+        starter: starterFor(p.wallet),
         provider: p.provider,
         purchaseKey: purchaseKeyOf(p.provider, p.externalId),
         secondaryKeys,
@@ -432,7 +581,85 @@ export function createCredits(options: CreditsOptions) {
     }
   }
 
+  // ---- Stripe adapter (web): Checkout Session -> credits, once per session id and payment intent.
+
+  /** Credit a Checkout Session the server created (metadata is server-set, so it is trusted once retrieved or signed). */
+  async function fulfillSession(s: StripeCheckoutSession): Promise<{ status: number; body: Record<string, unknown>; account?: string }> {
+    const md = s.metadata ?? {};
+    const walletId = typeof md.mg_wallet === 'string' ? md.mg_wallet : '';
+    const pack = packById(md.mg_pack, 'stripe');
+    if ((s.mode && s.mode !== 'payment') || !WEB_WALLET_RE.test(walletId) || !pack) return { status: 400, body: { error: 'invalid_session' } };
+    if (s.payment_status !== 'paid') return { status: 202, body: { error: 'payment_pending' } };
+    const promised = typeof md.mg_credits === 'string' && /^\d{1,7}$/.test(md.mg_credits) ? Number(md.mg_credits) : pack.credits;
+    const pi = typeof s.payment_intent === 'string' ? s.payment_intent : null;
+    const applied = await creditPurchase({
+      wallet: webWallet(walletId),
+      provider: 'stripe',
+      externalId: s.id,
+      packId: pack.id,
+      credits: promised > 0 ? promised : pack.credits,
+      secondaryIds: pi ? [pi] : [],
+      orderId: pi,
+      finalized: true,
+      ...(s.livemode === false ? { purchaseType: 0 } : {}),
+    });
+    return { status: 200, body: { ok: true, credited: applied.credited, alreadyProcessed: applied.duplicate, balance: applied.balance }, account: applied.account };
+  }
+
+  /** Apply one verified Stripe event. Throws on storage errors (Stripe retries the webhook). */
+  async function handleStripeEvent(event: StripeEvent): Promise<string> {
+    const obj = event.data.object as Record<string, unknown>;
+    switch (event.type) {
+      case 'checkout.session.completed':
+      case 'checkout.session.async_payment_succeeded': {
+        const s = obj as unknown as StripeCheckoutSession;
+        if (!s.metadata || typeof s.metadata.mg_wallet !== 'string') return 'ignored (not a credits session)';
+        const out = await fulfillSession(s);
+        return out.status === 200 ? `credited ${String(out.body.credited)}` : String(out.body.error);
+      }
+      case 'charge.refunded':
+      case 'charge.dispute.created': {
+        const pi = typeof obj.payment_intent === 'string' ? obj.payment_intent : '';
+        if (!pi) return 'ignored (no payment intent)';
+        let fraction = 1;
+        if (event.type === 'charge.refunded') {
+          const amount = Number(obj.amount);
+          const refunded = Number(obj.amount_refunded);
+          fraction = amount > 0 && Number.isFinite(refunded) ? refunded / amount : 1;
+        }
+        const reason = event.type === 'charge.refunded' ? 'refund' : 'dispute';
+        const r = await store.reversePurchase({ secondaryKey: `stripe:${pi}` }, fraction, reason, now());
+        if (!r) return 'ignored (unknown purchase)';
+        if (r.reversed) console.log(`[credits] ${app}: -${r.reversed} (${reason}) for ${mask(r.account.replace(/^web:/, ''))}, balance ${r.balance}`);
+        return `${reason} reversed ${r.reversed}`;
+      }
+      default:
+        return 'ignored';
+    }
+  }
+
   // ---------------------------------------------------------------- HTTP glue (Express-compatible)
+
+  /**
+   * Express middleware for the app's /api router: when web credits are on, gives a web request without a
+   * wallet a new mg_wallet cookie (and adds it to this request, so the same call can already pay).
+   */
+  async function middleware(req: ReqLike, res: ResLike, next: () => void) {
+    try {
+      if (!isNativeRequest(req) && (await webEnabled())) {
+        const id = resolveWebWallet(req);
+        if (!id || !WEB_WALLET_RE.test(id)) {
+          const fresh = randomBytes(24).toString('base64url');
+          appendCookie(res, walletCookie(req, fresh));
+          const prev = header(req, 'cookie');
+          req.headers.cookie = `${WEB_WALLET_COOKIE}=${fresh}` + (prev ? '; ' + prev : '');
+        }
+      }
+    } catch (err) {
+      console.warn('[credits] wallet middleware', (err as Error)?.message);
+    }
+    next();
+  }
 
   function applyHeaders(res: ResLike, result: { charged: number; balance: number | null }) {
     if (result.balance === null) return;
@@ -460,12 +687,14 @@ export function createCredits(options: CreditsOptions) {
       const wait = balanceLimit.hit(clientIp(req));
       if (wait) return limited(res, wait);
       try {
+        if (!isNativeRequest(req)) await webEnabled();
         const wallet = identify(req);
         if (!wallet) {
           res.status(200).json({ enforced: false });
           return;
         }
         const body = await balance(wallet);
+        if (wallet.kind === 'web') appendCookie(res, walletCookie(req, wallet.id)); // renew the 400-day cookie
         res.setHeader(BALANCE_HEADER, String(body.balance));
         res.status(200).json(body);
       } catch (err) {
@@ -497,9 +726,147 @@ export function createCredits(options: CreditsOptions) {
         res.status(503).json({ error: 'credits_unavailable' });
       }
     },
+
+    /** POST /api/credits/checkout { packId, returnUrl } — web: start a Stripe Checkout, answer { url }. */
+    async checkout(req: ReqLike, res: ResLike) {
+      res.setHeader('Cache-Control', 'no-store');
+      const wait = checkoutIpLimit.hit(clientIp(req));
+      if (wait) return limited(res, wait);
+      try {
+        if (isNativeRequest(req)) {
+          res.status(403).json({ error: 'web_only' }); // Play Billing only inside the Android app
+          return;
+        }
+        if (!(await webEnabled())) {
+          res.status(403).json({ error: 'web_credits_off' });
+          return;
+        }
+        const wallet = walletFor(req);
+        if (!wallet || wallet.kind !== 'web') {
+          res.status(402).json({ error: 'wallet_required' });
+          return;
+        }
+        const w2 = checkoutWalletLimit.hit(wallet.id);
+        if (w2) return limited(res, w2);
+        await prepareWeb(wallet); // the buyer's address: starter credits before the first purchase
+        const b = (req.body ?? {}) as { packId?: unknown; returnUrl?: unknown };
+        const pack = packById(b.packId, 'stripe');
+        const returnUrl = safeReturnUrl(b.returnUrl);
+        if (!pack || !returnUrl) {
+          res.status(400).json({ error: 'invalid' });
+          return;
+        }
+        if (!(await stripe().configured())) {
+          res.status(503).json({ error: 'checkout_unavailable' });
+          return;
+        }
+        const s = await stripe().createCheckoutSession({ pack, walletId: wallet.id, app, returnUrl });
+        console.log(`[credits] ${app}: checkout ${pack.id} for ${mask(wallet.id)}`);
+        res.status(200).json({ url: s.url });
+      } catch (err) {
+        if (sendError(res, err)) return;
+        console.error('[credits] checkout failed', err instanceof StripeApiError ? `${err.status} ${err.code}` : (err as Error)?.message);
+        res.status(503).json({ error: 'checkout_unavailable' });
+      }
+    },
+
+    /** POST /api/credits/stripe/confirm { sessionId } — the buyer is back from Checkout: credit now (the webhook is the backup). */
+    async confirm(req: ReqLike, res: ResLike) {
+      res.setHeader('Cache-Control', 'no-store');
+      const wait = confirmIpLimit.hit(clientIp(req));
+      if (wait) return limited(res, wait);
+      try {
+        const sessionId = typeof (req.body as { sessionId?: unknown } | undefined)?.sessionId === 'string' ? (req.body as { sessionId: string }).sessionId.trim() : '';
+        if (!SESSION_RE.test(sessionId)) {
+          res.status(400).json({ error: 'invalid' });
+          return;
+        }
+        let session: StripeCheckoutSession;
+        try {
+          session = await stripe().retrieveCheckoutSession(sessionId);
+        } catch (err) {
+          if (err instanceof StripeApiError && (err.status === 404 || err.status === 400)) {
+            res.status(400).json({ error: 'invalid_session' });
+            return;
+          }
+          throw err;
+        }
+        const out = await fulfillSession(session);
+        const wallet = isNativeRequest(req) ? null : walletFor(req);
+        if (out.status === 200 && out.account && wallet?.key !== out.account) {
+          // Paid in another browser: credited to the wallet that started the checkout.
+          res.status(200).json({ ok: true, credited: out.body.credited, alreadyProcessed: out.body.alreadyProcessed, otherWallet: true });
+          return;
+        }
+        if (typeof out.body.balance === 'number') res.setHeader(BALANCE_HEADER, String(out.body.balance));
+        res.status(out.status).json(out.body);
+      } catch (err) {
+        if (sendError(res, err)) return;
+        console.error('[credits] confirm failed', err instanceof StripeApiError ? `${err.status} ${err.code}` : (err as Error)?.message);
+        res.status(503).json({ error: 'credits_unavailable' });
+      }
+    },
+
+    /**
+     * POST /api/credits/stripe/webhook — Stripe events, signature-checked over the RAW body: mount with
+     * express.raw({ type: 'application/json' }) BEFORE any JSON parser. Register it once (any one app).
+     */
+    async webhook(req: ReqLike, res: ResLike) {
+      const raw = req.body;
+      if (!(typeof raw === 'string' || Buffer.isBuffer(raw))) {
+        console.error('[credits] Stripe webhook: mount with express.raw({ type: "application/json" }) before express.json()');
+        res.status(400).json({ error: 'raw_body_required' });
+        return;
+      }
+      const secret = await stripe()
+        .webhookSecret()
+        .catch(() => null);
+      if (!secret) {
+        res.status(503).json({ error: 'webhook_not_configured' });
+        return;
+      }
+      let event: StripeEvent;
+      try {
+        event = verifyStripeSignature(raw, header(req, 'stripe-signature'), secret);
+      } catch (err) {
+        console.warn('[credits] Stripe webhook rejected:', err instanceof StripeApiError ? err.code : 'bad payload');
+        res.status(400).json({ error: 'bad_signature' });
+        return;
+      }
+      try {
+        const what = await handleStripeEvent(event);
+        if (!what.startsWith('ignored')) console.log(`[credits] Stripe ${event.type}: ${what}`);
+        res.status(200).json({ received: true });
+      } catch (err) {
+        console.error('[credits] Stripe webhook processing failed', event.type, (err as Error)?.message);
+        res.status(500).json({ error: 'processing_failed' });
+      }
+    },
   };
 
-  return { packageName: pkg, walletFor, identify, run, balance, creditPurchase, verifyPlay, applyHeaders, sendError, handlers, store };
+  /** Add credits to a wallet by hand (owner top-ups, goodwill). */
+  async function grant(wallet: Wallet, credits: number, reason: string) {
+    if (!Number.isInteger(credits) || credits <= 0) throw new Error('grant: invalid credits');
+    return store.grant(wallet.key, meta(wallet), credits, reason.slice(0, 80), now());
+  }
+
+  return {
+    packageName: pkg,
+    walletFor,
+    identify,
+    run,
+    balance,
+    creditPurchase,
+    verifyPlay,
+    applyHeaders,
+    sendError,
+    handlers,
+    middleware,
+    webEnabled,
+    grant,
+    handleStripeEvent,
+    store,
+  };
 }
 
 export type Credits = ReturnType<typeof createCredits>;

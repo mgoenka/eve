@@ -63,14 +63,17 @@ app.use(
 );
 
 // Body limits: small JSON everywhere; only posting a special carries an
-// image. The Stripe webhook needs the raw body to verify its signature, so
-// the JSON parser skips it (express.raw() on that route reads it).
+// image. The Stripe webhooks (Eve's subscriptions and the AI credits one) need
+// the raw body to verify their signatures, so the JSON parser skips them
+// (express.raw() on each route reads it).
 const jsonSmall = express.json({ limit: '100kb' });
 const jsonImage = express.json({ limit: '6mb' });
 const jsonTiny = express.json({ limit: '8kb', strict: true });
+const RAW_BODY_PATHS = new Set(['/api/stripe/webhook', '/api/credits/stripe/webhook']);
+const TINY_JSON_PATHS = new Set(['/api/credits/purchase', '/api/credits/checkout', '/api/credits/stripe/confirm']);
 app.use((req, res, next) => {
-  if (req.path === '/api/stripe/webhook') return next();
-  if (req.path === '/api/credits/purchase') return jsonTiny(req, res, next);
+  if (RAW_BODY_PATHS.has(req.path)) return next();
+  if (TINY_JSON_PATHS.has(req.path)) return jsonTiny(req, res, next);
   return (req.path === '/api/post-special' ? jsonImage : jsonSmall)(req, res, next);
 });
 
@@ -367,13 +370,15 @@ function refundImages(req: express.Request, n = 1) {
   b.used = Math.max(0, b.used - n);
 }
 
-// ---------- AI credits (Android app only; the website is never metered) ----------
-// Requests from the Play app (user agent MohitGoenkaApp/ + X-MG-App-User) prepay every AI call with
-// credits (server/credits, vendored from app-platform/server-kit; Firestore + Play API via ADC).
+// ---------- AI credits ----------
+// Android app requests (user agent MohitGoenkaApp/ + X-MG-App-User) always prepay every AI call with
+// credits; website requests pay from the shared mg_wallet cookie only while the web credits switch
+// (Firestore aiCreditConfig/web) is on, buying packs through Stripe Checkout. server/credits is
+// vendored from app-platform/server-kit. Firestore, Play API and Secret Manager via ADC.
 // metered() holds a typical estimate (402 when the balance can't cover it), runs the unchanged
 // handler with a per-request meter (server/aiMeter.ts: the text/image helpers, agent tools and
 // Cloud TTS record each call that really ran), then charges the sum. Cache hits record nothing;
-// a failed action (4xx/5xx answer or a throw) is not charged. Website requests skip all of this.
+// a failed action (4xx/5xx answer or a throw) is not charged. Requests that don't pay skip all of this.
 const credits = createCredits({ packageName: 'com.mohitgoenka.eve' });
 
 /** Typical cost of one call in credits (estimates only; the charge uses the real usage). */
@@ -493,13 +498,26 @@ function metered(action: string, estimate: Estimate, handler: AiHandler): expres
   };
 }
 
-// Credits endpoints act only on app requests carrying X-MG-App-User (the kit rate-limits them).
-// Mounted before the /api origin guard: the balance GET may arrive without Origin/Referer.
+// Web wallet cookie (only while web credits are on), before every /api route that may call
+// credits.identify. Mounted before the /api origin guard: the balance GET may arrive without
+// Origin/Referer; it changes nothing but creating a wallet. The kit rate-limits the credits endpoints.
+app.use('/api', (req, res, next) => void credits.middleware(req, res, next));
 app.get('/api/credits/balance', (req, res) => credits.handlers.balance(req, res));
+// JSON bodies for purchase/checkout/confirm: the 8kb strict parser above (TINY_JSON_PATHS).
 app.post('/api/credits/purchase', (req, res) => {
   if (!isAllowedEveOrigin(req)) return res.status(403).json({ error: 'Forbidden' });
   return credits.handlers.purchase(req, res);
 });
+app.post('/api/credits/checkout', (req, res) => {
+  if (!isAllowedEveOrigin(req)) return res.status(403).json({ error: 'Forbidden' });
+  return credits.handlers.checkout(req, res);
+});
+app.post('/api/credits/stripe/confirm', (req, res) => {
+  if (!isAllowedEveOrigin(req)) return res.status(403).json({ error: 'Forbidden' });
+  return credits.handlers.confirm(req, res);
+});
+// Stripe calls this server to server: no Origin check; the Stripe-Signature over the raw body is the auth.
+app.post('/api/credits/stripe/webhook', express.raw({ type: 'application/json', limit: '256kb' }), (req, res) => credits.handlers.webhook(req, res));
 
 // Rate limiting + origin check for AI endpoints.
 // Stripe webhook and Instagram OAuth callbacks are exempt — they are called by

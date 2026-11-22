@@ -2,11 +2,11 @@
 // Storage contract for balances + append-only ledger, and an in-memory implementation
 // (tests and local runs without Firestore). The Firestore one is in firestore-store.ts.
 
-export type LedgerType = 'grant' | 'purchase' | 'charge';
+export type LedgerType = 'grant' | 'purchase' | 'charge' | 'reversal';
 
 export interface LedgerEntry {
   type: LedgerType;
-  /** Signed: + for grants/purchases, − for charges. */
+  /** Signed: + for grants/purchases, − for charges and reversals (refunds, disputes). */
   credits: number;
   balanceAfter: number;
   at: string;
@@ -50,6 +50,8 @@ export interface PurchaseRecord {
   /** Provider-side follow-up done (Play: consumed). Stripe purchases are final when credited. */
   finalized: boolean;
   createdAt: string;
+  /** Credits taken back after a refund or dispute (cumulative). */
+  reversedCredits?: number;
 }
 
 export interface CreditPurchaseInput {
@@ -90,6 +92,26 @@ export interface CreditStore {
   creditPurchase(p: CreditPurchaseInput, now: Date): Promise<{ balance: number; duplicate: boolean; finalized: boolean; account: string }>;
   getPurchase(purchaseKey: string): Promise<PurchaseRecord | null>;
   markFinalized(purchaseKey: string, now: Date): Promise<void>;
+  /** Add credits (owner top-ups, web starter grants). Creates the account (without a starter) if needed. */
+  grant(key: string, meta: AccountMeta, credits: number, reason: string, now: Date): Promise<{ balance: number }>;
+  /**
+   * Count one more starter grant for this address key; true while fewer than `limit` were claimed in the
+   * current window (the window restarts `windowMs` after its first claim).
+   */
+  claimStarter(addressKey: string, limit: number, windowMs: number, now: Date): Promise<boolean>;
+  /**
+   * Take back credits of a refunded or disputed purchase so that, in total, round(credits × fraction) are
+   * reversed (idempotent: repeating an event reverses nothing more). Finds the purchase by its key or a
+   * secondary key ("stripe:<payment intent>"). The balance may go below zero. Null: purchase unknown.
+   */
+  reversePurchase(
+    find: { purchaseKey?: string; secondaryKey?: string },
+    fraction: number,
+    reason: string,
+    now: Date,
+  ): Promise<{ reversed: number; balance: number; account: string } | null>;
+  /** The web credits switch (aiCreditConfig/web.enabled). */
+  webEnabled(): Promise<boolean>;
 }
 
 interface MemAccount {
@@ -111,6 +133,9 @@ export class MemoryCreditStore implements CreditStore {
   readonly accounts = new Map<string, MemAccount>();
   readonly purchases = new Map<string, PurchaseRecord>();
   readonly orders = new Map<string, string>();
+  readonly starterIps = new Map<string, { count: number; windowStart: number }>();
+  /** The web switch for tests. */
+  webSwitch = false;
 
   private ensureSync(key: string, meta: AccountMeta, starter: number, now: Date): { acc: MemAccount; created: boolean } {
     const existing = this.accounts.get(key);
@@ -199,5 +224,42 @@ export class MemoryCreditStore implements CreditStore {
   async markFinalized(purchaseKey: string) {
     const p = this.purchases.get(purchaseKey);
     if (p) p.finalized = true;
+  }
+
+  async grant(key: string, meta: AccountMeta, credits: number, reason: string, now: Date) {
+    const { acc } = this.ensureSync(key, meta, 0, now);
+    acc.balance += credits;
+    acc.totals.granted += credits;
+    acc.ledger.push({ type: 'grant', credits, balanceAfter: acc.balance, at: now.toISOString(), reason });
+    return { balance: acc.balance };
+  }
+
+  async claimStarter(addressKey: string, limit: number, windowMs: number, now: Date) {
+    const t = now.getTime();
+    const cur = this.starterIps.get(addressKey);
+    const fresh = !cur || cur.windowStart + windowMs <= t;
+    const count = fresh ? 0 : cur.count;
+    if (count >= limit) return false;
+    this.starterIps.set(addressKey, { count: count + 1, windowStart: fresh ? t : cur.windowStart });
+    return true;
+  }
+
+  async reversePurchase(find: { purchaseKey?: string; secondaryKey?: string }, fraction: number, reason: string, now: Date) {
+    const key = find.purchaseKey ?? (find.secondaryKey ? this.orders.get(find.secondaryKey) : undefined);
+    const rec = key ? this.purchases.get(key) : undefined;
+    if (!rec) return null;
+    const target = Math.min(rec.credits, Math.max(0, Math.round(rec.credits * Math.min(1, Math.max(0, fraction)))));
+    const delta = target - (rec.reversedCredits ?? 0);
+    const acc = this.accounts.get(rec.account);
+    if (!acc) return null;
+    if (delta <= 0) return { reversed: 0, balance: acc.balance, account: rec.account };
+    rec.reversedCredits = target;
+    acc.balance -= delta;
+    acc.ledger.push({ type: 'reversal', credits: -delta, balanceAfter: acc.balance, at: now.toISOString(), reason, productId: rec.productId, provider: rec.provider, ...(rec.orderId ? { orderId: rec.orderId } : {}) });
+    return { reversed: delta, balance: acc.balance, account: rec.account };
+  }
+
+  async webEnabled() {
+    return this.webSwitch;
   }
 }

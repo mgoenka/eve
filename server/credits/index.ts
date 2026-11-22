@@ -1,6 +1,6 @@
 /* generated from app-platform/server-kit/credits — edit there and re-sync. */
-// Prepaid AI credits for the Play apps. See app-platform/README.md ("AI credits").
-export { createCredits, CreditsError, defaultPayPolicy, isNativeRequest, mask, walletKey } from './credits.ts';
+// Prepaid AI credits: Play in the Android apps, Stripe Checkout on the websites. See app-platform/README.md ("AI credits").
+export { createCredits, CreditsError, defaultPayPolicy, isNativeRequest, mask, readCookie, safeReturnUrl, walletCookie, walletKey } from './credits.ts';
 export type {
   CreditContext,
   CreditPurchaseInput,
@@ -28,6 +28,10 @@ export {
   PAYMENT_PROVIDERS,
   STARTER_CREDITS,
   STRIPE_FEE,
+  STRIPE_TAX_CODE,
+  WEB_MIN_PACK_USD,
+  WEB_STARTER_PER_IP,
+  WEB_SWITCH_DOC,
   WEB_WALLET_COOKIE,
   creditsForPrice,
   netRevenueMicros,
@@ -42,3 +46,5 @@ export type { CreditStore, LedgerEntry } from './store.ts';
 export { FirestoreCreditStore } from './firestore-store.ts';
 export { GooglePlayApi, FakePlayApi, PlayApiError } from './play.ts';
 export type { PlayApi, ProductPurchase } from './play.ts';
+export { FakeStripeApi, SecretSource, StripeApiError, StripeRestApi, formEncode, signStripePayload, verifyStripeSignature, withParams } from './stripe.ts';
+export type { CheckoutInput, StripeApi, StripeCheckoutSession, StripeEvent } from './stripe.ts';

@@ -1,14 +1,16 @@
 /* generated from app-platform/ui-kit — edit there and re-sync. */
 // Prepaid AI credits client. Server side: app-platform/server-kit/credits.
 //
-// Payment goes through a CreditsProvider: Google Play (utils/creditsPlay.ts) inside the Android app.
-// A web checkout provider (Stripe) can be registered later with registerWebCreditsProvider(); it is
-// never used inside the Android app (Play payments policy), whatever is registered.
+// Payment goes through a CreditsProvider: Google Play (utils/creditsPlay.ts) inside the Android app,
+// Stripe Checkout (utils/creditsWeb.ts) on the websites. Web checkout is never used inside the Android
+// app (Play payments policy). On the website the chip and sheet appear only while the server meters the
+// web (its web credits switch is on); otherwise the website behaves exactly as before.
 import { fetchJson, FetchError } from './fetchJson';
 import type { FetchJsonOptions } from './fetchJson';
 import { isNativeApp } from './native';
 import { showToast } from './toastBus';
 import { playCreditsProvider } from './creditsPlay';
+import { webCreditsProvider } from './creditsWeb';
 
 /** Same ids and Play credit counts as server-kit/credits/config.ts (the server is the source of truth; its
  *  /api/credits/balance answer replaces these). Kept here for the rules text and the first paint. */
@@ -35,7 +37,7 @@ export interface CreditsProviderEvents {
   done(): void;
 }
 
-/** A way to pay for credits: Play inside the Android app; a web checkout (Stripe) later on the website. */
+/** A way to pay for credits: Play inside the Android app; Stripe Checkout on the website. */
 export interface CreditsProvider {
   readonly id: 'play' | 'web';
   /** The page has a wallet with this provider (Play: wrapper bridge + app user id). */
@@ -52,15 +54,15 @@ export interface CreditsProvider {
   resume?(): void;
 }
 
-let webProvider: CreditsProvider | null = null;
-/** For the future web checkout. Ignored inside the Android app. */
+let webProvider: CreditsProvider | null | undefined;
+/** Replace the web provider (default: Stripe Checkout, webCreditsProvider); null turns web checkout off. Ignored in the Android app. */
 export function registerWebCreditsProvider(p: CreditsProvider | null): void {
   webProvider = p && p.id === 'web' ? p : null;
 }
 
-/** The provider for this page: Play in the Android app (never web checkout there), else a registered web one. */
+/** The provider for this page: Play in the Android app (never web checkout there), else the web one. */
 export function activeCreditsProvider(): CreditsProvider | null {
-  const p = isNativeApp() ? playCreditsProvider : webProvider;
+  const p = isNativeApp() ? playCreditsProvider : webProvider === undefined ? webCreditsProvider : webProvider;
   try {
     return p && p.enabled() ? p : null;
   } catch {
@@ -73,7 +75,7 @@ export function creditsHeaders(): Record<string, string> {
   return activeCreditsProvider()?.headers() ?? {};
 }
 
-/** True when this page meters AI with credits (today: inside the Android app with a working bridge). */
+/** True when this page can meter AI with credits (Android app with a working bridge, or a *.mohitgoenka.com page). */
 export function creditsEnabled(): boolean {
   return activeCreditsProvider() !== null;
 }
@@ -96,6 +98,10 @@ export interface CreditsState {
   needed: number | null;
   /** Pack id whose purchase is in progress. */
   buying: string | null;
+  /** Web: the server can open Stripe Checkout right now. */
+  checkout: boolean;
+  /** 'play' (Android app) or 'stripe' (website), from the server. */
+  provider: 'play' | 'stripe' | null;
   /** A payment is pending at the provider. */
   pending: boolean;
 }
@@ -111,6 +117,8 @@ let state: CreditsState = {
   needed: null,
   buying: null,
   pending: false,
+  checkout: true,
+  provider: null,
 };
 const listeners = new Set<() => void>();
 function setState(patch: Partial<CreditsState>) {
@@ -134,13 +142,21 @@ function readBalanceHeader(res: Response) {
 export async function refreshCredits(): Promise<void> {
   if (!creditsEnabled()) return;
   try {
-    const r = await fetchJson<{ enforced?: boolean; balance?: number; packs?: CreditsState['packs'] }>(CREDITS_BALANCE_URL, {
+    const r = await fetchJson<{ enforced?: boolean; balance?: number; packs?: CreditsState['packs']; checkout?: boolean; provider?: string }>(CREDITS_BALANCE_URL, {
       headers: creditsHeaders(),
       timeoutMs: 10000,
       retries: 1,
     });
     if (r?.enforced && typeof r.balance === 'number') {
-      setState({ enabled: true, balance: r.balance, ...(Array.isArray(r.packs) && r.packs.length ? { packs: r.packs } : {}) });
+      setState({
+        enabled: true,
+        balance: r.balance,
+        ...(Array.isArray(r.packs) && r.packs.length ? { packs: r.packs } : {}),
+        ...(typeof r.checkout === 'boolean' ? { checkout: r.checkout } : {}),
+        ...(r.provider === 'play' || r.provider === 'stripe' ? { provider: r.provider } : {}),
+      });
+    } else if (r && r.enforced === false && state.enabled) {
+      setState({ enabled: false, sheetOpen: false }); // web switch turned off
     }
   } catch {
     /* keep the last known balance */
@@ -175,6 +191,11 @@ export function closeCreditsSheet(): void {
   setState({ sheetOpen: false });
 }
 
+/** HTTP 402 wallet_required: a web request without the wallet cookie (the balance call mints it). */
+function isWalletRequired(err: unknown): boolean {
+  return err instanceof FetchError && err.status === 402 && (err.body as { error?: unknown } | null)?.error === 'wallet_required';
+}
+
 /** True for the FetchError of an AI call refused for lack of credits (HTTP 402). */
 export function isInsufficientCredits(err: unknown): boolean {
   return err instanceof FetchError && err.status === 402 && (err.body as { error?: unknown } | null)?.error === INSUFFICIENT_CREDITS;
@@ -206,8 +227,8 @@ export async function aiFetchJson<T = unknown>(url: string, options: AiFetchJson
   const headers = new Headers(fetchOptions.headers);
   for (const [k, v] of Object.entries(creditsHeaders())) headers.set(k, v);
   const userHook = fetchOptions.onResponse;
-  try {
-    return await fetchJson<T>(url, {
+  const call = () =>
+    fetchJson<T>(url, {
       ...fetchOptions,
       headers,
       onResponse: (res) => {
@@ -215,6 +236,14 @@ export async function aiFetchJson<T = unknown>(url: string, options: AiFetchJson
         userHook?.(res);
       },
     });
+  try {
+    try {
+      return await call();
+    } catch (err) {
+      if (!isWalletRequired(err)) throw err;
+      await refreshCredits(); // sets the wallet cookie (and shows the chip), then try once more
+      return await call();
+    }
   } catch (err) {
     if (isInsufficientCredits(err)) {
       const body = (err as FetchError).body as { balance?: unknown; needed?: unknown };

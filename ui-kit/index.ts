@@ -84,4 +84,5 @@ export {
 } from './utils/credits';
 export type { AiFetchJsonOptions, CreditsProvider, CreditsProviderEvents, CreditsState } from './utils/credits';
 export { playCreditsProvider, getAppUserId, nativeBridge } from './utils/creditsPlay';
+export { webCreditsProvider, CREDITS_CHECKOUT_URL, CREDITS_CONFIRM_URL } from './utils/creditsWeb';
 export type { NativeBridge, NativeBilling, NativeProduct, NativePurchase } from './utils/creditsPlay';
