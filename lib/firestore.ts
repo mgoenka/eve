@@ -12,6 +12,8 @@ let dbPromise: Promise<Firestore | null> | null = null;
 function getDb(): Promise<Firestore | null> {
   if (dbPromise) return dbPromise;
   dbPromise = (async () => {
+    // Local testing without touching the production database.
+    if (process.env.EVE_MEMORY_STORE === '1') return null;
     try {
       const { Firestore } = await import('@google-cloud/firestore');
       // Cloud Run automatically authenticates via the service account.
@@ -42,6 +44,8 @@ export interface PostedSpecialDoc {
   views?: number;
   planInclusions?: number;
   clickThroughs?: number;
+  /** sha256 of the owner key in the publishing browser's httpOnly cookie (lets that device delete it). Never sent to clients. */
+  ownerKeyHash?: string;
 }
 
 export interface RestaurantBrandDoc {
@@ -56,6 +60,8 @@ export interface RestaurantBrandDoc {
   instagramBusinessAccountId?: string;
   /** sha256 of the publish key held in the connecting browser's httpOnly cookie. */
   instagramPublishKeyHash?: string;
+  /** sha256 of the owner key of the device that connected Instagram (account deletion). */
+  ownerKeyHash?: string;
   stripeCustomerId?: string;
   stripeSubscriptionId?: string;
   subscriptionStatus?: 'active' | 'past_due' | 'canceled' | 'trialing' | 'unpaid' | null;
@@ -69,19 +75,24 @@ const memoryBrands = new Map<string, RestaurantBrandDoc>();
 
 // ---------- Specials (the dining index) ----------
 
+/** Specials as they leave this module: never with the owner key hash. */
+function publicSpecial({ ownerKeyHash: _owner, ...s }: PostedSpecialDoc): PostedSpecialDoc {
+  return s;
+}
+
 export async function listSpecials(limit = 50): Promise<PostedSpecialDoc[]> {
   const d = await getDb();
-  if (!d) return memorySpecials.slice(-limit).reverse();
+  if (!d) return memorySpecials.slice(-limit).reverse().map(publicSpecial);
   try {
     const snap = await d
       .collection('specials')
       .orderBy('postedAtISO', 'desc')
       .limit(limit)
       .get();
-    return snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as PostedSpecialDoc) }));
+    return snap.docs.map((doc) => publicSpecial({ id: doc.id, ...(doc.data() as PostedSpecialDoc) }));
   } catch (err: any) {
     console.warn('[firestore] listSpecials failed:', err?.message || err);
-    return memorySpecials.slice(-limit).reverse();
+    return memorySpecials.slice(-limit).reverse().map(publicSpecial);
   }
 }
 
@@ -189,6 +200,52 @@ export async function saveBrand(id: string, data: Partial<RestaurantBrandDoc>): 
   } catch (err: any) {
     console.warn('[firestore] saveBrand failed:', err?.message || err);
   }
+}
+
+// ---------- Account deletion ----------
+
+export interface DeletedCounts {
+  specials: number;
+  brands: number;
+}
+
+/**
+ * Deletes everything linked to one device's owner key: the specials it published
+ * (dish, caption, AI image, metrics) and any restaurant brand doc it connected
+ * (Instagram token, account id, publish key hash). Throws if the database fails,
+ * so the caller never reports a deletion that didn't happen.
+ */
+export async function deleteOwnedData(ownerKeyHash: string): Promise<DeletedCounts> {
+  const counts: DeletedCounts = { specials: 0, brands: 0 };
+  if (!/^[a-f0-9]{64}$/.test(ownerKeyHash)) return counts;
+  // In-memory copies (local dev, or Firestore write fallbacks).
+  for (let i = memorySpecials.length - 1; i >= 0; i--) {
+    if (memorySpecials[i].ownerKeyHash === ownerKeyHash) {
+      memorySpecials.splice(i, 1);
+      counts.specials++;
+    }
+  }
+  for (const [id, b] of memoryBrands) {
+    if (b.ownerKeyHash === ownerKeyHash) {
+      memoryBrands.delete(id);
+      counts.brands++;
+    }
+  }
+  const d = await getDb();
+  if (!d) return counts;
+  for (const name of ['specials', 'brands'] as const) {
+    // Batches of up to 400 deletes until nothing owned is left.
+    for (;;) {
+      const snap = await d.collection(name).where('ownerKeyHash', '==', ownerKeyHash).limit(400).get();
+      if (snap.empty) break;
+      const batch = d.batch();
+      snap.docs.forEach((doc) => batch.delete(doc.ref));
+      await batch.commit();
+      counts[name] += snap.size;
+      if (snap.size < 400) break;
+    }
+  }
+  return counts;
 }
 
 // ---------- Analytics ----------

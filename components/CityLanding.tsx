@@ -2,8 +2,8 @@ import { useEffect } from 'react';
 import { Sparkles, ArrowRight, MapPin, Utensils } from 'lucide-react';
 import { EveLogo } from './EveLogo';
 import type { CityContent } from '../data/cities';
-import { useOpenRules } from './RulesContext';
-import { AppHeader } from '../ui-kit';
+import { useOpenRules, useOpenSettings } from './RulesContext';
+import { AppHeader, isNativeApp } from '../ui-kit';
 
 interface Props {
   city: CityContent;
@@ -11,7 +11,10 @@ interface Props {
 }
 
 export function CityLanding({ city, onPlanInCity }: Props) {
+  // No pricing / web-purchase entry points inside the Android app (Play payments policy).
+  const native = isNativeApp();
   const openRules = useOpenRules();
+  const openSettings = useOpenSettings();
   useEffect(() => {
     document.title = city.title;
     const meta = document.querySelector<HTMLMetaElement>('meta[name="description"]');
@@ -27,7 +30,9 @@ export function CityLanding({ city, onPlanInCity }: Props) {
         titleLabel="Eve home"
         onRules={openRules}
         rulesLabel="How Eve works"
+        onSettings={openSettings}
         right={
+          native ? undefined : (
           <>
           <a
             href="/pricing"
@@ -38,6 +43,7 @@ export function CityLanding({ city, onPlanInCity }: Props) {
             Pricing
           </a>
           </>
+          )
         }
       />
 
@@ -122,9 +128,14 @@ export function CityLanding({ city, onPlanInCity }: Props) {
         Yours, quietly. <span className="text-eve-cream/40 not-italic">·</span>{' '}
         <a href="/" className="hover:text-eve-cream">Eve home</a>{' '}
         <span className="text-eve-cream/40">·</span>{' '}
-        <a href="/restaurant" className="hover:text-eve-cream">For restaurants</a>{' '}
-        <span className="text-eve-cream/40">·</span>{' '}
-        <a href="/pricing" className="hover:text-eve-cream">Pricing</a>
+        <a href="/restaurant" className="hover:text-eve-cream">For restaurants</a>
+        {!native && (
+          <>
+            {' '}
+            <span className="text-eve-cream/40">·</span>{' '}
+            <a href="/pricing" className="hover:text-eve-cream">Pricing</a>
+          </>
+        )}
       </footer>
     </div>
   );

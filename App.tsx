@@ -2,7 +2,8 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { DinerView } from './components/DinerView';
 import { findCity, CITIES } from './data/cities';
 import { RulesContext } from './components/RulesContext';
-import { RulesOverlay, lazyWithRetry, type RuleSection } from './ui-kit';
+import { RulesOverlay, aiContentRuleSection, lazyWithRetry, type RuleSection } from './ui-kit';
+import { DataPage, EveSettings } from './components/AccountData';
 
 // Secondary screens load on demand so the planner opens fast.
 const RestaurantView = lazyWithRetry(() =>
@@ -60,6 +61,19 @@ const APP_RULES: RuleSection[] = [
       'Publish to Eve diners features your special to people planning evenings nearby.',
     ],
   },
+  aiContentRuleSection(
+    'evening plans, Eve’s lines and replies, stop pictures and restaurant content packs',
+    'on each stop card, next to what Eve says, under the plan title and on each content card'
+  ),
+  {
+    title: 'Your data',
+    icon: '🔒',
+    items: [
+      'There is no sign-in. Recent evenings and your restaurant profile stay on this device.',
+      'Specials you publish to Eve diners, and an Instagram connection, are stored on Eve’s server and linked to this device.',
+      'Settings (the gear) → Delete my account and data removes all of it and resets Eve on this device.',
+    ],
+  },
   {
     title: 'Keys',
     icon: '⌨️',
@@ -71,6 +85,7 @@ type Route =
   | { kind: 'diner' }
   | { kind: 'restaurant' }
   | { kind: 'pricing' }
+  | { kind: 'data' }
   | { kind: 'city'; slug: string };
 
 const CITY_SLUGS = new Set(CITIES.map((c) => c.slug));
@@ -80,6 +95,7 @@ function getRoute(): Route {
   const path = window.location.pathname.replace(/\/+$/, '');
   if (path.startsWith('/restaurant')) return { kind: 'restaurant' };
   if (path === '/pricing') return { kind: 'pricing' };
+  if (path === '/delete-data') return { kind: 'data' };
   const slug = path.replace(/^\//, '');
   if (CITY_SLUGS.has(slug)) return { kind: 'city', slug };
   return { kind: 'diner' };
@@ -96,9 +112,11 @@ function ScreenFallback() {
 export default function App() {
   const [route, setRoute] = useState<Route>(getRoute());
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const openRules = useCallback(() => setRulesOpen(true), []);
   const closeRules = useCallback(() => setRulesOpen(false), []);
-  const rulesCtx = useMemo(() => ({ open: openRules }), [openRules]);
+  const openSettings = useCallback(() => setSettingsOpen(true), []);
+  const rulesCtx = useMemo(() => ({ open: openRules, openSettings }), [openRules, openSettings]);
 
   useEffect(() => {
     const onPop = () => setRoute(getRoute());
@@ -122,6 +140,7 @@ export default function App() {
   useEffect(() => {
     if (route.kind === 'restaurant') document.title = 'Eve · For Restaurants';
     else if (route.kind === 'pricing') document.title = 'Eve · Pricing';
+    else if (route.kind === 'data') document.title = 'Eve · Delete my account and data';
     else if (route.kind === 'city') {
       const c = findCity(route.slug);
       document.title = c?.title || 'Eve · Yours, quietly';
@@ -140,6 +159,8 @@ export default function App() {
     screen = <RestaurantView onSwitchToDiner={() => navigate('diner')} />;
   } else if (route.kind === 'pricing') {
     screen = <PricingPage onBack={() => navigate('diner')} />;
+  } else if (route.kind === 'data') {
+    screen = <DataPage onBack={() => navigate('diner')} />;
   } else if (city) {
     screen = (
       <CityLanding
@@ -162,6 +183,7 @@ export default function App() {
         <Suspense fallback={<ScreenFallback />}>{screen}</Suspense>
       </div>
       {rulesOpen && <RulesOverlay appName="Eve" subtitle="How Eve works" sections={APP_RULES} onClose={closeRules} />}
+      <EveSettings open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </RulesContext.Provider>
   );
 }

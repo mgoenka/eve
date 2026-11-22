@@ -5,8 +5,8 @@ import type { Cuisine, ContentPack, RestaurantBrand } from '../types';
 import { generateContentPack, postSpecial, synthesize, suggestSpecial } from '../services/eveService';
 import type { SuggestSpecialResponse } from '../services/eveService';
 import { EveLogo } from './EveLogo';
-import { useOpenRules } from './RulesContext';
-import { AppHeader, IconButton } from '../ui-kit';
+import { useOpenRules, useOpenSettings } from './RulesContext';
+import { AppHeader, IconButton, ReportContentButton, isNativeApp } from '../ui-kit';
 
 interface Props {
   onSwitchToDiner: () => void;
@@ -53,6 +53,19 @@ function emailParagraphs(html: string): string[] {
   }
 }
 
+/** What the user saw of Eve's dish suggestion, for a content report. */
+function suggestionText(s: SuggestSpecialResponse): string {
+  const alts = (s.alternatives || []).map((a) => `${a.dishName}: ${a.rationale}`).join('; ');
+  return [
+    `Suggested special: ${s.dishName}`,
+    s.dishDescription,
+    `Why: ${s.rationale}`,
+    alts && `Alternatives: ${alts}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
 function downloadDataUrl(filename: string, mime: string, base64: string) {
   const link = document.createElement('a');
   link.href = `data:${mime};base64,${base64}`;
@@ -85,6 +98,7 @@ function ghostClass(value: string, ghost: string): string {
 
 export function RestaurantView({ onSwitchToDiner }: Props) {
   const openRules = useOpenRules();
+  const openSettings = useOpenSettings();
   const stored = loadBrand();
   const seed = DEMO_RESTAURANTS[0];
 
@@ -110,6 +124,9 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
   // Instagram connection state — pulled from server brand doc.
   const [igConnected, setIgConnected] = useState<boolean>(false);
   const [igPublishing, setIgPublishing] = useState<boolean>(false);
+  // "Connect IG" only when the server can complete the Meta OAuth, and not in
+  // the Android app (Facebook login doesn't run inside a WebView).
+  const [igAvailable, setIgAvailable] = useState<boolean>(false);
 
   // Stable brand id: slugified "name-city"
   const brandId = `${(name || 'eve').toLowerCase()}-${(city || 'brand').toLowerCase()}`
@@ -125,8 +142,9 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
     (async () => {
       try {
         const res = await fetch(`/api/restaurant/brand/${encodeURIComponent(brandId)}`);
-        const data = (await res.json()) as { brand?: any };
+        const data = (await res.json()) as { brand?: any; instagramAvailable?: boolean };
         if (cancelled) return;
+        setIgAvailable(!!data.instagramAvailable && !isNativeApp());
         // Server brand existence implies the IG token is on the server side.
         // We expose only a boolean to the client.
         if (data.brand?.igConnected) setIgConnected(true);
@@ -383,6 +401,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
         titleLabel="Eve · For Restaurants"
         onRules={openRules}
         rulesLabel="How Eve works"
+        onSettings={openSettings}
         right={
           <>
           <IconButton
@@ -576,6 +595,15 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                     ))}
                   </>
                 )}
+                <ReportContentButton
+                  app="eve"
+                  kind="suggestion"
+                  variant="link"
+                  label="Report"
+                  className="ml-1 align-middle not-italic"
+                  content={() => suggestionText(suggestion)}
+                  contentKey={`${suggestion.dishName}|${suggestion.rationale}`}
+                />
               </p>
             )}
 
@@ -655,8 +683,18 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
             <section className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur overflow-hidden animate-fade-in-up">
               <header className="px-5 py-3 flex items-center justify-between border-b border-white/5">
                 <span className="text-[10px] tracking-wide text-eve-gold/80 italic font-serif">Instagram post</span>
-                <div className="flex gap-1">
-                  {!igConnected && (
+                <div className="flex items-center gap-1">
+                  <ReportContentButton
+                    app="eve"
+                    kind="post"
+                    className="-my-1.5"
+                    label="Report this Instagram post"
+                    content={() =>
+                      `Instagram post for ${pack.dishName} (${name}, ${city})\nCaption: ${pack.instagramPost.caption}\nHashtags: ${pack.instagramPost.hashtags.map((h) => '#' + h).join(' ')}${pack.instagramPost.imageData ? '\nImage: AI-generated photo of the dish' : ''}`
+                    }
+                    contentKey={`post|${pack.dishName}|${pack.instagramPost.caption}`}
+                  />
+                  {!igConnected && igAvailable && (
                     <a
                       href={`/api/auth/instagram/start?brandId=${encodeURIComponent(brandId)}`}
                       className="px-3 py-1 rounded-full bg-white/5 hover:bg-white/10 text-[10px] font-bold tracking-wide uppercase text-eve-cream/85 border border-white/15 hover:border-eve-gold/45 inline-flex items-center gap-1"
@@ -738,12 +776,26 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
             <section className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur overflow-hidden animate-fade-in-up">
               <header className="px-5 py-3 flex items-center justify-between border-b border-white/5">
                 <span className="text-[10px] tracking-wide text-eve-gold/80 italic font-serif">15-sec Reel · 3 scenes + voiceover</span>
+                <div className="flex items-center gap-1">
+                <ReportContentButton
+                  app="eve"
+                  kind="reel"
+                  className="-my-1.5"
+                  label="Report this Reel"
+                  content={() =>
+                    `Reel for ${pack.dishName} (${name}, ${city})\n${pack.reel.scenes
+                      .map((sc, i) => `Scene ${i + 1}: ${sc.description} / "${sc.voiceover}"${sc.imageData ? ' (AI image)' : ''}`)
+                      .join('\n')}\nVoiceover: ${pack.reel.fullVoiceoverScript}`
+                  }
+                  contentKey={`reel|${pack.dishName}|${pack.reel.fullVoiceoverScript}`}
+                />
                 <button
                   onClick={() => copyToClipboard('reel', pack.reel.fullVoiceoverScript)}
                   className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 text-[10px] font-semibold tracking-wide uppercase text-eve-cream/70 inline-flex items-center gap-1"
                 >
                   {copied === 'reel' ? <Check size={10} /> : <Copy size={10} />} script
                 </button>
+                </div>
               </header>
               <div className="grid grid-cols-3 gap-px bg-white/5">
                 {pack.reel.scenes.map((sc, i) => (
@@ -781,6 +833,17 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
             <section className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur overflow-hidden animate-fade-in-up">
               <header className="px-5 py-3 flex items-center justify-between border-b border-white/5">
                 <span className="text-[10px] tracking-wide text-eve-gold/80 italic font-serif">Menu card</span>
+                <div className="flex items-center gap-1">
+                <ReportContentButton
+                  app="eve"
+                  kind="menu"
+                  className="-my-1.5"
+                  label="Report this menu card"
+                  content={() =>
+                    `Menu card (${name}, ${city}): ${pack.menuCard.name}${pack.menuCard.suggestedPrice ? ` ${pack.menuCard.suggestedPrice}` : ''}\n${pack.menuCard.description}\nTags: ${pack.menuCard.allergenTags.join(', ')}`
+                  }
+                  contentKey={`menu|${pack.menuCard.name}|${pack.menuCard.description}`}
+                />
                 <button
                   onClick={() =>
                     downloadText(
@@ -792,6 +855,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                 >
                   <Download size={10} /> txt
                 </button>
+                </div>
               </header>
               <div className="p-6">
                 <div className="flex items-baseline justify-between mb-3">
@@ -817,6 +881,17 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
             <section className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur overflow-hidden animate-fade-in-up">
               <header className="px-5 py-3 flex items-center justify-between border-b border-white/5">
                 <span className="text-[10px] tracking-wide text-eve-gold/80 italic font-serif">Email + SMS</span>
+                <div className="flex items-center gap-1">
+                <ReportContentButton
+                  app="eve"
+                  kind="email"
+                  className="-my-1.5"
+                  label="Report this email and SMS"
+                  content={() =>
+                    `Email (${name}, ${city}) subject: ${pack.emailBlast.subject}\n${emailParagraphs(pack.emailBlast.bodyHtml).join('\n')}\nSMS: ${pack.smsBlast}`
+                  }
+                  contentKey={`email|${pack.emailBlast.subject}|${pack.smsBlast}`}
+                />
                 <button
                   onClick={() =>
                     copyToClipboard(
@@ -828,6 +903,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                 >
                   {copied === 'email' ? <Check size={10} /> : <Copy size={10} />} all
                 </button>
+                </div>
               </header>
               <div className="p-5 space-y-4">
                 <div>

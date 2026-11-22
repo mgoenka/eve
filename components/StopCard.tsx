@@ -3,6 +3,7 @@ import { MapPin, Clock, Footprints, Sparkles, ExternalLink, BookOpen, RotateCcw 
 import type { ExperienceStop, StopKind } from '../types';
 import { STOP_KINDS } from '../constants';
 import { buildReservationLinks } from '../lib/reservations';
+import { ReportContentButton } from '../ui-kit';
 
 interface Props {
   stop: ExperienceStop;
@@ -201,6 +202,20 @@ export function StopCard({ stop, index, city, whenISO, startTime, party, highlig
               Eve Original
             </span>
           )}
+        </div>
+        {/* Report this stop (AI venue text + AI painting). */}
+        <div className="absolute top-2.5 right-2.5 z-10 rounded-full bg-eve-ink/75 backdrop-blur">
+          <ReportContentButton
+            app="eve"
+            kind="stop"
+            label={`Report stop ${index + 1}`}
+            content={() =>
+              `Stop ${index + 1}: ${stop.name} (${stop.kind}, ${stop.approxArrival})\n${stop.oneLineVibe}\n${stop.whyThisFits}${
+                stop.signatureItem ? `\nOrder or try: ${stop.signatureItem}` : ''
+              }${stop.imageData ? `\nImage: AI-painted scene of ${stop.name}` : ''}`
+            }
+            contentKey={`${stop.name}|${stop.oneLineVibe}|${stop.imageData ? stop.imageData.length : 0}`}
+          />
         </div>
         <div className="absolute bottom-3 right-3 px-2.5 py-1 rounded-full bg-eve-ink/85 backdrop-blur text-[11px] font-semibold tracking-wide text-eve-cream/95 inline-flex items-center gap-1 z-10">
           <Clock size={11} />

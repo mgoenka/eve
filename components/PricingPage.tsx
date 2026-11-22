@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Check, Sparkles, Loader2 } from 'lucide-react';
 import { EveLogo } from './EveLogo';
-import { useOpenRules } from './RulesContext';
-import { AppHeader } from '../ui-kit';
+import { useOpenRules, useOpenSettings } from './RulesContext';
+import { AppHeader, isNativeApp } from '../ui-kit';
 
 const RESTAURANT_FEATURES = [
   'Daily AI content pack — Instagram, Reel, menu card, email, SMS',
@@ -10,13 +10,13 @@ const RESTAURANT_FEATURES = [
   'One-click publish to Eve diners — featured in the local index',
   'Reservation deep-links from Eve\u2019s plans (OpenTable, Resy, Tock)',
   'Multi-day analytics — views, plan inclusions, click-throughs',
-  'Unlimited regenerations · iterate until on-brand',
+  'Regenerate until it’s on-brand · up to 40 AI images an hour (4 per pack)',
   'Dish suggestions mined from your real reviews',
   'Cancel anytime',
 ];
 
 const DINER_FEATURES = [
-  'Unlimited evening plans',
+  'Plan as many evenings as you like · Eve paints up to 40 stop cards an hour',
   'Save plans, share by link, replan in one tap',
   'Priority access to new venues + city expansions',
   'Multi-stop walk-throughs with Eve\u2019s voice',
@@ -30,10 +30,13 @@ interface Props {
 
 export function PricingPage({ onBack }: Props) {
   const openRules = useOpenRules();
+  const openSettings = useOpenSettings();
   useEffect(() => {
     document.title = 'Eve · Pricing';
   }, []);
 
+  // Google Play payments policy: no web checkout or prices inside the Android app.
+  const native = isNativeApp();
   const [loadingTier, setLoadingTier] = useState<'restaurant' | 'diner' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -66,6 +69,7 @@ export function PricingPage({ onBack }: Props) {
         titleLabel="Eve home"
         onRules={openRules}
         rulesLabel="How Eve works"
+        onSettings={openSettings}
         right={
           <>
           <button
@@ -80,6 +84,23 @@ export function PricingPage({ onBack }: Props) {
         }
       />
 
+      {native ? (
+        <main className="flex-1 max-w-xl mx-auto w-full px-4 sm:px-6 py-12 sm:py-16 text-center">
+          <h1 className="font-header text-3xl md:text-4xl leading-tight mb-3 text-eve-cream">
+            Plans aren’t available in the app
+          </h1>
+          <p className="text-eve-cream/70 text-base leading-relaxed mb-7">
+            Everything in Eve works here for free: plan evenings, talk to Eve, refine and share plans, and make restaurant content packs. Eve paints up to 40 pictures an hour.
+          </p>
+          <button
+            onClick={onBack}
+            className="inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl font-bold text-base bg-eve-ink-soft text-eve-gold border border-eve-gold/25 hover:bg-mg-surface-2 hover:border-eve-gold/45 transition-all shadow-lg shadow-eve-gold/15"
+          >
+            <Sparkles size={16} />
+            Plan an evening
+          </button>
+        </main>
+      ) : (
       <main className="flex-1 max-w-5xl mx-auto w-full px-4 sm:px-6 py-8 sm:py-10 md:py-14">
         <div className="text-center mb-10 md:mb-14">
           <p className="text-[12px] tracking-[0.4em] uppercase text-eve-gold/85 mb-3 font-header font-semibold">
@@ -200,7 +221,7 @@ export function PricingPage({ onBack }: Props) {
             </details>
             <details className="rounded-2xl bg-white/[0.03] border border-white/10 px-5 py-4 group">
               <summary className="cursor-pointer text-eve-cream/95 font-medium text-sm">Do you charge per content pack generated?</summary>
-              <p className="mt-2 text-eve-cream/70 text-sm leading-relaxed">No. $99 covers unlimited regenerations every month, on every location. Make 30 versions of tonight’s dish until one feels right.</p>
+              <p className="mt-2 text-eve-cream/70 text-sm leading-relaxed">No. $99 covers your content packs every month, on every location. Each pack paints 4 images and Eve makes up to 40 images an hour, so you can regenerate tonight’s dish up to 10 times an hour until it feels right.</p>
             </details>
             <details className="rounded-2xl bg-white/[0.03] border border-white/10 px-5 py-4 group">
               <summary className="cursor-pointer text-eve-cream/95 font-medium text-sm">Can I cancel anytime?</summary>
@@ -213,6 +234,7 @@ export function PricingPage({ onBack }: Props) {
           </div>
         </section>
       </main>
+      )}
 
       <footer className="text-center py-8 px-6 text-[11px] text-white/55 italic font-serif">
         Yours, quietly. <span className="text-eve-cream/40 not-italic">·</span>{' '}

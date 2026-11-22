@@ -63,8 +63,8 @@ import {
 import type { SavedEvening } from '../services/savedEvenings';
 import { StopCard } from './StopCard';
 import { EveLogo } from './EveLogo';
-import { useOpenRules } from './RulesContext';
-import { AppHeader, IconButton, shareOrCopy, useToast } from '../ui-kit';
+import { useOpenRules, useOpenSettings } from './RulesContext';
+import { AppHeader, IconButton, ReportContentButton, shareOrCopy, useToast } from '../ui-kit';
 
 interface Props {
   onSwitchToRestaurant: () => void;
@@ -75,7 +75,11 @@ type Phase = 'input' | 'forging' | 'ready';
 interface ChatMessage {
   role: 'user' | 'eve';
   text: string;
+  /** Eve's reply came from the AI (not one of the app's own fallback lines). */
+  ai?: boolean;
 }
+
+const AVATAR_REPORT = 'Image: AI-painted portrait of Eve (Gemini)';
 
 const SURPRISE_VIBES: Vibe[] = ['date_night', 'casual', 'celebrating', 'friends'];
 const SURPRISE_FREETEXT = [
@@ -206,6 +210,7 @@ function timeAgo(ts: number): string {
 
 export function DinerView({ onSwitchToRestaurant }: Props) {
   const openRules = useOpenRules();
+  const openSettings = useOpenSettings();
   const toast = useToast();
   const initial = readURLParams();
 
@@ -1502,7 +1507,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
         budgetUSD: budgetPerPerson * party,
       });
 
-      setChatHistory((h) => [...h, { role: 'eve', text: result.spokenReply }]);
+      setChatHistory((h) => [...h, { role: 'eve', text: result.spokenReply, ai: true }]);
       if (result.spokenReply) speakAsEve(result.spokenReply);
 
       if (result.stops?.length) {
@@ -1663,6 +1668,18 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
     return -1;
   })();
 
+  // What the user sees of the plan, for a content report (the kit trims to 1200 chars).
+  const planReportText = () =>
+    [
+      `Plan: ${planTitle} (${city}, ${formatDate(whenISO)})`,
+      ...stops.map((s, i) => `${i + 1}. ${s.name} (${s.kind}, ${s.approxArrival}): ${s.oneLineVibe} ${s.whyThisFits}${s.signatureItem ? ` Order: ${s.signatureItem}.` : ''}`),
+      story
+        ? `Story: ${[story.opening, story.atStop1, story.transition1to2, story.atStop2, story.transition2to3, story.atStop3, story.closing].filter(Boolean).join(' ')}`
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
   const sharePlan = useCallback(async () => {
     const url = buildShareURL({
       city,
@@ -1734,6 +1751,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           titleLabel="Eve home"
           onRules={openRules}
           rulesLabel="How Eve works"
+          onSettings={openSettings}
           right={
             <>
             {muted ? (
@@ -1809,6 +1827,9 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                       speaking
                     </span>
                   )}
+                  <div className="absolute -right-9 bottom-0">
+                    <ReportContentButton app="eve" kind="image" label="Report Eve’s portrait" content={AVATAR_REPORT} />
+                  </div>
                 </div>
               </div>
             )}
@@ -1895,7 +1916,10 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           )}
 
           {eveIntroText && !voiceListening && !parsing && (
-            <div className="max-w-xl mx-auto mb-5 px-4 py-3 rounded-2xl border border-eve-gold/30 bg-eve-gold/5 text-center animate-fade-in">
+            <div className="relative max-w-xl mx-auto mb-5 px-9 py-3 rounded-2xl border border-eve-gold/30 bg-eve-gold/5 text-center animate-fade-in">
+              <div className="absolute top-1 right-1">
+                <ReportContentButton app="eve" kind="chat" label="Report what Eve said" content={`Eve says: "${eveIntroText}"`} />
+              </div>
               <p className="text-[11px] tracking-wide text-eve-gold/80 mb-1 italic font-serif inline-flex items-center gap-1.5">
                 {eveSpeaking && (
                   <span className="w-1.5 h-1.5 rounded-full bg-eve-gold animate-pulse" />
@@ -2257,6 +2281,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
         titleLabel="Start a new evening"
         onRules={openRules}
         rulesLabel="How Eve works"
+        onSettings={openSettings}
         right={
           <>
           {phase === 'ready' && stops.length > 0 && (
@@ -2325,6 +2350,18 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           <p className="mt-2 text-eve-cream/55 text-sm italic font-serif">
             {city} · {formatDate(whenISO)}
           </p>
+          {phase === 'ready' && stops.length > 0 && (
+            <div className="mt-1 flex justify-center">
+              <ReportContentButton
+                app="eve"
+                kind="plan"
+                variant="link"
+                label="Report this plan"
+                content={planReportText}
+                contentKey={`${planTitle}|${stops.map((s) => s.name).join('|')}|${story?.opening || ''}`}
+              />
+            </div>
+          )}
           {phase === 'forging' && loadingMessage && (
             <div className="mt-4 mx-auto inline-flex items-center gap-2.5 px-5 py-2.5 rounded-xl bg-eve-ink-soft border border-eve-gold/25 text-eve-gold shadow-lg shadow-eve-gold/10 max-w-2xl">
               <Loader2 size={16} className="animate-spin flex-shrink-0" />
@@ -2350,7 +2387,15 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
         </div>
 
         {(eveIntroText || eveOutroText) && (
-          <div className="max-w-2xl mx-auto mb-8 px-5 py-4 rounded-2xl bg-gradient-to-br from-eve-rose/10 to-eve-plum/10 border border-eve-gold/25 animate-fade-in">
+          <div className="relative max-w-2xl mx-auto mb-8 pl-5 pr-10 py-4 rounded-2xl bg-gradient-to-br from-eve-rose/10 to-eve-plum/10 border border-eve-gold/25 animate-fade-in">
+            <div className="absolute top-1.5 right-1.5">
+              <ReportContentButton
+                app="eve"
+                kind="chat"
+                label="Report what Eve said"
+                content={`Eve says: "${eveOutroText || eveIntroText}"${eveAvatarUrl ? `\n${AVATAR_REPORT}` : ''}`}
+              />
+            </div>
             <div className="flex items-start gap-4">
               {eveAvatarUrl && (
                 <div
@@ -2571,7 +2616,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
               >
                 {playing ? <Pause size={18} /> : <Play size={18} className="ml-0.5" />}
               </button>
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <p className="text-[11px] text-eve-gold/80 mb-0.5 italic font-serif">
                   Eve narrates your evening
                 </p>
@@ -2579,6 +2624,9 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                   {narrationText_}
                 </p>
               </div>
+              {narrationText_ && (
+                <ReportContentButton app="eve" kind="narration" label="Report the narration" content={narrationText_} />
+              )}
             </div>
           </div>
         )}
@@ -2589,18 +2637,27 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           </p>
           {chatHistory.length > 0 && (
             <div className="space-y-2 mb-3 max-h-64 overflow-y-auto">
-              {chatHistory.map((m, i) => (
-                <div
-                  key={i}
-                  className={`px-4 py-3 rounded-2xl text-[14px] leading-relaxed ${
-                    m.role === 'user'
-                      ? 'bg-white/[0.06] text-eve-cream ml-8 text-right'
-                      : 'bg-eve-rose/10 border border-eve-rose/20 text-eve-cream/95 mr-8 italic font-serif'
-                  }`}
-                >
-                  {m.text}
-                </div>
-              ))}
+              {chatHistory.map((m, i) =>
+                m.role === 'eve' && m.ai ? (
+                  <div key={i} className="flex items-start gap-1">
+                    <div className="flex-1 min-w-0 px-4 py-3 rounded-2xl text-[14px] leading-relaxed bg-eve-rose/10 border border-eve-rose/20 text-eve-cream/95 italic font-serif">
+                      {m.text}
+                    </div>
+                    <ReportContentButton app="eve" kind="chat" label="Report Eve’s reply" content={`Eve replied: "${m.text}"`} className="mt-1.5" />
+                  </div>
+                ) : (
+                  <div
+                    key={i}
+                    className={`px-4 py-3 rounded-2xl text-[14px] leading-relaxed ${
+                      m.role === 'user'
+                        ? 'bg-white/[0.06] text-eve-cream ml-8 text-right'
+                        : 'bg-eve-rose/10 border border-eve-rose/20 text-eve-cream/95 mr-8 italic font-serif'
+                    }`}
+                  >
+                    {m.text}
+                  </div>
+                )
+              )}
             </div>
           )}
           <div className="flex gap-2">

@@ -27,7 +27,8 @@ app.disable('x-powered-by');
 app.set('trust proxy', 1);
 app.use(compression());
 // Security headers. CSP: everything is same-origin except the Unsplash
-// placeholder photos and the Google Fonts used by the static pitch deck.
+// placeholder photos, the Google Fonts used by the static pitch deck and the
+// AI-content report request to mohitgoenka.com (kit ReportContentButton).
 // AI images and TTS audio arrive as data: URLs. Stripe Checkout, Maps,
 // OpenTable/Resy/Tock and Instagram are plain navigations (no scripts).
 app.use(
@@ -41,7 +42,7 @@ app.use(
         'font-src': ["'self'", 'https://fonts.gstatic.com'],
         'img-src': ["'self'", 'data:', 'blob:', 'https://images.unsplash.com'],
         'media-src': ["'self'", 'data:', 'blob:'],
-        'connect-src': ["'self'"],
+        'connect-src': ["'self'", 'https://mohitgoenka.com'],
         'worker-src': ["'self'"],
         'manifest-src': ["'self'"],
         'frame-src': ["'none'"],
@@ -1632,7 +1633,10 @@ app.post('/api/post-special', async (req, res) => {
     return jsonError(res, 400, 'restaurantName, dishName, city required');
   }
   try {
+    // Linked to this device so "Delete my account and data" can remove it.
+    const ownerKeyHash = sha256(ownerKeyFor(req, res));
     const id = await firestore.addSpecial({
+      ownerKeyHash,
       restaurantName,
       city,
       cuisine,
@@ -1660,7 +1664,11 @@ app.get('/api/restaurant/brand/:id', async (req, res) => {
   if (!BRAND_ID_RE.test(req.params.id)) return jsonError(res, 400, 'bad brand id');
   try {
     const brand = await firestore.getBrand(req.params.id);
-    res.json({ brand: brand ? { igConnected: !!brand.instagramBusinessAccountId } : null });
+    res.json({
+      brand: brand ? { igConnected: !!brand.instagramBusinessAccountId } : null,
+      // The "Connect IG" link is only shown when the server can complete it.
+      instagramAvailable: instagramLib.isInstagramConfigured(),
+    });
   } catch (err: any) {
     jsonError(res, 500, err?.message || 'getBrand failed');
   }
@@ -1681,6 +1689,11 @@ app.get('/api/restaurant/metrics/:name', async (req, res) => {
 // ---------- Stripe checkout + webhook ----------
 
 app.post('/api/stripe/create-checkout-session', async (req, res) => {
+  // Google Play payments policy: no web checkout from inside the Android app
+  // (the app hides every pricing/checkout entry point; this is the backstop).
+  if ((req.get('user-agent') || '').includes('MohitGoenkaApp/')) {
+    return jsonError(res, 403, 'Plans aren\u2019t available in the app.');
+  }
   if (!stripeLib.isStripeConfigured()) {
     return jsonError(
       res,
@@ -1805,10 +1818,78 @@ function verifyState(state: string): string | null {
 function readCookie(req: express.Request, name: string): string | null {
   for (const part of (req.get('cookie') || '').split(';')) {
     const [k, ...v] = part.trim().split('=');
-    if (k === name) return decodeURIComponent(v.join('='));
+    if (k === name) {
+      try {
+        return decodeURIComponent(v.join('='));
+      } catch {
+        return null;
+      }
+    }
   }
   return null;
 }
+
+// ---------- Device owner key + account deletion ----------
+// Eve has no sign-in. Anything a device stores on the server (published
+// specials, an Instagram connection) carries the sha256 of a random owner key
+// that lives only in that browser's httpOnly cookie. Presenting the key is what
+// authorizes "Delete my account and data".
+const OWNER_COOKIE = 'eve_owner';
+const OWNER_KEY_RE = /^[A-Za-z0-9_-]{43}$/;
+const ownerCookieOptions = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'lax' as const,
+  path: '/api',
+};
+
+function readOwnerKey(req: express.Request): string | null {
+  const v = readCookie(req, OWNER_COOKIE);
+  return v && OWNER_KEY_RE.test(v) ? v : null;
+}
+
+/** This device's owner key; issues one (cookie, ~400 days) the first time it's needed. */
+function ownerKeyFor(req: express.Request, res: express.Response): string {
+  const existing = readOwnerKey(req);
+  if (existing) return existing;
+  const key = crypto.randomBytes(32).toString('base64url');
+  res.cookie(OWNER_COOKIE, key, { ...ownerCookieOptions, maxAge: 400 * 24 * 60 * 60 * 1000 });
+  return key;
+}
+
+const deleteBuckets = new Map<string, { count: number; resetAt: number }>();
+
+// Deletes every server-side record linked to this device, then clears the
+// device's Eve cookies. Same-origin only (the /api/ guard above), POST with an
+// explicit confirmation, a few attempts per IP per hour.
+app.post('/api/account/delete', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (req.body?.confirm !== 'delete') return jsonError(res, 400, 'Confirmation required.');
+  const ip = clientIp(req);
+  const now = Date.now();
+  let bucket = deleteBuckets.get(ip);
+  if (!bucket || bucket.resetAt <= now) {
+    bucket = { count: 0, resetAt: now + HOUR };
+    deleteBuckets.set(ip, bucket);
+  }
+  if (deleteBuckets.size > 5000) for (const [k, v] of deleteBuckets) if (v.resetAt <= now) deleteBuckets.delete(k);
+  if (++bucket.count > 10) {
+    res.set('Retry-After', String(Math.ceil((bucket.resetAt - now) / 1000)));
+    return jsonError(res, 429, 'Too many attempts. Please try again later.');
+  }
+  const key = readOwnerKey(req);
+  try {
+    const deleted = key ? await firestore.deleteOwnedData(sha256(key)) : { specials: 0, brands: 0 };
+    res.clearCookie(OWNER_COOKIE, ownerCookieOptions);
+    res.clearCookie(IG_COOKIE, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', path: '/api/instagram' });
+    console.log(`[account] deleted device data: ${deleted.specials} specials, ${deleted.brands} brands`);
+    res.json({ ok: true, linked: !!key, deleted });
+  } catch (err: any) {
+    // Keep the cookie so the user can simply try again.
+    console.error('[account] delete failed:', err?.message || err);
+    jsonError(res, 503, 'Eve couldn\u2019t delete your data just now. Please try again in a minute.');
+  }
+});
 
 app.get('/api/auth/instagram/start', (req, res) => {
   if (!instagramLib.isInstagramConfigured()) {
@@ -1842,6 +1923,7 @@ app.get('/api/auth/instagram/callback', async (req, res) => {
       instagramAccessToken: igAccount.pageAccessToken,
       instagramBusinessAccountId: igAccount.igBusinessAccountId,
       instagramPublishKeyHash: sha256(publishKey),
+      ownerKeyHash: sha256(ownerKeyFor(req, res)),
     });
     res.cookie(IG_COOKIE, `${brandId}.${publishKey}`, {
       httpOnly: true,
