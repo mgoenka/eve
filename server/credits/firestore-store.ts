@@ -24,9 +24,11 @@ interface AccountDoc {
   id: string;
   balance: number;
   holds: Holds;
-  totals: { granted: number; purchased: number; spent: number };
+  totals: { granted: number; purchased: number; spent: number; ownerSpent?: number };
   createdAt: string;
   updatedAt: string;
+  /** Owner wallet: AI logged, never deducted (set by the owner code or scripts/credits-admin.mjs). */
+  owner?: boolean;
 }
 
 export interface FirestoreStoreOptions {
@@ -106,7 +108,7 @@ export class FirestoreCreditStore implements CreditStore {
       const { doc, created } = await FirestoreCreditStore.load(tx, account, meta, starter, now);
       if (created) FirestoreCreditStore.writeCreated(tx, account, ledger, doc, starter, now);
       const holds = FirestoreCreditStore.live(doc.holds, now.getTime());
-      return { balance: doc.balance, available: doc.balance - liveHeld(Object.values(holds), now.getTime()), created };
+      return { balance: doc.balance, available: doc.balance - liveHeld(Object.values(holds), now.getTime()), created, owner: doc.owner === true };
     });
   }
 
@@ -116,12 +118,13 @@ export class FirestoreCreditStore implements CreditStore {
       const { doc, created } = await FirestoreCreditStore.load(tx, account, meta, starter, now);
       const holds = FirestoreCreditStore.live(doc.holds, now.getTime());
       const available = doc.balance - liveHeld(Object.values(holds), now.getTime());
+      if (doc.owner === true) return { balance: doc.balance, available, created, ok: true, owner: true };
       const need = Math.max(1, credits);
       const ok = available >= need;
       if (ok) holds[holdId] = { credits: need, expiresAt: now.getTime() + ttlMs };
       if (created) FirestoreCreditStore.writeCreated(tx, account, ledger, { ...doc, holds }, starter, now);
       else if (ok) tx.update(account, { holds, updatedAt: now.toISOString() });
-      return { balance: doc.balance, available: ok ? available - need : available, created, ok };
+      return { balance: doc.balance, available: ok ? available - need : available, created, ok, owner: false };
     });
   }
 
@@ -133,13 +136,13 @@ export class FirestoreCreditStore implements CreditStore {
       const doc = snap.data() as AccountDoc;
       const holds = FirestoreCreditStore.live(doc.holds, now.getTime());
       delete holds[holdId];
-      const balance = doc.balance - charge.credits;
-      tx.update(account, {
-        balance,
-        holds,
-        'totals.spent': (doc.totals?.spent ?? 0) + charge.credits,
-        updatedAt: now.toISOString(),
-      });
+      const balance = charge.owner ? doc.balance : doc.balance - charge.credits;
+      tx.update(
+        account,
+        charge.owner
+          ? { holds, 'totals.ownerSpent': (doc.totals?.ownerSpent ?? 0) + charge.credits, updatedAt: now.toISOString() }
+          : { balance, holds, 'totals.spent': (doc.totals?.spent ?? 0) + charge.credits, updatedAt: now.toISOString() },
+      );
       const e: LedgerEntry = {
         type: 'charge',
         credits: -charge.credits,
@@ -149,6 +152,7 @@ export class FirestoreCreditStore implements CreditStore {
         costUsd: charge.costUsd,
         calls: charge.calls ?? [],
       };
+      if (charge.owner) e.notDeducted = true;
       tx.create(ledger(), e);
       return { balance };
     });
@@ -276,6 +280,19 @@ export class FirestoreCreditStore implements CreditStore {
       if (rec.orderId) e.orderId = rec.orderId;
       tx.create(accRef.collection('ledger').doc(), e);
       return { reversed: delta, balance, account: rec.account };
+    });
+  }
+
+  async setOwner(key: string, meta: AccountMeta, owner: boolean, reason: string, now: Date) {
+    const { db, account, ledger } = await this.refs(key);
+    return db.runTransaction(async (tx) => {
+      const { doc, created } = await FirestoreCreditStore.load(tx, account, meta, 0, now);
+      const at = now.toISOString();
+      if (created) tx.create(account, { ...doc, owner });
+      else tx.update(account, { owner, updatedAt: at });
+      const e: LedgerEntry = { type: 'grant', credits: 0, balanceAfter: doc.balance, at, reason: (owner ? 'owner on: ' : 'owner off: ') + reason };
+      tx.create(ledger(), e);
+      return { balance: doc.balance, owner };
     });
   }
 

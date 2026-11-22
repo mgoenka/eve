@@ -3,8 +3,9 @@
 // remits sales tax / VAT, handles fraud, disputes and payment support). No Stripe SDK: fetch + form encoding.
 //
 // Secrets (never logged, never sent to the browser):
-//   STRIPE_SECRET_KEY      env, else Secret Manager "stripe-secret-key"      (projects/<GOOGLE_CLOUD_PROJECT>)
-//   STRIPE_WEBHOOK_SECRET  env, else Secret Manager "stripe-webhook-secret"
+//   CREDITS_STRIPE_SECRET_KEY      env, else Secret Manager "stripe-secret-key"      (projects/<GOOGLE_CLOUD_PROJECT>)
+//   CREDITS_STRIPE_WEBHOOK_SECRET  env, else Secret Manager "stripe-webhook-secret"
+// (CREDITS_ prefix: Eve's own subscription code uses STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET.)
 // Missing key: web checkout is simply unavailable (the balance answer says checkout: false).
 //
 // Prices are created once per pack by lookup key (stripeLookupKey) with the AIaaS tax code and

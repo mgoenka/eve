@@ -102,6 +102,8 @@ export interface CreditsState {
   checkout: boolean;
   /** 'play' (Android app) or 'stripe' (website), from the server. */
   provider: 'play' | 'stripe' | null;
+  /** Owner wallet (Mohit's own device): AI is free here, usage still logged. */
+  owner: boolean;
   /** A payment is pending at the provider. */
   pending: boolean;
 }
@@ -119,6 +121,7 @@ let state: CreditsState = {
   pending: false,
   checkout: true,
   provider: null,
+  owner: false,
 };
 const listeners = new Set<() => void>();
 function setState(patch: Partial<CreditsState>) {
@@ -142,7 +145,7 @@ function readBalanceHeader(res: Response) {
 export async function refreshCredits(): Promise<void> {
   if (!creditsEnabled()) return;
   try {
-    const r = await fetchJson<{ enforced?: boolean; balance?: number; packs?: CreditsState['packs']; checkout?: boolean; provider?: string }>(CREDITS_BALANCE_URL, {
+    const r = await fetchJson<{ enforced?: boolean; balance?: number; packs?: CreditsState['packs']; checkout?: boolean; provider?: string; owner?: boolean }>(CREDITS_BALANCE_URL, {
       headers: creditsHeaders(),
       timeoutMs: 10000,
       retries: 1,
@@ -154,6 +157,7 @@ export async function refreshCredits(): Promise<void> {
         ...(Array.isArray(r.packs) && r.packs.length ? { packs: r.packs } : {}),
         ...(typeof r.checkout === 'boolean' ? { checkout: r.checkout } : {}),
         ...(r.provider === 'play' || r.provider === 'stripe' ? { provider: r.provider } : {}),
+        owner: r.owner === true,
       });
     } else if (r && r.enforced === false && state.enabled) {
       setState({ enabled: false, sheetOpen: false }); // web switch turned off
@@ -251,6 +255,28 @@ export async function aiFetchJson<T = unknown>(url: string, options: AiFetchJson
       if (creditsSheet) openCreditsSheet('insufficient', typeof body.needed === 'number' ? body.needed : null);
     }
     throw err;
+  }
+}
+
+/**
+ * Owner code: marks this device's wallet as the owner's (AI free, usage still logged). The code rides on
+ * the purchase route in the Android app and the checkout route on the web (no extra server routes).
+ * Resolves true on success; shows a toast either way.
+ */
+export async function enterOwnerCode(code: string): Promise<boolean> {
+  const url = isNativeApp() ? '/api/credits/purchase' : '/api/credits/checkout';
+  try {
+    await fetchJson<{ ok?: boolean }>(url, { method: 'POST', body: { ownerCode: code }, headers: creditsHeaders(), timeoutMs: 15000, retries: 0 });
+    setState({ owner: true });
+    showToast({ id: 'mg-credits-owner', tone: 'success', message: 'Owner mode is on for this device: AI is free here.' });
+    void refreshCredits();
+    return true;
+  } catch (err) {
+    const code2 = err instanceof FetchError ? (err.body as { error?: string } | null)?.error : undefined;
+    const message =
+      code2 === 'wrong_code' ? 'That code isn’t right.' : code2 === 'rate_limited' ? 'Too many tries. Please wait a while.' : code2 === 'owner_unavailable' ? 'Owner mode isn’t set up.' : 'Couldn’t check the code right now.';
+    showToast({ id: 'mg-credits-owner', tone: 'error', message });
+    return false;
   }
 }
 

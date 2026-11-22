@@ -76,6 +76,7 @@ export {
   buyCredits,
   creditsEnabled,
   creditsHeaders,
+  enterOwnerCode,
   activeCreditsProvider,
   registerWebCreditsProvider,
   AI_CREDIT_PACKS,

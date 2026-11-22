@@ -1,5 +1,5 @@
 /* generated from app-platform/ui-kit — edit there and re-sync. */
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { cx } from '../utils/cx';
 import {
   AI_CREDIT_PACKS,
@@ -8,6 +8,7 @@ import {
   buyCredits,
   closeCreditsSheet,
   creditsEnabled,
+  enterOwnerCode,
   getCreditsState,
   initCredits,
   loadPrices,
@@ -39,8 +40,8 @@ export interface CreditsChipProps {
 export function CreditsChip({ className }: CreditsChipProps) {
   const s = useCredits();
   if (!s.enabled) return null;
-  const low = s.balance !== null && s.balance < 20;
-  const label = s.balance === null ? 'AI credits' : `${fmt(s.balance)} AI credits`;
+  const low = !s.owner && s.balance !== null && s.balance < 20;
+  const label = s.owner ? 'AI credits: owner mode' : s.balance === null ? 'AI credits' : `${fmt(s.balance)} AI credits`;
   return (
     <button
       type="button"
@@ -54,12 +55,56 @@ export function CreditsChip({ className }: CreditsChipProps) {
       )}
     >
       <CoinsIcon size={14} />
-      <span>{s.balance === null ? '…' : fmt(s.balance)}</span>
+      <span>{s.owner ? 'Owner' : s.balance === null ? '…' : fmt(s.balance)}</span>
     </button>
   );
 }
 
 /** The "Get AI credits" sheet. AiCreditsHost renders it; use directly only if you don't mount the host. */
+function OwnerCodeForm() {
+  const [open, setOpen] = useState(false);
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  if (!open) {
+    return (
+      <button type="button" className="mt-3 text-xs text-mg-subtle underline underline-offset-2 hover:text-mg-text-2" onClick={() => setOpen(true)}>
+        Owner? Enter code
+      </button>
+    );
+  }
+  return (
+    <form
+      className="mt-3 flex items-center gap-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!code.trim() || busy) return;
+        setBusy(true);
+        void enterOwnerCode(code).then((ok) => {
+          setBusy(false);
+          if (ok) {
+            setCode('');
+            setOpen(false);
+          }
+        });
+      }}
+    >
+      <input
+        type="password"
+        autoComplete="off"
+        aria-label="Owner code"
+        placeholder="Owner code"
+        value={code}
+        maxLength={200}
+        onChange={(e) => setCode(e.target.value)}
+        className="h-9 min-w-0 flex-1 rounded-mg-sm border border-mg-border bg-mg-surface px-3 text-sm text-mg-text placeholder:text-mg-subtle focus:border-mg-gold focus:outline-none"
+      />
+      <Button size="sm" type="submit" loading={busy} loadingText="Checking" disabled={!code.trim()}>
+        Unlock
+      </Button>
+    </form>
+  );
+}
+
 export function CreditsSheet() {
   const s = useCredits();
   const unavailable = s.pricesStatus === 'unavailable';
@@ -83,6 +128,11 @@ export function CreditsSheet() {
         </p>
       ) : null}
 
+      {s.owner ? (
+        <p role="status" className="mb-4 rounded-mg-sm border border-mg-gold/40 bg-mg-gold/10 px-3 py-2 text-sm text-mg-text">
+          Owner mode: AI is free on this device. Usage is still logged at its real cost.
+        </p>
+      ) : null}
       <div className="mb-4 flex items-center justify-between gap-3 rounded-mg border border-mg-border bg-mg-surface px-4 py-3">
         <span className="text-sm text-mg-muted">Your balance</span>
         <span className="flex items-center gap-1.5 text-lg font-bold tabular-nums text-mg-gold">
@@ -91,7 +141,7 @@ export function CreditsSheet() {
         </span>
       </div>
 
-      <ul className="flex flex-col gap-2" aria-label="Credit packs">
+      <ul className={cx('flex flex-col gap-2', s.owner && 'hidden')} aria-label="Credit packs">
         {s.packs.map((pack) => {
           const price = s.prices[pack.id];
           const busy = s.buying === pack.id;
@@ -116,7 +166,7 @@ export function CreditsSheet() {
         })}
       </ul>
 
-      {unavailable ? (
+      {unavailable && !s.owner ? (
         <div role="alert" className="mt-3 rounded-mg-sm border border-mg-border-strong bg-mg-surface-2 px-3 py-2 text-sm text-mg-text-2">
           {viaPlay ? 'Purchases are unavailable on this device right now. Make sure the Google Play Store is installed and you’re signed in, then' : 'Purchases are unavailable right now. Please'}{' '}
           <button type="button" className="font-semibold text-mg-gold underline underline-offset-2" onClick={() => void loadPrices(true)}>
@@ -138,6 +188,7 @@ export function CreditsSheet() {
           ? 'Credits don’t expire and are for this app. Paid through Google Play.'
           : 'Credits don’t expire and work in all of Mohit’s apps and games in this browser. Secure checkout by Stripe (sold through Link): prices in US dollars, with sales tax or VAT added at checkout where it applies.'}
       </p>
+      {s.owner ? null : <OwnerCodeForm />}
     </Modal>
   );
 }

@@ -134,6 +134,12 @@ export const STRIPE_TAX_CODE = 'txcd_10105001';
 export const stripeLookupKey = (packId: string) => `mg_${packId}_v1`;
 /** Secret Manager secret names (project public-mohit-260610); env vars of the same meaning override them. */
 export const STRIPE_SECRETS = {
-  apiKey: { secret: 'stripe-secret-key', env: 'STRIPE_SECRET_KEY' },
-  webhook: { secret: 'stripe-webhook-secret', env: 'STRIPE_WEBHOOK_SECRET' },
+  apiKey: { secret: 'stripe-secret-key', env: 'CREDITS_STRIPE_SECRET_KEY' },
+  webhook: { secret: 'stripe-webhook-secret', env: 'CREDITS_STRIPE_WEBHOOK_SECRET' },
 } as const;
+
+/**
+ * Owner code (Mohit's own devices use AI without paying; charges are still logged). Set by Mohit in Secret
+ * Manager; missing secret = owner enrolment off. Entered once per device/browser in the AI credits sheet.
+ */
+export const OWNER_CODE_SECRET = { secret: 'credits-owner-code', env: 'CREDITS_OWNER_CODE' } as const;

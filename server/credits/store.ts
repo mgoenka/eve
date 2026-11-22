@@ -14,6 +14,8 @@ export interface LedgerEntry {
   /** Per-model-call breakdown of a charge. */
   calls?: Array<{ model: string; priced: string; usd: number; credits: number }>;
   costUsd?: number;
+  /** Owner wallet: the charge is logged (real AI cost) but not taken from the balance. */
+  notDeducted?: boolean;
   /** Pack id (purchase entries). */
   productId?: string;
   /** Payment provider of a purchase ('play' | 'stripe'). */
@@ -38,6 +40,8 @@ export interface AccountState {
   available: number;
   /** True when this call created the account (and granted the starter credits). */
   created: boolean;
+  /** Owner wallet (Mohit's own devices): AI is logged but never deducted or refused. */
+  owner?: boolean;
 }
 
 export interface PurchaseRecord {
@@ -77,12 +81,14 @@ export interface ChargeInput {
   action: string;
   costUsd: number;
   calls: LedgerEntry['calls'];
+  /** Owner wallet: log the charge, don't deduct it. */
+  owner?: boolean;
 }
 
 export interface CreditStore {
   /** Create the account with the starter grant if it doesn't exist; return its state. */
   ensure(key: string, meta: AccountMeta, starter: number, now: Date): Promise<AccountState>;
-  /** Hold `credits` if available >= credits (and > 0). Creates the account first if needed. */
+  /** Hold `credits` if available >= credits (and > 0). Creates the account first if needed. Owner wallets: ok, no hold. */
   reserve(key: string, meta: AccountMeta, starter: number, holdId: string, credits: number, ttlMs: number, now: Date): Promise<AccountState & { ok: boolean }>;
   /** Drop the hold and charge the actual cost (balance may go below zero by at most one action's overrun). */
   settle(key: string, holdId: string, charge: ChargeInput, now: Date): Promise<{ balance: number }>;
@@ -112,6 +118,8 @@ export interface CreditStore {
   ): Promise<{ reversed: number; balance: number; account: string } | null>;
   /** The web credits switch (aiCreditConfig/web.enabled). */
   webEnabled(): Promise<boolean>;
+  /** Mark (or unmark) an owner wallet; creates the account (no starter) if needed. Logged in the ledger. */
+  setOwner(key: string, meta: AccountMeta, owner: boolean, reason: string, now: Date): Promise<{ balance: number; owner: boolean }>;
 }
 
 interface MemAccount {
@@ -119,7 +127,8 @@ interface MemAccount {
   balance: number;
   holds: Map<string, { credits: number; expiresAt: number }>;
   ledger: LedgerEntry[];
-  totals: { granted: number; purchased: number; spent: number };
+  totals: { granted: number; purchased: number; spent: number; ownerSpent?: number };
+  owner?: boolean;
 }
 
 export function liveHeld(holds: Iterable<{ credits: number; expiresAt: number }>, nowMs: number): number {
@@ -148,7 +157,7 @@ export class MemoryCreditStore implements CreditStore {
 
   private state(acc: MemAccount, created: boolean, now: Date): AccountState {
     for (const [id, h] of acc.holds) if (h.expiresAt <= now.getTime()) acc.holds.delete(id);
-    return { balance: acc.balance, available: acc.balance - liveHeld(acc.holds.values(), now.getTime()), created };
+    return { balance: acc.balance, available: acc.balance - liveHeld(acc.holds.values(), now.getTime()), created, owner: acc.owner === true };
   }
 
   async ensure(key: string, meta: AccountMeta, starter: number, now: Date): Promise<AccountState> {
@@ -159,6 +168,7 @@ export class MemoryCreditStore implements CreditStore {
   async reserve(key: string, meta: AccountMeta, starter: number, holdId: string, credits: number, ttlMs: number, now: Date) {
     const { acc, created } = this.ensureSync(key, meta, starter, now);
     const s = this.state(acc, created, now);
+    if (s.owner) return { ...s, ok: true };
     const need = Math.max(1, credits);
     if (s.available < need) return { ...s, ok: false };
     acc.holds.set(holdId, { credits: need, expiresAt: now.getTime() + ttlMs });
@@ -169,8 +179,11 @@ export class MemoryCreditStore implements CreditStore {
     const acc = this.accounts.get(key);
     if (!acc) throw new Error('settle on missing account');
     acc.holds.delete(holdId);
-    acc.balance -= charge.credits;
-    acc.totals.spent += charge.credits;
+    if (charge.owner) acc.totals.ownerSpent = (acc.totals.ownerSpent ?? 0) + charge.credits;
+    else {
+      acc.balance -= charge.credits;
+      acc.totals.spent += charge.credits;
+    }
     acc.ledger.push({
       type: 'charge',
       credits: -charge.credits,
@@ -179,6 +192,7 @@ export class MemoryCreditStore implements CreditStore {
       action: charge.action,
       costUsd: charge.costUsd,
       calls: charge.calls ?? [],
+      ...(charge.owner ? { notDeducted: true } : {}),
     });
     return { balance: acc.balance };
   }
@@ -261,5 +275,12 @@ export class MemoryCreditStore implements CreditStore {
 
   async webEnabled() {
     return this.webSwitch;
+  }
+
+  async setOwner(key: string, meta: AccountMeta, owner: boolean, reason: string, now: Date) {
+    const { acc } = this.ensureSync(key, meta, 0, now);
+    acc.owner = owner;
+    acc.ledger.push({ type: 'grant', credits: 0, balanceAfter: acc.balance, at: now.toISOString(), reason: (owner ? 'owner on: ' : 'owner off: ') + reason });
+    return { balance: acc.balance, owner };
   }
 }

@@ -7,7 +7,7 @@
 //     requests while aiCreditConfig/web.enabled is true. Switch off: the websites are free, as before.
 //  3. Purchases: creditPurchase({ wallet, provider, externalId, packId }) is idempotent on (provider, externalId).
 //     Adapters: verifyPlay (Play Billing token) and Stripe Checkout (confirm on return + signed webhook).
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import {
   APP_USER_HEADER,
   APP_USER_RE,
@@ -22,6 +22,7 @@ import {
   WEB_STARTER_WINDOW_MS,
   WEB_WALLET_COOKIE,
   WEB_WALLET_MAX_AGE_S,
+  OWNER_CODE_SECRET,
   packById,
   packsFor,
 } from './config.ts';
@@ -33,7 +34,7 @@ import { MemoryCreditStore } from './store.ts';
 import type { AccountMeta, CreditStore } from './store.ts';
 import { GooglePlayApi, PlayApiError } from './play.ts';
 import type { PlayApi } from './play.ts';
-import { StripeApiError, StripeRestApi, verifyStripeSignature } from './stripe.ts';
+import { SecretSource, StripeApiError, StripeRestApi, verifyStripeSignature } from './stripe.ts';
 import type { StripeApi, StripeCheckoutSession, StripeEvent } from './stripe.ts';
 
 // ---------------------------------------------------------------- types (framework-agnostic)
@@ -161,6 +162,8 @@ export interface CreditsOptions {
   resolveWebWallet?: (req: ReqLike) => string | null;
   /** Stripe Checkout (web packs). Default: StripeRestApi (keys from env or Secret Manager). */
   stripe?: StripeApi;
+  /** Secrets (owner code). Default: env, else Secret Manager. */
+  secrets?: { get(spec: { secret: string; env: string }): Promise<string | null> };
   /**
    * Web credits: 'switch' (default) follows Firestore aiCreditConfig/web.enabled (cached 1 min);
    * 'on' / 'off' force it (also CREDITS_WEB=on|off in the environment).
@@ -328,6 +331,9 @@ export function createCredits(options: CreditsOptions) {
   const checkoutIpLimit = new Window(10, 60_000);
   const checkoutWalletLimit = new Window(20, 60 * 60_000);
   const confirmIpLimit = new Window(30, 60_000);
+  const ownerIpLimit = new Window(5, 60 * 60_000);
+  const ownerWalletLimit = new Window(5, 24 * 60 * 60_000);
+  const secrets = options.secrets ?? new SecretSource();
 
   const meta = (w: Wallet): AccountMeta => ({ kind: w.kind, app: w.app, id: w.id });
   /** Android wallets get the starter on creation; web wallets only through the per-address claim (prepareWeb). */
@@ -414,7 +420,8 @@ export function createCredits(options: CreditsOptions) {
       console.error('[credits] reserve failed for', mask(wallet.id), (err as Error)?.message);
       throw new CreditsError(503, 'credits_unavailable');
     }
-    if (reserved.created) console.log(`[credits] ${app}: new ${wallet.kind} wallet ${mask(wallet.id)} (+${STARTER_CREDITS} starter)`);
+    if (reserved.created) console.log(`[credits] ${app}: new ${wallet.kind} wallet ${mask(wallet.id)} (+${starterFor(wallet)} starter)`);
+    const owner = reserved.owner === true;
     if (!reserved.ok) throw new CreditsError(402, 'insufficient_credits', { balance: reserved.balance, available: reserved.available, needed: estimate });
 
     let value: T;
@@ -441,14 +448,15 @@ export function createCredits(options: CreditsOptions) {
           action: `${app}:${opts.action}`,
           costUsd,
           calls: costs.map((c) => ({ model: c.model.slice(0, 80), priced: c.priced, usd: Math.round(c.usd * 1e8) / 1e8, credits: c.credits })),
+          owner,
         },
         at,
       );
-      return { value, charged: credits, balance };
+      return { value, charged: owner ? 0 : credits, balance };
     } catch (err) {
       // The user already has the result; the hold expires on its own. Log loudly, don't fail the request.
       console.error('[credits] settle failed for', mask(wallet.id), credits, 'credits', (err as Error)?.message);
-      return { value, charged: 0, balance: reserved.balance - estimate };
+      return { value, charged: 0, balance: owner ? reserved.balance : reserved.balance - estimate };
     }
   }
 
@@ -465,6 +473,7 @@ export function createCredits(options: CreditsOptions) {
       provider: wallet.provider,
       packs: packsFor(wallet.provider).map((p) => ({ id: p.id, credits: p.credits, priceUsd: p.priceUsd })),
     };
+    if (s.owner) body.owner = true;
     if (wallet.kind === 'web') {
       body.checkout = await stripe()
         .configured()
@@ -638,6 +647,34 @@ export function createCredits(options: CreditsOptions) {
     }
   }
 
+  // ---- Owner code: Mohit's own devices use AI without paying (charges still logged, never deducted).
+
+  const sha = (s: string) => createHash('sha256').update(s, 'utf8').digest();
+  /** Check an owner code and mark the wallet as owner. Answers like the other handlers. */
+  async function enrollOwner(wallet: Wallet, raw: unknown, req: ReqLike): Promise<{ status: number; body: Record<string, unknown> }> {
+    const code = typeof raw === 'string' ? raw.trim() : '';
+    const waitIp = ownerIpLimit.hit(clientIp(req));
+    const waitWallet = ownerWalletLimit.hit(wallet.key);
+    if (waitIp || waitWallet) return { status: 429, body: { error: 'rate_limited', retryAfter: Math.max(waitIp, waitWallet) } };
+    if (!code || code.length > 200) return { status: 400, body: { error: 'invalid' } };
+    let secret: string | null = null;
+    try {
+      secret = await secrets.get(OWNER_CODE_SECRET);
+    } catch {
+      secret = null;
+    }
+    if (!secret) return { status: 403, body: { error: 'owner_unavailable' } };
+    if (!timingSafeEqual(sha(code), sha(secret))) {
+      console.warn(`[credits] ${app}: wrong owner code for ${wallet.kind} wallet ${mask(wallet.id)}`);
+      return { status: 403, body: { error: 'wrong_code' } };
+    }
+    if (wallet.kind === 'web') await prepareWeb(wallet);
+    else await store.ensure(wallet.key, meta(wallet), starterFor(wallet), now());
+    const r = await store.setOwner(wallet.key, meta(wallet), true, `code (${app})`, now());
+    console.log(`[credits] ${app}: owner mode on for ${wallet.kind} wallet ${mask(wallet.id)}`);
+    return { status: 200, body: { ok: true, owner: true, balance: r.balance } };
+  }
+
   // ---------------------------------------------------------------- HTTP glue (Express-compatible)
 
   /**
@@ -715,6 +752,12 @@ export function createCredits(options: CreditsOptions) {
           res.status(403).json({ error: 'native_only' });
           return;
         }
+        if (typeof (req.body as { ownerCode?: unknown } | undefined)?.ownerCode === 'string') {
+          // Owner code rides on this route so apps need no extra wiring (same-origin, JSON, native wallet).
+          const o = await enrollOwner(wallet, (req.body as { ownerCode: string }).ownerCode, req);
+          res.status(o.status).json(o.body);
+          return;
+        }
         const w2 = purchaseUserLimit.hit(wallet.id);
         if (w2) return limited(res, w2);
         const out = await verifyPlay(wallet, req.body);
@@ -733,6 +776,20 @@ export function createCredits(options: CreditsOptions) {
       const wait = checkoutIpLimit.hit(clientIp(req));
       if (wait) return limited(res, wait);
       try {
+        const ownerCode = (req.body as { ownerCode?: unknown } | undefined)?.ownerCode;
+        if (typeof ownerCode === 'string' && !isNativeRequest(req)) {
+          // Owner code on the web rides on this route (same-origin, JSON). Works with the web switch off too:
+          // the wallet cookie is minted here if needed, so the owner is ready before the switch goes on.
+          let wallet = walletFor(req);
+          if (!wallet || wallet.kind !== 'web') {
+            const fresh = randomBytes(24).toString('base64url');
+            appendCookie(res, walletCookie(req, fresh));
+            wallet = webWallet(fresh, clientIp(req));
+          }
+          const o = await enrollOwner(wallet, ownerCode, req);
+          res.status(o.status).json(o.body);
+          return;
+        }
         if (isNativeRequest(req)) {
           res.status(403).json({ error: 'web_only' }); // Play Billing only inside the Android app
           return;
