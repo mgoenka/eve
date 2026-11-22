@@ -2,7 +2,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { DinerView } from './components/DinerView';
 import { findCity, CITIES } from './data/cities';
 import { RulesContext } from './components/RulesContext';
-import { RulesOverlay, aiContentRuleSection, isNativeApp, lazyWithRetry, type RuleSection } from './ui-kit';
+import { RulesOverlay, aiContentRuleSection, aiCreditsRuleSections, isNativeApp, lazyWithRetry, type RuleSection } from './ui-kit';
 import { DataPage, EveSettings } from './components/AccountData';
 
 // Secondary screens load on demand so the planner opens fast.
@@ -57,6 +57,22 @@ const APP_RULES: RuleSection[] = [
       'If Eve can’t finish a plan, you get a clear message and a Try again button.',
     ],
   },
+  // Android app only (empty on the website): prepaid AI credits for every AI feature.
+  ...aiCreditsRuleSections(),
+  ...(isNativeApp()
+    ? [
+        {
+          title: 'What Eve costs in credits',
+          icon: '🧾',
+          items: [
+            'Each painted picture costs about 40 credits (a stop card about 55, with the web research behind it). Cards and portraits she has already painted are free.',
+            'The plan itself costs about 25 credits (it searches the web for real venues); her lines, story and replies about 2 to 5 each; her voice about 1 to 3 per line and about 12 for the full narration.',
+            'A whole evening with four painted stops is usually 250 to 300 credits; a restaurant content pack (4 pictures) about 170.',
+            'If you run out mid-plan, the plan still shows: tap Repaint on a card after getting more credits.',
+          ],
+        },
+      ]
+    : []),
   {
     title: 'For restaurants',
     icon: '🍽️',

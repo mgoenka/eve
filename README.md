@@ -149,6 +149,20 @@ Seed the dining index with a handful of demo specials so the *Eve Originals* bad
 BASE_URL=https://eve.mohitgoenka.com bash scripts/seed-demo.sh
 ```
 
+## AI credits (Android app only)
+
+Inside the Play app (user agent `MohitGoenkaApp/Android` + `X-MG-App-User`), every AI endpoint is prepaid with AI
+credits (1 credit = $0.001 of real cost): `server/credits/` (vendored from `app-platform/server-kit/credits`, do not
+edit here) holds a typical estimate (HTTP 402 + the kit's "AI credits" sheet when the balance can't cover it), and
+`server/aiMeter.ts` records every model call the request really made (text, grounded search, images, the agent tools,
+Cloud TTS), which is then charged. Cache hits are free; failed actions are not charged. Old app builds without an app
+user id get 426 and a "please update" toast. The website is unchanged and free, and the Stripe plans stay hidden in
+the app. Typical costs: plan ~18-25, painted stop card ~55 (research + image), image ~39, content pack ~165,
+text lines 2-5, a voice line 1-3. Cloud TTS has no usageMetadata: it is priced per character (Chirp 3 HD $30, Neural2
+$16, Standard $4 per 1M) as equivalent `gemini-2.5-flash-image` output tokens ($30 / 1M). Local run without Google:
+Firestore emulator (`FIRESTORE_EMULATOR_HOST=127.0.0.1:8085 GOOGLE_CLOUD_PROJECT=demo-ai-credits EVE_MEMORY_STORE=1`)
+and a fake Gemini via `GOOGLE_GEMINI_BASE_URL`. Details: `app-platform/README.md`.
+
 ---
 
 ## Roadmap

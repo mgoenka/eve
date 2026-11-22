@@ -20,6 +20,7 @@
 //                      placesSearch, sceneCard, voiceLine
 
 import { GoogleGenAI } from '@google/genai';
+import { recordCloudTts, recordGemini } from './server/aiMeter.ts';
 
 export interface ToolSchemaProperty {
   type: 'string' | 'number' | 'boolean' | 'array' | 'object';
@@ -109,6 +110,7 @@ export function makePlacesSearchTool(ai: GoogleGenAI, textModel: string): Tool {
           httpOptions: { timeout: 40_000, retryOptions: { attempts: 2 } },
         },
       });
+      recordGemini(response, textModel); // AI credits (no-op unless a paying app request)
       return { details: ((response.text || '').trim() || '').slice(0, 600) };
     },
   };
@@ -144,6 +146,7 @@ Photoreal but slightly painterly, like Bon Appetit / Cereal Magazine. NO text, N
           httpOptions: { timeout: 55_000, retryOptions: { attempts: 2 } },
         },
       });
+      recordGemini(response, imageModel);
       const parts = response.candidates?.[0]?.content?.parts || [];
       for (const p of parts as Array<any>) {
         if (p?.inlineData?.data && p?.inlineData?.mimeType) {
@@ -181,6 +184,7 @@ export function makeVoiceLineTool(geminiKey: string): Tool {
         }
       );
       if (!r.ok) return { error: `TTS HTTP ${r.status}` };
+      recordCloudTts(ttsBody.voice.name, ttsBody.input.text.length);
       const j = (await r.json()) as { audioContent?: string };
       return { audioData: j.audioContent || '', audioMime: 'audio/mpeg' };
     },

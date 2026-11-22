@@ -16,6 +16,7 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=builder /app/dist ./dist
 COPY server.ts agent.ts constants.ts types.ts tsconfig.json ./
 COPY lib ./lib
+COPY server ./server
 COPY data ./data
 EXPOSE 8080
 USER node

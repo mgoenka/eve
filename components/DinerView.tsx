@@ -64,7 +64,7 @@ import type { SavedEvening } from '../services/savedEvenings';
 import { StopCard } from './StopCard';
 import { EveLogo } from './EveLogo';
 import { useOpenRules, useOpenSettings } from './RulesContext';
-import { AppHeader, IconButton, ReportContentButton, isNativeApp, shareOrCopy, useToast } from '../ui-kit';
+import { AppHeader, CreditsChip, IconButton, ReportContentButton, isNativeApp, shareOrCopy, useToast } from '../ui-kit';
 
 interface Props {
   onSwitchToRestaurant: () => void;
@@ -1756,6 +1756,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           onSettings={openSettings}
           right={
             <>
+            <CreditsChip />
             {muted ? (
               <button
                 onClick={() => {
@@ -2286,6 +2287,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
         onSettings={openSettings}
         right={
           <>
+          <CreditsChip />
           {phase === 'ready' && stops.length > 0 && (
             <IconButton
               onClick={sharePlan}

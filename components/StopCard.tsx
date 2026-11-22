@@ -4,6 +4,7 @@ import type { ExperienceStop, StopKind } from '../types';
 import { STOP_KINDS } from '../constants';
 import { buildReservationLinks } from '../lib/reservations';
 import { ReportContentButton } from '../ui-kit';
+import { checkReservations } from '../services/eveService';
 
 interface Props {
   stop: ExperienceStop;
@@ -75,12 +76,8 @@ export function StopCard({ stop, index, city, whenISO, startTime, party, highlig
   useEffect(() => {
     if (!isReservable || !stop.name) return;
     let cancelled = false;
-    fetch('/api/reservations/check', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ restaurantName: stop.name, city: city || '' }),
-    })
-      .then((r) => (r.ok ? r.json() : null))
+    // Background check (AI credits in the Android app; never opens the credits sheet).
+    checkReservations({ restaurantName: stop.name, city: city || '' })
       .then((data) => {
         if (cancelled || !data) return;
         setAvailability({

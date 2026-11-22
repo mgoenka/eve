@@ -11,6 +11,9 @@ import * as firestore from './lib/firestore';
 import * as stripeLib from './lib/stripe';
 import * as instagramLib from './lib/instagram';
 import { TtlCache, cacheKey } from './lib/ttlCache';
+import { createCredits, costOfCall } from './server/credits/index.ts';
+import type { Meter } from './server/credits/index.ts';
+import { cloudTtsUsage, recordCloudTts, recordGemini, withMeter } from './server/aiMeter.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -64,8 +67,10 @@ app.use(
 // the JSON parser skips it (express.raw() on that route reads it).
 const jsonSmall = express.json({ limit: '100kb' });
 const jsonImage = express.json({ limit: '6mb' });
+const jsonTiny = express.json({ limit: '8kb', strict: true });
 app.use((req, res, next) => {
   if (req.path === '/api/stripe/webhook') return next();
+  if (req.path === '/api/credits/purchase') return jsonTiny(req, res, next);
   return (req.path === '/api/post-special' ? jsonImage : jsonSmall)(req, res, next);
 });
 
@@ -233,18 +238,22 @@ async function generateText(opts: {
   }
   if (thinkingLevelSupported) {
     try {
-      return await ai.models.generateContent({
+      const response = await ai.models.generateContent({
         model: TEXT_MODEL,
         contents: opts.contents,
         config: { ...config, thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } },
       });
+      recordGemini(response, TEXT_MODEL); // AI credits: no-op unless a paying app request
+      return response;
     } catch (err: any) {
       if (!/thinking/i.test(String(err?.message || ''))) throw err;
       thinkingLevelSupported = false;
       console.warn(`thinkingLevel rejected by ${TEXT_MODEL}; continuing without it`);
     }
   }
-  return ai.models.generateContent({ model: TEXT_MODEL, contents: opts.contents, config });
+  const response = await ai.models.generateContent({ model: TEXT_MODEL, contents: opts.contents, config });
+  recordGemini(response, TEXT_MODEL);
+  return response;
 }
 
 /** Search-grounded text call (venue research, live lookups). */
@@ -272,6 +281,7 @@ async function generateImage(prompt: string): Promise<GeneratedImage | null> {
       httpOptions: { timeout: IMAGE_TIMEOUT_MS, retryOptions: RETRY },
     },
   });
+  recordGemini(response, IMAGE_MODEL);
   const parts = response.candidates?.[0]?.content?.parts || [];
   for (const p of parts as Array<any>) {
     if (p?.inlineData?.data && p?.inlineData?.mimeType) {
@@ -356,6 +366,140 @@ function refundImages(req: express.Request, n = 1) {
   const b = imageBudget(req);
   b.used = Math.max(0, b.used - n);
 }
+
+// ---------- AI credits (Android app only; the website is never metered) ----------
+// Requests from the Play app (user agent MohitGoenkaApp/ + X-MG-App-User) prepay every AI call with
+// credits (server/credits, vendored from app-platform/server-kit; Firestore + Play API via ADC).
+// metered() holds a typical estimate (402 when the balance can't cover it), runs the unchanged
+// handler with a per-request meter (server/aiMeter.ts: the text/image helpers, agent tools and
+// Cloud TTS record each call that really ran), then charges the sum. Cache hits record nothing;
+// a failed action (4xx/5xx answer or a throw) is not charged. Website requests skip all of this.
+const credits = createCredits({ packageName: 'com.mohitgoenka.eve' });
+
+/** Typical cost of one call in credits (estimates only; the charge uses the real usage). */
+const est = (model: string, input: number, output: number, grounded = 0) =>
+  costOfCall({ model, usage: { promptTokenCount: input, candidatesTokenCount: output }, groundedRequests: grounded }).credits;
+// One 1024px image (1,290 image tokens) from a ~500-token prompt.
+const estImage = () => est(IMAGE_MODEL, 500, 1290);
+// Venue research: short grounded prompt + one paragraph + thinking.
+const estResearch = () => est(TEXT_MODEL, 300, 700, 1);
+const estTtsChars = (voice: string, chars: number) => {
+  const u = cloudTtsUsage(voice, chars);
+  return costOfCall({ model: u.model, usage: u.usage }).credits;
+};
+
+type Estimate = (req: express.Request) => number;
+const body = (req: express.Request): any => (req.body && typeof req.body === 'object' ? req.body : {});
+const estIntro: Estimate = () => est(TEXT_MODEL, 700, 800);
+const estOutro: Estimate = () => est(TEXT_MODEL, 350, 650);
+const estStory: Estimate = () => est(TEXT_MODEL, 900, 900);
+const estRefine: Estimate = () => est(TEXT_MODEL, 800, 1300, 1);
+const estParseIntent: Estimate = () => est(TEXT_MODEL, 900, 750);
+const estGeocode: Estimate = () => est(TEXT_MODEL, 80, 620);
+const estSkeleton: Estimate = () => est(TEXT_MODEL, 1200, 2100, 1);
+const estNarration: Estimate = () => est(TEXT_MODEL, 500, 800);
+const estReservations: Estimate = () => est(TEXT_MODEL, 200, 630, 1);
+const AVATAR_MOODS = new Set(['devoted', 'listening', 'speaking', 'thinking', 'longing']);
+const estAvatar: Estimate = (req) => {
+  const mood = str(body(req).mood, 20);
+  return avatarCache.get(cacheKey(AVATAR_MOODS.has(mood) ? mood : 'devoted')) ? 1 : estImage();
+};
+const estStopImage: Estimate = (req) => {
+  const b = body(req);
+  const key = cacheKey(str(b.name, 120), kindIn(b.kind), str(b.city, 120), vibeIn(b.vibe), str(b.oneLineVibe, 240));
+  return stopImageCache.get(key) ? 1 : estResearch() + estImage();
+};
+const estContentPack: Estimate = (req) => {
+  const b = body(req);
+  const key = cacheKey(str(b.dishName, 120), str(b.dishDescription, 400), str(b.restaurantName, 120), str(b.cuisine, 40) || 'fusion', str(b.voice, 300), str(b.city, 120), str(b.signatureDishes, 400));
+  if (!b.fresh && contentPackCache.get(key)) return 1;
+  return est(TEXT_MODEL, 350, 1300) + est(TEXT_MODEL, 300, 900) + 4 * estImage();
+};
+const estSuggest: Estimate = (req) => {
+  const b = body(req);
+  const cuisine = str(b.cuisine, 40);
+  const dishes = str(b.signatureDishes, 400);
+  if (!b.fresh && suggestCache.get(cacheKey(str(b.restaurantName, 120), str(b.city, 120), cuisine, dishes))) return 1;
+  return est(TEXT_MODEL, 700, 1100, 1) + (cuisine && dishes ? 0 : est(TEXT_MODEL, 150, 700, 1));
+};
+const estTts: Estimate = (req) => {
+  const b = body(req);
+  const text = str(b.text, 1500);
+  const reel = b.voiceMode === 'reel';
+  if (ttsCache.get(`${reel ? 'reel' : 'eve'}|${text.slice(0, 4500)}`)) return 1;
+  // Eve's SSML wrapper adds ~70 characters plus a break tag per sentence.
+  return estTtsChars(reel ? 'en-US-Chirp3-HD-Aoede' : 'en-US-Neural2-F', text.length + (reel ? 0 : 120));
+};
+const estAgent: Estimate = (req) => {
+  const plan = Array.isArray(body(req).plan) ? body(req).plan.slice(0, 6) : [];
+  const per = (st: any) =>
+    st?.tool === 'placesSearch' ? est(TEXT_MODEL, 120, 700, 1)
+      : st?.tool === 'sceneCard' ? estImage()
+        : st?.tool === 'voiceLine' ? estTtsChars('en-US-Chirp3-HD-Aoede', str(st?.input?.text, 400).length)
+          : 0;
+  return Math.max(1, plan.reduce((n: number, st: any) => n + per(st), 0));
+};
+
+/** Thrown inside credits.run when the handler answered with an error: release the hold, charge nothing. */
+class UnchargedAnswer extends Error {}
+
+type AiHandler = (req: express.Request, res: express.Response) => unknown;
+
+/**
+ * Wraps an AI route. Website (and any request that doesn't pay): the handler runs exactly as before.
+ * Paying app request: the handler's JSON answer is held back until the credits are settled, so the
+ * response can carry X-MG-Credits-Balance / -Charged.
+ */
+function metered(action: string, estimate: Estimate, handler: AiHandler): express.RequestHandler {
+  return async (req, res) => {
+    let wallet;
+    try {
+      wallet = credits.identify(req);
+    } catch (err) {
+      if (!credits.sendError(res, err)) jsonError(res, 500, 'credits identify failed');
+      return;
+    }
+    if (!wallet) return handler(req, res) as any;
+
+    const realJson = res.json.bind(res);
+    let answered = false;
+    let answer: unknown;
+    res.json = ((b: unknown) => {
+      answered = true;
+      answer = b;
+      return res;
+    }) as typeof res.json;
+    try {
+      const out = await credits.run(wallet, { action, estimate: estimate(req) }, async (meter: Meter) => {
+        await withMeter(meter, async () => {
+          await handler(req, res);
+        });
+        if (!answered || res.statusCode >= 400) throw new UnchargedAnswer();
+        return answer;
+      });
+      res.json = realJson;
+      credits.applyHeaders(res, out);
+      realJson(out.value);
+    } catch (err) {
+      res.json = realJson;
+      if (err instanceof UnchargedAnswer && answered) {
+        realJson(answer);
+        return;
+      }
+      if (credits.sendError(res, err)) return;
+      console.error(`[credits] ${action} failed:`, (err as Error)?.message || err);
+      if (!res.headersSent) jsonError(res, 500, `${action} failed`);
+    }
+  };
+}
+
+// Credits endpoints act only on app requests carrying X-MG-App-User (the kit rate-limits them).
+// Mounted before the /api origin guard: the balance GET may arrive without Origin/Referer.
+app.get('/api/credits/balance', (req, res) => credits.handlers.balance(req, res));
+app.post('/api/credits/purchase', (req, res) => {
+  if (!isAllowedEveOrigin(req)) return res.status(403).json({ error: 'Forbidden' });
+  return credits.handlers.purchase(req, res);
+});
 
 // Rate limiting + origin check for AI endpoints.
 // Stripe webhook and Instagram OAuth callbacks are exempt — they are called by
@@ -453,7 +597,7 @@ app.get('/api/health', (_req, res) => {
 // ADK-pattern agent endpoint: the same three tools the rest of the
 // app uses, exposed through a single agent runtime call. Inspectable
 // from any client that wants to observe the agent abstraction.
-app.post('/api/agent/run', async (req, res) => {
+app.post('/api/agent/run', metered('agent', estAgent, async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
   const plan = req.body?.plan;
   if (!Array.isArray(plan) || plan.length === 0) {
@@ -494,9 +638,9 @@ app.post('/api/agent/run', async (req, res) => {
     console.error('agent run failed:', err?.message || err);
     jsonError(res, 500, `Agent run failed: ${err?.message || 'unknown'}`);
   }
-});
+}));
 
-app.post('/api/eve-intro', async (req, res) => {
+app.post('/api/eve-intro', metered('intro', estIntro, async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
   const vibe: string = vibeIn(req.body?.vibe);
@@ -568,9 +712,9 @@ Return strict JSON only:
     console.error('eve-intro failed:', err?.message || err);
     jsonError(res, 500, `Intro failed: ${err?.message || 'unknown'}`);
   }
-});
+}));
 
-app.post('/api/eve-outro', async (req, res) => {
+app.post('/api/eve-outro', metered('outro', estOutro, async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
   const vibe: string = vibeIn(req.body?.vibe);
@@ -615,9 +759,9 @@ Output ONLY the line itself. No quotes.`;
     console.error('eve-outro failed:', err?.message || err);
     jsonError(res, 500, `Outro failed: ${err?.message || 'unknown'}`);
   }
-});
+}));
 
-app.post('/api/eve-story', async (req, res) => {
+app.post('/api/eve-story', metered('story', estStory, async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
   const title: string = str(req.body?.title, 160);
@@ -705,9 +849,9 @@ Total length across all beats: aim for 130-180 words. Sound spoken. Avoid em das
     console.error('eve-story failed:', err?.message || err);
     jsonError(res, 500, `Story failed: ${err?.message || 'unknown'}`);
   }
-});
+}));
 
-app.post('/api/eve-refine', async (req, res) => {
+app.post('/api/eve-refine', metered('refine', estRefine, async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
   const userMessage: string = str(req.body?.message, 500);
@@ -762,9 +906,9 @@ Return strict JSON only:
     console.error('eve-refine failed:', err?.message || err);
     jsonError(res, 500, `Refine failed: ${err?.message || 'unknown'}`);
   }
-});
+}));
 
-app.post('/api/eve-parse-intent', async (req, res) => {
+app.post('/api/eve-parse-intent', metered('parse-intent', estParseIntent, async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
   const transcript: string = str(req.body?.transcript, 1000);
@@ -855,9 +999,9 @@ Output JSON ONLY. No markdown fences. No prose before or after. First character 
     console.error('eve-parse-intent failed:', err?.message || err);
     jsonError(res, 500, `Parse failed: ${err?.message || 'unknown'}`);
   }
-});
+}));
 
-app.post('/api/eve-avatar', async (req, res) => {
+app.post('/api/eve-avatar', metered('avatar', estAvatar, async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
   const mood: string = str(req.body?.mood, 20) || 'devoted';
@@ -914,9 +1058,9 @@ Strict constraints:
     console.error('eve-avatar failed:', err?.message || err);
     jsonError(res, 500, `Avatar failed: ${err?.message || 'unknown'}`);
   }
-});
+}));
 
-app.post('/api/reverse-geocode', async (req, res) => {
+app.post('/api/reverse-geocode', metered('reverse-geocode', estGeocode, async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
   const lat: number = Number(req.body?.lat);
@@ -942,7 +1086,7 @@ app.post('/api/reverse-geocode', async (req, res) => {
     console.error('reverse-geocode failed:', err?.message || err);
     jsonError(res, 500, `Geocode failed: ${err?.message || 'unknown'}`);
   }
-});
+}));
 
 app.get('/api/specials', async (req, res) => {
   const cityFilter = str(req.query?.city, 80);
@@ -956,7 +1100,7 @@ app.get('/api/specials', async (req, res) => {
   }
 });
 
-app.post('/api/plan-experience/skeleton', async (req, res) => {
+app.post('/api/plan-experience/skeleton', metered('plan', estSkeleton, async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
   const city: string = str(req.body?.city, 120);
@@ -1123,7 +1267,7 @@ Schema:
     console.error('plan-experience/skeleton failed:', err?.message || err);
     jsonError(res, 500, `Skeleton failed: ${err?.message || 'unknown'}`);
   }
-});
+}));
 
 async function researchVenueDetails(
   name: string,
@@ -1153,7 +1297,7 @@ Constraints:
   }
 }
 
-app.post('/api/plan-experience/stop-image', async (req, res) => {
+app.post('/api/plan-experience/stop-image', metered('stop-image', estStopImage, async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
   const name: string = str(req.body?.name, 120);
@@ -1246,9 +1390,9 @@ CRITICAL composition rules:
     console.error('stop-image failed:', err?.message || err);
     jsonError(res, 500, `Stop image failed: ${err?.message || 'unknown'}`);
   }
-});
+}));
 
-app.post('/api/plan-experience/narration', async (req, res) => {
+app.post('/api/plan-experience/narration', metered('narration', estNarration, async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
   const title: string = str(req.body?.title, 160);
@@ -1282,9 +1426,9 @@ Write the monologue in plain prose suitable for text-to-speech. Use natural paus
     console.error('narration failed:', err?.message || err);
     jsonError(res, 500, `Narration failed: ${err?.message || 'unknown'}`);
   }
-});
+}));
 
-app.post('/api/content-pack', async (req, res) => {
+app.post('/api/content-pack', metered('content-pack', estContentPack, async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
   const dishName: string = str(req.body?.dishName, 120);
@@ -1511,9 +1655,9 @@ Strict JSON only:
     contentPackCache.set(packKey, { body: packBody, bytes });
   }
   sendWithLimit(req, res, packBody);
-});
+}));
 
-app.post('/api/suggest-special', async (req, res) => {
+app.post('/api/suggest-special', metered('suggest-special', estSuggest, async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
   const restaurantName: string = str(req.body?.restaurantName, 120);
@@ -1608,7 +1752,7 @@ Constraints:
     console.error('suggest-special failed:', err?.message || err);
     jsonError(res, 500, `Suggest failed: ${err?.message || 'unknown'}`);
   }
-});
+}));
 
 app.post('/api/post-special', async (req, res) => {
   const restaurantName: string = str(req.body?.restaurantName, 120);
@@ -1988,7 +2132,7 @@ const RESERVATION_CACHE = new TtlCache<{ opentable: boolean; resy: boolean; tock
   ttlMs: 12 * 60 * 60 * 1000,
 });
 
-app.post('/api/reservations/check', async (req, res) => {
+app.post('/api/reservations/check', metered('reservations', estReservations, async (req, res) => {
   if (!ai) {
     // Without Gemini, optimistically allow all platforms.
     return res.json({ opentable: true, resy: true, tock: true, source: 'fallback' });
@@ -2027,7 +2171,7 @@ First character of your response is { and last is }.`;
     // On error, allow all so the user still has a path to book.
     res.json({ opentable: true, resy: true, tock: true, source: 'error_fallback' });
   }
-});
+}));
 
 // ---------- Sitemap (SEO for city pages) ----------
 
@@ -2054,7 +2198,7 @@ const ttsCache = new TtlCache<{ audioData: string; audioMime: string }>({
   sizeOf: (v) => v.audioData.length,
 });
 
-app.post('/api/tts', async (req, res) => {
+app.post('/api/tts', metered('tts', estTts, async (req, res) => {
   if (!GEMINI_API_KEY) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
   const text: string = str(req.body?.text, 1500);
@@ -2119,6 +2263,8 @@ app.post('/api/tts', async (req, res) => {
         },
       };
 
+  // Cloud TTS bills every input character, SSML markup included.
+  const ttsChars = (ttsBody.input.ssml ?? ttsBody.input.text ?? '').length;
   try {
     const ttsRes = await fetch(
       'https://texttospeech.googleapis.com/v1/text:synthesize',
@@ -2149,16 +2295,18 @@ app.post('/api/tts', async (req, res) => {
         const fallbackErr = await fallbackRes.text();
         return jsonError(res, 502, `TTS failed: ${fallbackErr.slice(0, 200)}`);
       }
+      recordCloudTts(fallbackBody.voice.name, ttsChars);
       const fallbackJson = (await fallbackRes.json()) as { audioContent?: string };
       return sendAudio(fallbackJson.audioContent || '');
     }
+    recordCloudTts(voiceName, ttsChars);
     const ttsJson = (await ttsRes.json()) as { audioContent?: string };
     sendAudio(ttsJson.audioContent || '');
   } catch (err: any) {
     console.error('tts failed:', err?.message || err);
     jsonError(res, 500, `TTS failed: ${err?.message || 'unknown'}`);
   }
-});
+}));
 
 app.get('/robots.txt', (_req, res) => {
   res.type('text/plain').send('User-agent: *\nAllow: /\nDisallow: /api/\nSitemap: https://eve.mohitgoenka.com/sitemap.xml\n');

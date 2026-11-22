@@ -26,3 +26,4 @@ export const VolumeOffIcon = (p: P) => (<Svg {...p}><path d="M11 4.7a.7.7 0 0 0-
 export const RefreshIcon = (p: P) => (<Svg {...p}><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" /></Svg>);
 export const FlagIcon = (p: P) => (<Svg {...p}><path d="M4 22V4a1 1 0 0 1 .4-.8A6 6 0 0 1 8 2c3 0 5 2 7.33 2q2 0 3.67-.8a1 1 0 0 1 1.4.92v10.2a1 1 0 0 1-.4.8A6 6 0 0 1 16.4 16c-3 0-5-2-7.33-2q-2 0-3.67.8" /></Svg>);
 export const MoreIcon = (p: P) => (<Svg {...p}><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /><circle cx="5" cy="12" r="1" /></Svg>);
+export const CoinsIcon = (p: P) => (<Svg {...p}><circle cx="8" cy="8" r="6" /><path d="M18.09 10.37A6 6 0 1 1 10.34 18" /><path d="M7 6h1v4" /><path d="m16.71 13.88.7.71-2.82 2.82" /></Svg>);

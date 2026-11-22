@@ -6,7 +6,7 @@ import { generateContentPack, postSpecial, synthesize, suggestSpecial } from '..
 import type { SuggestSpecialResponse } from '../services/eveService';
 import { EveLogo } from './EveLogo';
 import { useOpenRules, useOpenSettings } from './RulesContext';
-import { AppHeader, IconButton, ReportContentButton, isNativeApp } from '../ui-kit';
+import { AppHeader, CreditsChip, IconButton, ReportContentButton, isNativeApp } from '../ui-kit';
 
 interface Props {
   onSwitchToDiner: () => void;
@@ -182,12 +182,16 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
     if (!name.trim() || !city.trim()) return;
     autoSuggestedRef.current = true;
     setSuggesting(true);
-    suggestSpecial({
-      restaurantName: name.trim(),
-      city: city.trim(),
-      cuisine,
-      signatureDishes: signature,
-    })
+    // Automatic on page open: never pops the AI-credits sheet (Android app).
+    suggestSpecial(
+      {
+        restaurantName: name.trim(),
+        city: city.trim(),
+        cuisine,
+        signatureDishes: signature,
+      },
+      { background: true }
+    )
       .then((result) => {
         setSuggestion(result);
         if (!dishName) setDishName(result.dishName);
@@ -404,6 +408,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
         onSettings={openSettings}
         right={
           <>
+          <CreditsChip />
           <IconButton
             onClick={onSwitchToDiner}
             aria-label="For diners"

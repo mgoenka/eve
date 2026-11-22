@@ -1,7 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
-import { ErrorBoundary, ToastProvider, registerServiceWorker } from './ui-kit';
+import { AiCreditsHost, ErrorBoundary, ToastProvider, registerServiceWorker } from './ui-kit';
 // Syne + DM Sans come self-hosted from the kit (theme.css). Cormorant Garamond,
 // Eve's spoken-voice serif, is self-hosted here (font-display: swap).
 import '@fontsource-variable/cormorant-garamond/wght.css';
@@ -19,6 +19,8 @@ root.render(
     <ErrorBoundary appName="Eve" resetKeys={['eve.*']}>
       <ToastProvider>
         <App />
+        {/* Android app only (renders nothing on the website): AI credits balance + "Get AI credits" sheet. */}
+        <AiCreditsHost />
       </ToastProvider>
     </ErrorBoundary>
   </React.StrictMode>

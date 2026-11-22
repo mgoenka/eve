@@ -37,6 +37,8 @@ export interface FetchJsonOptions extends Omit<RequestInit, 'body' | 'signal'> {
   signal?: AbortSignal;
   /** Parse the response as JSON (default) or text. */
   responseType?: 'json' | 'text';
+  /** Called with every HTTP response (also errors) before the body is read, e.g. to read headers. Must not throw. */
+  onResponse?: (res: Response) => void;
 }
 
 const sleep = (ms: number, signal?: AbortSignal) =>
@@ -77,7 +79,7 @@ function friendly(kind: FetchErrorKind, status: number): string {
  * Credentials are sent only to the same origin — never cross-origin, whatever `credentials` says.
  */
 export async function fetchJson<T = unknown>(url: string, options: FetchJsonOptions = {}): Promise<T> {
-  const { timeoutMs = 15000, retries = 0, backoffMs = 600, body, signal, responseType = 'json', headers, credentials, ...rest } = options;
+  const { timeoutMs = 15000, retries = 0, backoffMs = 600, body, signal, responseType = 'json', headers, credentials, onResponse, ...rest } = options;
   const maxRetries = Math.max(0, Math.min(2, Math.floor(retries)));
 
   let sameOrigin = true;
@@ -115,6 +117,11 @@ export async function fetchJson<T = unknown>(url: string, options: FetchJsonOpti
       const init: RequestInit = { ...rest, headers: h, credentials: finalCredentials, signal: ctrl.signal };
       if (finalBody !== undefined) init.body = finalBody;
       const res = await fetch(url, init);
+      try {
+        onResponse?.(res);
+      } catch {
+        /* a hook must never break the request */
+      }
       const text = await res.text();
       let parsed: unknown = text;
       if (responseType === 'json' && text) {

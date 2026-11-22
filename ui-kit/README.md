@@ -279,6 +279,24 @@ app's Content-Security-Policy must allow it: `'connect-src': ["'self'", 'https:/
 The server accepts only `https://*.mohitgoenka.com` origins, an allow-listed `app`, the reason enum and capped
 lengths, and rate-limits per IP (10/hour) and globally.
 
+### AI credits: `AiCreditsHost`, `CreditsChip`, `CreditsSheet`, `aiFetchJson` (Android app only)
+Prepaid AI credits for the Play apps (server side and the full integration guide: `app-platform/README.md`, "AI
+credits"). Everything renders **nothing on the website**; inside the app it needs the wrapper's `window.MGNative`
+bridge (an app build from the `ai-credits` native template).
+
+- `<AiCreditsHost />` — mount once inside `ToastProvider`: loads the balance, recovers purchases that weren't credited
+  yet, hosts the sheet.
+- `<CreditsChip />` — coin + balance pill for `AppHeader`'s `right` slot (amber below 20); tap opens the sheet.
+- The sheet lists the packs from the server with Google Play's **localized** prices, the balance, "Payment pending",
+  and a friendly "Purchases are unavailable on this device right now" (+ try again) when Play Billing isn't available.
+- `aiFetchJson(url, opts)` — `fetchJson` plus the `X-MG-App-User` header, live balance from `X-MG-Credits-Balance`, and
+  on HTTP 402 `insufficient_credits` it opens the sheet and rethrows (`creditsSheet: false` for background calls).
+  `isInsufficientCredits(err)`, `openCreditsSheet()`, `refreshCredits()`, `useCredits()`.
+- `aiCreditsRuleSections()` — `[]` on the web, one "AI Credits" rules section in the app: `[...rules, ...aiCreditsRuleSections()]`.
+- Providers: payment goes through a `CreditsProvider` (`playCreditsProvider` in the app). `registerWebCreditsProvider()`
+  is for a future web checkout; `activeCreditsProvider()` never returns it inside the Android app.
+- `fetchJson` gained `onResponse(res)` (read headers; must not throw).
+
 ### `LazyQRCode` / `QRCode`
 Pure SVG QR code from a vendored MIT encoder (uqr, license in `vendor/uqr.js`). Encodes locally — the value is never
 sent anywhere. `LazyQRCode` splits the encoder (~4 kB gz) into its own chunk with a same-size skeleton.
@@ -287,7 +305,7 @@ Props: `value`, `size` (200), `ecc` `L|M|Q|H` ('M'), `margin` (2 modules), `colo
 
 ### Icons
 `HelpIcon`, `SettingsIcon`, `CloseIcon`, `DownloadIcon`, `ShareIcon`, `CopyIcon`, `CheckIcon`, `AlertIcon`, `InfoIcon`,
-`WifiOffIcon`, `VolumeOnIcon`, `VolumeOffIcon`, `RefreshIcon`, `FlagIcon`, `MoreIcon` — inline SVG, `size` prop (18), `currentColor`.
+`WifiOffIcon`, `VolumeOnIcon`, `VolumeOffIcon`, `RefreshIcon`, `FlagIcon`, `MoreIcon`, `CoinsIcon` — inline SVG, `size` prop (18), `currentColor`.
 Apps can keep lucide-react for everything else.
 
 ## 6. Hooks

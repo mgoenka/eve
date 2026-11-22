@@ -32,6 +32,8 @@ export { OfflineBanner, OfflinePill } from './components/OfflineBanner';
 export type { OfflineBannerProps } from './components/OfflineBanner';
 export { ReportContentButton, ReportContentDialog, aiContentRuleSection } from './components/ReportContentButton';
 export type { ReportContentButtonProps, ReportContentDialogProps } from './components/ReportContentButton';
+export { AiCreditsHost, CreditsChip, CreditsSheet, useCredits, aiCreditsRuleSections } from './components/AiCredits';
+export type { CreditsChipProps } from './components/AiCredits';
 export { LazyQRCode } from './components/LazyQRCode';
 export type { QRCodeProps } from './components/QRCode';
 // Static QRCode (pulls the encoder into the importing chunk): import { QRCode } from './ui-kit/components/QRCode'
@@ -65,3 +67,21 @@ export { safeGet, safeSet, safeRemove, readJson } from './utils/storage';
 export { isNativeApp, nativePlatform, goToHub, NATIVE_UA_TOKEN } from './utils/native';
 export { reportContent, REPORT_CONTENT_URL, REPORT_REASONS, REPORT_LIMITS } from './utils/reportContent';
 export type { ReportContentInput, ReportReason } from './utils/reportContent';
+export {
+  aiFetchJson,
+  isInsufficientCredits,
+  openCreditsSheet,
+  closeCreditsSheet,
+  refreshCredits,
+  buyCredits,
+  creditsEnabled,
+  creditsHeaders,
+  activeCreditsProvider,
+  registerWebCreditsProvider,
+  AI_CREDIT_PACKS,
+  AI_STARTER_CREDITS,
+  INSUFFICIENT_CREDITS,
+} from './utils/credits';
+export type { AiFetchJsonOptions, CreditsProvider, CreditsProviderEvents, CreditsState } from './utils/credits';
+export { playCreditsProvider, getAppUserId, nativeBridge } from './utils/creditsPlay';
+export type { NativeBridge, NativeBilling, NativeProduct, NativePurchase } from './utils/creditsPlay';

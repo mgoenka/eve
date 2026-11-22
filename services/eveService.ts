@@ -8,7 +8,7 @@ import type {
   PostedSpecial,
   EveStory,
 } from '@/types';
-import { fetchJson, FetchError } from '../ui-kit';
+import { aiFetchJson, fetchJson, FetchError } from '../ui-kit';
 
 // ---------- Image budget (shown in the UI) ----------
 // Image responses (and the 429 when it runs out) carry the visitor's
@@ -34,6 +34,11 @@ export function subscribeImageLimit(fn: (l: ImageLimit) => void): () => void {
   return () => limitListeners.delete(fn);
 }
 
+/** Reservation platforms that list a venue (Gemini + Google Search); background, never opens the credits sheet. */
+export async function checkReservations(input: { restaurantName: string; city: string }): Promise<{ opentable: boolean; resy: boolean; tock: boolean }> {
+  return call('/api/reservations/check', input, { timeoutMs: 45_000, retries: 0, ai: 'background' });
+}
+
 /** Error with a user-safe message plus the server's code (e.g. 'image_limit'). */
 export interface EveError extends Error {
   code?: string;
@@ -41,24 +46,50 @@ export interface EveError extends Error {
   retryable?: boolean;
 }
 
+// Messages for the AI-credits answers (Android app only; the website never gets them).
+const CREDIT_MESSAGES: Record<string, string> = {
+  insufficient_credits: 'You\u2019re out of AI credits. Tap the coin at the top to get more.',
+  credits_unavailable: 'AI credits are temporarily unavailable. Please try again in a minute.',
+  update_required: 'Update Eve from Google Play to use AI features.',
+};
+
 // All API calls go through the kit's fetchJson: per-attempt timeout and
 // bounded retries (timeouts / network / 429 / 5xx). AI calls are slow
 // (search grounding, image generation), so each call sets its own timeout.
-async function call<T>(url: string, body: unknown, opts: { timeoutMs: number; retries?: number }): Promise<T> {
+// AI calls (`ai`) use aiFetchJson: inside the Android app it sends the app
+// user id (prepaid AI credits), keeps the coin chip current and opens the
+// "Get AI credits" sheet on HTTP 402, except for background calls
+// (ai: 'background'). On the website it is exactly fetchJson.
+async function call<T>(
+  url: string,
+  body: unknown,
+  opts: { timeoutMs: number; retries?: number; ai?: true | 'background' }
+): Promise<T> {
   try {
-    const data = await fetchJson<T>(url, {
+    const request = {
       method: body === undefined ? 'GET' : 'POST',
       body,
       timeoutMs: opts.timeoutMs,
       retries: opts.retries ?? 1,
       backoffMs: 1200,
-    });
+    };
+    const data = opts.ai
+      ? await aiFetchJson<T>(url, { ...request, creditsSheet: opts.ai !== 'background' })
+      : await fetchJson<T>(url, request);
     publishLimit((data as any)?.imageLimit);
     return data;
   } catch (e) {
     if (e instanceof FetchError) {
-      const b = (e.body && typeof e.body === 'object' ? e.body : {}) as { code?: string; imageLimit?: unknown };
+      const b = (e.body && typeof e.body === 'object' ? e.body : {}) as { code?: string; error?: unknown; imageLimit?: unknown };
       publishLimit(b.imageLimit);
+      const creditCode = typeof b.error === 'string' && CREDIT_MESSAGES[b.error] ? b.error : undefined;
+      if (creditCode) {
+        const err = new Error(CREDIT_MESSAGES[creditCode]) as EveError;
+        err.code = creditCode;
+        err.status = e.status;
+        err.retryable = creditCode === 'credits_unavailable';
+        throw err;
+      }
       const message =
         e.status === 503
           ? 'Eve is resting right now. Please try again in a little while.'
@@ -104,7 +135,7 @@ export interface PlanSkeletonResponse {
 }
 
 export async function planSkeleton(req: PlanSkeletonRequest): Promise<PlanSkeletonResponse> {
-  return call('/api/plan-experience/skeleton', req, { timeoutMs: 75_000, retries: 0 });
+  return call('/api/plan-experience/skeleton', req, { timeoutMs: 75_000, retries: 0, ai: true });
 }
 
 export interface StopImageRequest {
@@ -116,7 +147,7 @@ export interface StopImageRequest {
 }
 
 export async function stopImage(req: StopImageRequest): Promise<{ imageData: string; imageMime: string }> {
-  return call('/api/plan-experience/stop-image', req, { timeoutMs: 120_000, retries: 0 });
+  return call('/api/plan-experience/stop-image', req, { timeoutMs: 120_000, retries: 0, ai: true });
 }
 
 export interface NarrationRequest {
@@ -126,14 +157,14 @@ export interface NarrationRequest {
 }
 
 export async function narrationText(req: NarrationRequest): Promise<{ narration: string }> {
-  return call('/api/plan-experience/narration', req, { timeoutMs: 45_000 });
+  return call('/api/plan-experience/narration', req, { timeoutMs: 45_000, ai: 'background' });
 }
 
 export async function synthesize(
   text: string,
   voiceMode: 'eve' | 'reel' = 'eve'
 ): Promise<{ audioData: string; audioMime: string }> {
-  return call('/api/tts', { text, voiceMode }, { timeoutMs: 25_000 });
+  return call('/api/tts', { text, voiceMode }, { timeoutMs: 25_000, ai: 'background' });
 }
 
 export interface ContentPackRequest {
@@ -149,7 +180,7 @@ export interface ContentPackRequest {
 }
 
 export async function generateContentPack(req: ContentPackRequest): Promise<ContentPack> {
-  return call('/api/content-pack', req, { timeoutMs: 180_000, retries: 0 });
+  return call('/api/content-pack', req, { timeoutMs: 180_000, retries: 0, ai: true });
 }
 
 export async function postSpecial(input: {
@@ -175,7 +206,7 @@ export async function eveIntro(input: {
   party: number;
   freeText: string;
 }): Promise<{ intro: string; lines: string[] }> {
-  return call('/api/eve-intro', input, { timeoutMs: 45_000 });
+  return call('/api/eve-intro', input, { timeoutMs: 45_000, ai: 'background' });
 }
 
 export async function eveOutro(input: {
@@ -183,7 +214,7 @@ export async function eveOutro(input: {
   city: string;
   stops: Array<{ name: string; kind: string }>;
 }): Promise<{ outro: string }> {
-  return call('/api/eve-outro', input, { timeoutMs: 45_000 });
+  return call('/api/eve-outro', input, { timeoutMs: 45_000, ai: 'background' });
 }
 
 export async function eveStory(input: {
@@ -193,7 +224,7 @@ export async function eveStory(input: {
   city: string;
   party: number;
 }): Promise<EveStory> {
-  return call('/api/eve-story', input, { timeoutMs: 45_000 });
+  return call('/api/eve-story', input, { timeoutMs: 45_000, ai: 'background' });
 }
 
 export interface EveRefineResponse {
@@ -221,7 +252,7 @@ export async function eveRefine(input: {
   party: number;
   budgetUSD: number;
 }): Promise<EveRefineResponse> {
-  return call('/api/eve-refine', input, { timeoutMs: 75_000, retries: 0 });
+  return call('/api/eve-refine', input, { timeoutMs: 75_000, retries: 0, ai: true });
 }
 
 export interface SuggestSpecialResponse {
@@ -241,8 +272,8 @@ export async function suggestSpecial(input: {
   signatureDishes: string;
   /** Skip the server cache (the "pick a different dish" button). */
   fresh?: boolean;
-}): Promise<SuggestSpecialResponse> {
-  return call('/api/suggest-special', input, { timeoutMs: 75_000, retries: 0 });
+}, opts: { background?: boolean } = {}): Promise<SuggestSpecialResponse> {
+  return call('/api/suggest-special', input, { timeoutMs: 75_000, retries: 0, ai: opts.background ? 'background' : true });
 }
 
 export interface ParsedIntent {
@@ -271,15 +302,15 @@ export async function eveParseIntent(
     freeText?: string;
   }
 ): Promise<ParsedIntent> {
-  return call<ParsedIntent>('/api/eve-parse-intent', { transcript, currentForm }, { timeoutMs: 45_000 });
+  return call<ParsedIntent>('/api/eve-parse-intent', { transcript, currentForm }, { timeoutMs: 45_000, ai: true });
 }
 
 export async function eveAvatar(
   mood: 'devoted' | 'listening' | 'speaking' | 'thinking' | 'longing' = 'devoted'
 ): Promise<{ imageData: string; imageMime: string }> {
-  return call('/api/eve-avatar', { mood }, { timeoutMs: 120_000, retries: 0 });
+  return call('/api/eve-avatar', { mood }, { timeoutMs: 120_000, retries: 0, ai: 'background' });
 }
 
 export async function reverseGeocode(lat: number, lng: number): Promise<{ city: string }> {
-  return call<{ city: string }>('/api/reverse-geocode', { lat, lng }, { timeoutMs: 45_000 });
+  return call<{ city: string }>('/api/reverse-geocode', { lat, lng }, { timeoutMs: 45_000, ai: true });
 }
