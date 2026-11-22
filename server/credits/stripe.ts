@@ -217,7 +217,10 @@ export class StripeRestApi implements StripeApi {
 
   /** The Price for a pack, created on first use (product with the AIaaS tax code, tax added on top). */
   async ensurePrice(pack: PackInfo): Promise<string> {
-    const cached = this.priceIds.get(pack.id);
+    // Test and live mode have different prices: cache per mode (never the key itself).
+    const key = (await this.secrets.get(STRIPE_SECRETS.apiKey)) ?? '';
+    const cacheKey = (/^(sk|rk)_live_/.test(key) ? 'live:' : 'test:') + pack.id;
+    const cached = this.priceIds.get(cacheKey);
     if (cached) return cached;
     const lookup = stripeLookupKey(pack.id);
     const found = await this.call<{ data: Array<{ id: string }> }>('GET', 'prices', { 'lookup_keys[]': lookup, active: 'true', limit: 1 });
@@ -247,7 +250,7 @@ export class StripeRestApi implements StripeApi {
         if (!id) throw err;
       }
     }
-    this.priceIds.set(pack.id, id);
+    this.priceIds.set(cacheKey, id);
     return id;
   }
 
