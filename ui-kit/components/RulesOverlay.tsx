@@ -2,6 +2,7 @@
 import { useRef } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { COPYRIGHT, PRIVACY_URL } from '../utils/constants';
+import { isNativeApp } from '../utils/native';
 import { DownloadIcon } from './icons';
 import { IconButton } from './IconButton';
 import { Modal } from './Modal';
@@ -27,7 +28,10 @@ export interface RulesOverlayProps {
   subtitle?: string;
   /** Headings/bullets color. Default the kit gold. Keep gold unless the app already used another accent. */
   accentColor?: string;
-  /** "Download as PDF" button (uses the browser's print → Save as PDF; no external scripts). Default true. */
+  /**
+   * "Download as PDF" button (uses the browser's print → Save as PDF; no external scripts). Default true.
+   * Always hidden inside the native app wrappers (Android WebView has no print dialog).
+   */
   downloadable?: boolean;
   /** Last updated / © Mohit's Creations / Privacy Policy footer. Default true. */
   showFooter?: boolean;
@@ -100,6 +104,7 @@ function printAccent(hex: string): string {
 export function RulesOverlay({ open = true, onClose, appName, sections = [], children, subtitle = 'How to Play', accentColor = '#f5c542', downloadable = true, showFooter = true }: RulesOverlayProps) {
   const contentRef = useRef<HTMLDivElement>(null);
   const accentStyle: CSSProperties = { color: accentColor };
+  const canDownload = downloadable && !isNativeApp();
   return (
     <Modal
       open={open}
@@ -108,7 +113,7 @@ export function RulesOverlay({ open = true, onClose, appName, sections = [], chi
       ariaLabel={appName + ' rules'}
       size="lg"
       headerActions={
-        downloadable ? (
+        canDownload ? (
           <IconButton
             aria-label="Download rules as PDF"
             variant="gold"

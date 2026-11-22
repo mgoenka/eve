@@ -207,7 +207,8 @@ dialog on the rendered DOM — no jsPDF/html2canvas CDN scripts.
 
 `appName`, `onClose`, `sections?: { title, icon?, items: ReactNode[] }[]` (pass your `GAME_RULES` / `APP_RULES`
 as-is), `children`, `open` (default `true`, so `{show && <RulesOverlay …/>}` works), `subtitle` ('How to Play'),
-`accentColor` (gold), `downloadable` (true), `showFooter` (true).
+`accentColor` (gold), `downloadable` (true; the PDF button is always hidden when `isNativeApp()` because Android
+WebView has no print dialog), `showFooter` (true).
 
 ```tsx
 {showRules && <RulesOverlay appName="Mohit's Bingo" sections={GAME_RULES} onClose={() => setShowRules(false)} />}
@@ -331,6 +332,8 @@ Apps can keep lucide-react for everything else.
   The kit already uses it: `AppHeader` and `ErrorBoundary` hide the "Apps and Games" hub link in the app.
   Apps should also use it to: hide their own hub links / title-click-to-hub, hide any "install this app" (PWA) hint,
   and hide web purchase / pricing / Stripe checkout CTAs (Play payments policy — the app must work on the free tier).
+  Also hide what Android WebView can't do: `window.print()` buttons, browser speech recognition (mic) buttons and
+  Google OAuth sign-in flows (Google blocks OAuth in WebViews). Trademarked show/brand names get neutral names there.
   Keep everything else identical. Test with a spoofed UA (CDP `Network.setUserAgentOverride` / Chrome
   `--user-agent="… MohitGoenkaApp/Android"`).
 - `reportContent({ app, kind, content, reason, note? })` — the call behind `ReportContentButton`; resolves on success,
