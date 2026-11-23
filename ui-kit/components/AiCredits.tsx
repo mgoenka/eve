@@ -41,7 +41,7 @@ export function CreditsChip({ className }: CreditsChipProps) {
   const s = useCredits();
   if (!s.enabled) return null;
   const low = !s.owner && s.balance !== null && s.balance < 20;
-  const label = s.owner ? 'AI credits: owner mode' : s.balance === null ? 'AI credits' : `${fmt(s.balance)} AI credits`;
+  const label = s.owner ? 'AI credits: free with promo code' : s.balance === null ? 'AI credits' : `${fmt(s.balance)} AI credits`;
   return (
     <button
       type="button"
@@ -55,7 +55,7 @@ export function CreditsChip({ className }: CreditsChipProps) {
       )}
     >
       <CoinsIcon size={14} />
-      <span>{s.owner ? 'Owner' : s.balance === null ? '…' : fmt(s.balance)}</span>
+      <span>{s.owner ? 'Free' : s.balance === null ? '…' : fmt(s.balance)}</span>
     </button>
   );
 }
@@ -68,7 +68,7 @@ function OwnerCodeForm() {
   if (!open) {
     return (
       <button type="button" className="mt-3 text-xs text-mg-subtle underline underline-offset-2 hover:text-mg-text-2" onClick={() => setOpen(true)}>
-        Owner? Enter code
+        Have a promo code?
       </button>
     );
   }
@@ -91,15 +91,15 @@ function OwnerCodeForm() {
       <input
         type="password"
         autoComplete="off"
-        aria-label="Owner code"
-        placeholder="Owner code"
+        aria-label="Promo code"
+        placeholder="Promo code"
         value={code}
         maxLength={200}
         onChange={(e) => setCode(e.target.value)}
         className="h-9 min-w-0 flex-1 rounded-mg-sm border border-mg-border bg-mg-surface px-3 text-sm text-mg-text placeholder:text-mg-subtle focus:border-mg-gold focus:outline-none"
       />
       <Button size="sm" type="submit" loading={busy} loadingText="Checking" disabled={!code.trim()}>
-        Unlock
+        Apply
       </Button>
     </form>
   );
@@ -130,7 +130,7 @@ export function CreditsSheet() {
 
       {s.owner ? (
         <p role="status" className="mb-4 rounded-mg-sm border border-mg-gold/40 bg-mg-gold/10 px-3 py-2 text-sm text-mg-text">
-          Owner mode: AI is free on this device. Usage is still logged at its real cost.
+          Promo code applied: AI is free on this device.
         </p>
       ) : null}
       <div className="mb-4 flex items-center justify-between gap-3 rounded-mg border border-mg-border bg-mg-surface px-4 py-3">

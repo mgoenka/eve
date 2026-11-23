@@ -35,6 +35,8 @@ export type { ReportContentButtonProps, ReportContentDialogProps } from './compo
 export { AiCreditsHost, CreditsChip, CreditsSheet, useCredits, aiCreditsRuleSections } from './components/AiCredits';
 export type { CreditsChipProps } from './components/AiCredits';
 export { LazyQRCode } from './components/LazyQRCode';
+export { LazyShareSheet } from './components/LazyShareSheet';
+export type { ShareSheetProps } from './components/ShareSheet';
 export type { QRCodeProps } from './components/QRCode';
 // Static QRCode (pulls the encoder into the importing chunk): import { QRCode } from './ui-kit/components/QRCode'
 export * from './components/icons';
@@ -58,6 +60,9 @@ export type { ToastOptions, ToastTone } from './utils/toastBus';
 export { haptic, haptics } from './utils/haptics';
 export { shareOrCopy, copyToClipboard } from './utils/share';
 export type { ShareData, ShareResult } from './utils/share';
+export type { ScoreCardData, ScoreCardPlayer, ScoreCardStat, ScoreCardFormat } from './utils/scoreCard';
+export { adaptiveSkill, aiSucceeds, skillToError, skillToDelay, createSkillTracker } from './utils/adaptiveAi';
+export type { AdaptiveSkillInput, SkillTracker } from './utils/adaptiveAi';
 export { fetchJson, FetchError } from './utils/fetchJson';
 export type { FetchJsonOptions, FetchErrorKind } from './utils/fetchJson';
 export { lazyWithRetry, importWithRetry, isChunkLoadError, reloadOnceForNewVersion } from './utils/lazyWithRetry';

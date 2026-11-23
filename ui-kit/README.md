@@ -297,6 +297,30 @@ bridge (an app build from the `ai-credits` native template).
   is for a future web checkout; `activeCreditsProvider()` never returns it inside the Android app.
 - `fetchJson` gained `onResponse(res)` (read headers; must not throw).
 
+### `LazyShareSheet` / `ShareSheet` (share a result as an image or video)
+Every game's end screen has **Play again** and **Share**. Share opens this sheet: a branded results card drawn on the
+device (Post 4:5 or Story 9:16; app name, headline, everyone's score with AI tags and a crown for the winner, up to 4
+stat tiles, and a promo footer "Can you beat this? · Play free at <host> · Also on Google Play" with a QR code),
+**Share image** (system sheet on phones: Instagram, WhatsApp, Facebook, Messages…; download on desktop),
+**Share video** (an animated ~5 s MP4 of the reveal, only where MediaRecorder can record MP4), Instagram / WhatsApp /
+Facebook / X / Copy buttons, and Save image. Nothing is uploaded. In the Android app, image/video files go through
+`navigator.share({files})` → NativeShell's share sheet (wrapper 1.2+; older wrappers fall back to saving the file).
+```tsx
+<LazyShareSheet open={shareOpen} onClose={() => setShareOpen(false)}
+  text={`We scored ${score} in Mohit's Faceoff! Can you beat it?`}
+  data={{ app: "Mohit's Faceoff", url: 'https://faceoff.mohitgoenka.com', headline: 'Team Blue wins!',
+          subline: 'Movies · 3 rounds', scoreSuffix: 'pts',
+          players: [{ name: 'Blue', score: 320, color: '#3b82f6', winner: true }, { name: 'Robo', score: 210, ai: true }],
+          stats: [{ label: 'Rounds', value: '3' }] }} />
+```
+`renderScoreCardPng(data, format)` and `recordScoreCardVideo(data, format)` (utils/scoreCard) are there for custom UIs.
+
+### Adaptive AI (`adaptiveSkill`, `createSkillTracker`, `skillToError`, `skillToDelay`)
+AI opponents follow the humans: `adaptiveSkill({ humanScore, aiScore, scale, progress, humanAccuracy })` returns a 0..1
+skill that starts just under the humans' observed accuracy, eases off while the AI leads (more so late in the game)
+and pushes harder while it trails. Map it onto the game's own AI decisions (chance of a right answer, size of a
+numeric error, buzz delay…). Humans can always win; games don't turn one-sided.
+
 ### `LazyQRCode` / `QRCode`
 Pure SVG QR code from a vendored MIT encoder (uqr, license in `vendor/uqr.js`). Encodes locally — the value is never
 sent anywhere. `LazyQRCode` splits the encoder (~4 kB gz) into its own chunk with a same-size skeleton.

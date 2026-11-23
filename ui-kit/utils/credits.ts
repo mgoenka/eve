@@ -268,13 +268,13 @@ export async function enterOwnerCode(code: string): Promise<boolean> {
   try {
     await fetchJson<{ ok?: boolean }>(url, { method: 'POST', body: { ownerCode: code }, headers: creditsHeaders(), timeoutMs: 15000, retries: 0 });
     setState({ owner: true });
-    showToast({ id: 'mg-credits-owner', tone: 'success', message: 'Owner mode is on for this device: AI is free here.' });
+    showToast({ id: 'mg-credits-owner', tone: 'success', message: 'Promo code applied: AI is free on this device.' });
     void refreshCredits();
     return true;
   } catch (err) {
     const code2 = err instanceof FetchError ? (err.body as { error?: string } | null)?.error : undefined;
     const message =
-      code2 === 'wrong_code' ? 'That code isn’t right.' : code2 === 'rate_limited' ? 'Too many tries. Please wait a while.' : code2 === 'owner_unavailable' ? 'Owner mode isn’t set up.' : 'Couldn’t check the code right now.';
+      code2 === 'wrong_code' ? 'That promo code isn’t valid.' : code2 === 'rate_limited' ? 'Too many tries. Please wait a while.' : code2 === 'owner_unavailable' ? 'Promo codes aren’t available right now.' : 'Couldn’t check the promo code right now.';
     showToast({ id: 'mg-credits-owner', tone: 'error', message });
     return false;
   }
