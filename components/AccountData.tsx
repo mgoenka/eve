@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Trash2, Check } from 'lucide-react';
-import { AppHeader, Button, FetchError, Modal, fetchJson, useConfirm } from '../ui-kit';
+import { AppHeader, Button, FetchError, LocalAiSetting, Modal, fetchJson, useConfirm } from '../ui-kit';
 import { EveLogo } from './EveLogo';
 import { useOpenRules } from './RulesContext';
 
@@ -135,6 +135,10 @@ export function EveSettings({ open, onClose }: { open: boolean; onClose: () => v
   const [deleted, setDeleted] = useState(false);
   return (
     <Modal open={open} onClose={deleted ? () => window.location.replace('/') : onClose} title="Settings" size="sm">
+      {/* "Use this device's AI" (hidden where the device has no model of its own). */}
+      <div className="-mx-3 mb-4">
+        <LocalAiSetting />
+      </div>
       <AccountDataSection compact onDeleted={() => setDeleted(true)} />
     </Modal>
   );

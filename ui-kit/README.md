@@ -315,6 +315,21 @@ Facebook / X / Copy buttons, and Save image. Nothing is uploaded. In the Android
 ```
 `renderScoreCardPng(data, format)` and `recordScoreCardVideo(data, format)` (utils/scoreCard) are there for custom UIs.
 
+### On-device AI (`runLocalFirst`, `localJson`, `LocalAiSetting`, `useLocalAi`) — free, no Sparks
+Devices with their own model run supported features locally: Chrome 148+ desktop / Edge (Prompt API `LanguageModel`)
+and Android wrapper 1.3+ on AICore phones (Gemini Nano via ML Kit, `window.MGLocalAI`). Settings and the Sparks sheet
+show "✨ Use this device's AI" (default on) with a one-time "Set up" download button where needed.
+```ts
+const words = await runLocalFirst({
+  minOutputTokens: 200,                 // skip engines that can't write this much in one call (Android ≈256)
+  local: () => localJson({ system, prompt, schema, validate: (v) => cleanWords(v) }), // null → server
+  server: () => aiFetchJson('/api/ai/words', { method: 'POST', json: body }),       // charges Sparks
+});
+```
+Use it only where a small model is good enough (creative text, short lists, classification, work grounded in
+text the user gave). Keep the same validation/sanitizing on the local result as the server applies, and keep
+fact-critical answer keys, prices, real places and health data on the server.
+
 ### Adaptive AI (`adaptiveSkill`, `createSkillTracker`, `skillToError`, `skillToDelay`)
 AI opponents follow the humans: `adaptiveSkill({ humanScore, aiScore, scale, progress, humanAccuracy })` returns a 0..1
 skill that starts just under the humans' observed accuracy, eases off while the AI leads (more so late in the game)

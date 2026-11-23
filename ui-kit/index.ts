@@ -36,6 +36,7 @@ export { AiCreditsHost, CreditsChip, CreditsSheet, useCredits, aiCreditsRuleSect
 export type { CreditsChipProps } from './components/AiCredits';
 export { LazyQRCode } from './components/LazyQRCode';
 export { LazyShareSheet } from './components/LazyShareSheet';
+export { LocalAiSetting } from './components/LocalAiSetting';
 export type { ShareSheetProps } from './components/ShareSheet';
 export type { QRCodeProps } from './components/QRCode';
 // Static QRCode (pulls the encoder into the importing chunk): import { QRCode } from './ui-kit/components/QRCode'
@@ -48,6 +49,7 @@ export { useMediaQuery, useIsPhone } from './hooks/useMediaQuery';
 export { useReducedMotion, prefersReducedMotion } from './hooks/useReducedMotion';
 export { useOnline } from './hooks/useOnline';
 export { useWakeLock } from './hooks/useWakeLock';
+export { useLocalAi } from './hooks/useLocalAi';
 export { useSettings } from './hooks/useSettings';
 
 // utils
@@ -95,3 +97,5 @@ export type { AiFetchJsonOptions, CreditsProvider, CreditsProviderEvents, Credit
 export { playCreditsProvider, getAppUserId, nativeBridge } from './utils/creditsPlay';
 export { webCreditsProvider, CREDITS_CHECKOUT_URL, CREDITS_CONFIRM_URL } from './utils/creditsWeb';
 export type { NativeBridge, NativeBilling, NativeProduct, NativePurchase } from './utils/creditsPlay';
+export { runLocalFirst, canRunLocally, localPrompt, localJson, parseLooseJson, prepareLocalAi, refreshLocalAi, getLocalAiInfo, subscribeLocalAi, localAiEnabled } from './utils/localAi';
+export type { LocalAiInfo, LocalAiState, LocalAiEngine, LocalPromptOptions, RunLocalFirstOptions } from './utils/localAi';

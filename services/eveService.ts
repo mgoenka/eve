@@ -8,7 +8,8 @@ import type {
   PostedSpecial,
   EveStory,
 } from '@/types';
-import { aiFetchJson, fetchJson, FetchError } from '../ui-kit';
+import { aiFetchJson, canRunLocally, fetchJson, FetchError, runLocalFirst } from '../ui-kit';
+import { LOCAL_TOKENS, localIntro, localNarration, localOutro, localPackText, localParseIntent, localStory } from './localEve';
 
 // ---------- Image budget (shown in the UI) ----------
 // Image responses (and the 429 when it runs out) carry the visitor's
@@ -157,7 +158,11 @@ export interface NarrationRequest {
 }
 
 export async function narrationText(req: NarrationRequest): Promise<{ narration: string }> {
-  return call('/api/plan-experience/narration', req, { timeoutMs: 45_000, ai: 'background' });
+  return runLocalFirst({
+    minOutputTokens: LOCAL_TOKENS.narration,
+    local: () => localNarration(req),
+    server: () => call('/api/plan-experience/narration', req, { timeoutMs: 45_000, ai: 'background' }),
+  });
 }
 
 export async function synthesize(
@@ -179,8 +184,17 @@ export interface ContentPackRequest {
   signatureDishes: string;
 }
 
+/**
+ * The pictures are always made on the server. With on-device AI the text (Instagram, menu card,
+ * email, SMS, Reel storyboard) is written here first and sent along, so the server skips those calls.
+ */
 export async function generateContentPack(req: ContentPackRequest): Promise<ContentPack> {
-  return call('/api/content-pack', req, { timeoutMs: 180_000, retries: 0, ai: true });
+  let body: ContentPackRequest & { local?: unknown } = req;
+  if (await canRunLocally({ minOutputTokens: LOCAL_TOKENS.contentPack })) {
+    const text = await localPackText(req).catch(() => null);
+    if (text) body = { ...req, local: { ...text.copy, reel: text.reel } };
+  }
+  return call('/api/content-pack', body, { timeoutMs: 180_000, retries: 0, ai: true });
 }
 
 export async function postSpecial(input: {
@@ -206,7 +220,11 @@ export async function eveIntro(input: {
   party: number;
   freeText: string;
 }): Promise<{ intro: string; lines: string[] }> {
-  return call('/api/eve-intro', input, { timeoutMs: 45_000, ai: 'background' });
+  return runLocalFirst({
+    minOutputTokens: LOCAL_TOKENS.intro,
+    local: () => localIntro(input),
+    server: () => call('/api/eve-intro', input, { timeoutMs: 45_000, ai: 'background' }),
+  });
 }
 
 export async function eveOutro(input: {
@@ -214,7 +232,11 @@ export async function eveOutro(input: {
   city: string;
   stops: Array<{ name: string; kind: string }>;
 }): Promise<{ outro: string }> {
-  return call('/api/eve-outro', input, { timeoutMs: 45_000, ai: 'background' });
+  return runLocalFirst({
+    minOutputTokens: LOCAL_TOKENS.outro,
+    local: () => localOutro(input),
+    server: () => call('/api/eve-outro', input, { timeoutMs: 45_000, ai: 'background' }),
+  });
 }
 
 export async function eveStory(input: {
@@ -224,7 +246,11 @@ export async function eveStory(input: {
   city: string;
   party: number;
 }): Promise<EveStory> {
-  return call('/api/eve-story', input, { timeoutMs: 45_000, ai: 'background' });
+  return runLocalFirst<EveStory>({
+    minOutputTokens: LOCAL_TOKENS.story,
+    local: () => localStory(input),
+    server: () => call('/api/eve-story', input, { timeoutMs: 45_000, ai: 'background' }),
+  });
 }
 
 export interface EveRefineResponse {
@@ -302,7 +328,11 @@ export async function eveParseIntent(
     freeText?: string;
   }
 ): Promise<ParsedIntent> {
-  return call<ParsedIntent>('/api/eve-parse-intent', { transcript, currentForm }, { timeoutMs: 45_000, ai: true });
+  return runLocalFirst<ParsedIntent>({
+    minOutputTokens: LOCAL_TOKENS.parseIntent,
+    local: () => localParseIntent(transcript, currentForm),
+    server: () => call<ParsedIntent>('/api/eve-parse-intent', { transcript, currentForm }, { timeoutMs: 45_000, ai: true }),
+  });
 }
 
 export async function eveAvatar(

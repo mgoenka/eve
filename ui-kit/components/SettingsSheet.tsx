@@ -4,6 +4,7 @@ import { useSettings } from '../hooks/useSettings';
 import { haptic } from '../utils/haptics';
 import { Modal } from './Modal';
 import { Switch } from './Switch';
+import { LocalAiSetting } from './LocalAiSetting';
 
 export interface SettingsSheetProps {
   open: boolean;
@@ -11,7 +12,7 @@ export interface SettingsSheetProps {
   /** Default "Settings". */
   title?: ReactNode;
   /** Hide toggles that don't apply (e.g. no sounds in the app). All shown by default. */
-  show?: { sound?: boolean; haptics?: boolean; reduceMotion?: boolean };
+  show?: { sound?: boolean; haptics?: boolean; reduceMotion?: boolean; onDeviceAi?: boolean };
   /** App-specific settings, rendered under the shared toggles. */
   children?: ReactNode;
   /** Small text at the bottom (e.g. version). */
@@ -38,6 +39,7 @@ export function SettingsSheet({ open, onClose, title = 'Settings', show = {}, ch
         {show.reduceMotion !== false ? (
           <Switch label="Reduce motion" description="Fewer animations and no confetti" checked={s.reduceMotion} onChange={(v) => set({ reduceMotion: v })} />
         ) : null}
+        {show.onDeviceAi !== false ? <LocalAiSetting /> : null}
       </div>
       {children ? <div className="mt-4 border-t border-mg-border-subtle pt-4">{children}</div> : null}
       {footnote ? <p className="mt-4 text-center text-xs text-mg-subtle">{footnote}</p> : null}

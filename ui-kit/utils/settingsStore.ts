@@ -8,10 +8,12 @@ export interface MgSettings {
   haptics: boolean;
   /** Force reduced motion even if the OS does not ask for it. */
   reduceMotion: boolean;
+  /** Run supported features on this device's own AI model when it has one (free, no Sparks). */
+  onDeviceAi: boolean;
 }
 
 export const SETTINGS_KEY = 'mg:settings:v1';
-export const DEFAULT_SETTINGS: MgSettings = { sound: true, haptics: true, reduceMotion: false };
+export const DEFAULT_SETTINGS: MgSettings = { sound: true, haptics: true, reduceMotion: false, onDeviceAi: true };
 
 type Listener = () => void;
 const listeners = new Set<Listener>();

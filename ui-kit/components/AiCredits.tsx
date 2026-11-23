@@ -22,6 +22,7 @@ import { isNativeApp } from '../utils/native';
 import { Button } from './Button';
 import { SparklesIcon } from './icons';
 import { Modal } from './Modal';
+import { LocalAiSetting } from './LocalAiSetting';
 import type { RuleSection } from './RulesOverlay';
 
 /** Live credits state (balance, products, sheet). Re-renders on change. */
@@ -219,6 +220,9 @@ export function CreditsSheet() {
           {s.balance === null ? '…' : fmt(s.balance)}
         </span>
       </div>
+      <div className="-mx-3 mb-3">
+        <LocalAiSetting compact />
+      </div>
 
       <ul className={cx('flex flex-col gap-2', s.owner && 'hidden')} aria-label="Sparks packs">
         {s.packs.map((pack) => {
@@ -308,6 +312,7 @@ export function aiCreditsRuleSections(): RuleSection[] {
         'Each one uses a few Sparks, based on what it really costs to make — usually 1–10, more for very long lists or pictures. Repeats are free, and everything else is always free.',
         `Tap the chip to get more: ${packs} (US prices; Google Play shows your local price). Sparks are added as soon as Google Play confirms the payment.`,
         'Have a promo code? Tap the chip, then “Have a promo code?”, for free Sparks (each code works once in this app).',
+        'Phones with built-in AI (Pixel 9 and newer, Galaxy S25 and newer, and more) make some of these right on the phone, for free: no Sparks used. Switch it off in Settings under “Use this device’s AI”.',
         'Sparks don’t expire and belong to this app on this device; with Android backup on they come back after a reinstall on the same Google account.',
       ],
     },
