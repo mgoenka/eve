@@ -19,6 +19,7 @@ import {
   cleanStory,
   contentSharedContext,
   copyPrompt,
+  copyChannelPrompt,
   introPrompt,
   narrationPrompt,
   outroPrompt,
@@ -1324,7 +1325,38 @@ app.post('/api/content-pack', metered('content-pack', estContentPack, async (req
   const local = cleanLocalPackText(req.body?.local);
 
 
-  let copyData: any = local.copy ?? null;
+  let copyData: any = null;
+  if (local.copy) try {
+    // The device wrote Instagram, email and SMS; the menu card (price, allergens) is always made here.
+    const str = { type: Type.STRING };
+    const strList = { type: Type.ARRAY, items: { type: Type.STRING } };
+    const menuResp = await generateText({
+      contents: copyChannelPrompt(sharedContext, 'menuCard'),
+      maxOutputTokens: 1024,
+      config: { temperature: 0.8 },
+      schema: {
+        type: Type.OBJECT,
+        properties: {
+          menuCard: {
+            type: Type.OBJECT,
+            properties: { name: str, description: str, suggestedPrice: str, allergenTags: strList },
+            required: ['name', 'description', 'suggestedPrice', 'allergenTags'],
+          },
+        },
+        required: ['menuCard'],
+      },
+    });
+    const menu = safeParseJson(menuResp.text || '');
+    if (!menu?.menuCard) {
+      refundImages(req, PACK_IMAGES);
+      return jsonError(res, 502, 'Model returned non-JSON copy');
+    }
+    copyData = { ...local.copy, menuCard: menu.menuCard };
+  } catch (err: any) {
+    refundImages(req, PACK_IMAGES);
+    console.error('content-pack/menu failed:', err?.message || err);
+    return jsonError(res, 500, `Copy generation failed: ${err?.message || 'unknown'}`);
+  }
   if (!copyData) try {
     const str = { type: Type.STRING };
     const strList = { type: Type.ARRAY, items: { type: Type.STRING } };

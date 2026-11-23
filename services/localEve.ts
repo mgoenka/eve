@@ -15,7 +15,7 @@ import {
   cleanStoryStrict,
   contentSharedContext,
   copyChannelPrompt,
-  COPY_CHANNEL_IDS,
+  DEVICE_COPY_CHANNEL_IDS,
   COPY_CHANNEL_JSON_SCHEMA,
   introPrompt,
   INTRO_JSON_SCHEMA,
@@ -28,7 +28,7 @@ import {
   storyPrompt,
   STORY_JSON_SCHEMA,
 } from '../lib/evePrompts';
-import type { ContentPackInput, CopyData, IntentForm, LocalPackText, ParsedIntentOut, StoryOut } from '../lib/evePrompts';
+import type { ContentPackInput, DeviceCopyData, IntentForm, LocalPackText, ParsedIntentOut, StoryOut } from '../lib/evePrompts';
 
 /** Output each feature needs in one call (tokens). Engines that can't write this much skip to the server. */
 export const LOCAL_TOKENS = {
@@ -132,9 +132,10 @@ export function localParseIntent(
 }
 
 /**
- * The content pack's text, one channel per call (Instagram, menu card, email, SMS, Reel storyboard).
- * Returns what passed its checks (the copy only when all four channels did); the server makes the
- * pictures and anything missing. Null when nothing passed.
+ * The content pack's text, one channel per call (Instagram, email, SMS, Reel storyboard).
+ * The menu card (price, allergens) is always made on the server. Returns what passed its checks
+ * (the copy only when all three channels did); the server makes the pictures, the menu card and
+ * anything missing. Null when nothing passed.
  */
 export async function localPackText(input: ContentPackInput): Promise<LocalPackText | null> {
   const ctx = contentSharedContext({
@@ -149,14 +150,14 @@ export async function localPackText(input: ContentPackInput): Promise<LocalPackT
   const opts = { temperature: 0.8, timeoutMs: 45_000 };
   const [channels, reel] = await Promise.all([
     Promise.all(
-      COPY_CHANNEL_IDS.map((c) =>
+      DEVICE_COPY_CHANNEL_IDS.map((c) =>
         localJson({ ...opts, prompt: copyChannelPrompt(ctx, c), schema: COPY_CHANNEL_JSON_SCHEMA[c], validate: (v) => cleanCopyChannel(c, v) })
       )
     ),
     localJson({ ...opts, temperature: 0.85, prompt: reelPrompt(ctx), schema: REEL_JSON_SCHEMA, validate: cleanReel }),
   ]);
   const out: LocalPackText = {};
-  if (channels.every((x) => x != null)) out.copy = Object.fromEntries(COPY_CHANNEL_IDS.map((c, i) => [c, channels[i]])) as unknown as CopyData;
+  if (channels.every((x) => x != null)) out.copy = Object.fromEntries(DEVICE_COPY_CHANNEL_IDS.map((c, i) => [c, channels[i]])) as unknown as DeviceCopyData;
   if (reel) out.reel = reel;
   return out.copy || out.reel ? out : null;
 }

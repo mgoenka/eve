@@ -94,7 +94,7 @@ const APP_RULES: RuleSection[] = [
       'There is no sign-in. Recent evenings and your restaurant profile stay on this device.',
       'Specials you publish to Eve diners, and an Instagram connection, are stored on Eve’s server and linked to this device.',
       'Settings (the gear) → Delete my account and data removes all of it and resets Eve on this device.',
-      'With Settings → Use this device’s AI on, phones and browsers with their own AI write Eve’s lines, story, narration, replies and restaurant copy on the device, free (no Sparks). Plans, pictures and her voice still use Eve’s server.',
+      'With Settings → Use this device’s AI on, phones and browsers with their own AI write Eve’s lines, story, narration, replies and restaurant copy on the device, free (no Sparks). Plans, pictures, the menu card and her voice still use Eve’s server.',
     ],
   },
   {

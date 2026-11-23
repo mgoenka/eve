@@ -545,18 +545,28 @@ export function cleanReel(v: unknown): ReelData | null {
   return scenes.length === 3 ? { scenes, fullVoiceoverScript } : null;
 }
 
+/**
+ * Copy channels the device may write. The menu card (suggested price, allergen tags) is always the
+ * server's: allergens are health information and a small model would invent them.
+ */
+export const DEVICE_COPY_CHANNEL_IDS = ['instagram', 'email', 'sms'] as const satisfies readonly CopyChannel[];
+export type DeviceCopyData = Pick<CopyData, (typeof DEVICE_COPY_CHANNEL_IDS)[number]>;
+
 /** Text the device already wrote for a content pack (sent to /api/content-pack as `local`). */
 export interface LocalPackText {
-  copy?: CopyData;
+  copy?: DeviceCopyData;
   reel?: ReelData;
 }
-/** Server side: accept the device's copy only when all four channels pass, and its reel when it passes. */
+/**
+ * Server side: accept the device's copy only when all three device channels pass, and its reel when
+ * it passes. Any device-supplied menu card (price, allergens) is ignored.
+ */
 export function cleanLocalPackText(v: unknown): LocalPackText {
   const o = obj(v);
   if (!o) return {};
   const out: LocalPackText = {};
-  const ch = COPY_CHANNEL_IDS.map((c) => [c, cleanCopyChannel(c, { [c]: o[c] })] as const);
-  if (ch.every(([, x]) => x != null)) out.copy = Object.fromEntries(ch) as unknown as CopyData;
+  const ch = DEVICE_COPY_CHANNEL_IDS.map((c) => [c, cleanCopyChannel(c, { [c]: o[c] })] as const);
+  if (ch.every(([, x]) => x != null)) out.copy = Object.fromEntries(ch) as unknown as DeviceCopyData;
   const reel = cleanReel(o.reel);
   if (reel) out.reel = reel;
   return out;

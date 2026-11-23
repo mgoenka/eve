@@ -185,8 +185,9 @@ export interface ContentPackRequest {
 }
 
 /**
- * The pictures are always made on the server. With on-device AI the text (Instagram, menu card,
- * email, SMS, Reel storyboard) is written here first and sent along, so the server skips those calls.
+ * The pictures and the menu card (price, allergens) are always made on the server. With on-device AI
+ * the other text (Instagram, email, SMS, Reel storyboard) is written here first and sent along, so the
+ * server skips those calls.
  */
 export async function generateContentPack(req: ContentPackRequest): Promise<ContentPack> {
   let body: ContentPackRequest & { local?: unknown } = req;
