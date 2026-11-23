@@ -38,6 +38,7 @@ export interface RulesOverlayProps {
 }
 
 function lastUpdated(): string {
+  if (isNativeApp()) return '';
   const d = new Date(document.lastModified);
   if (Number.isNaN(d.getTime())) return '';
   return 'Last Updated: ' + d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) + ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
@@ -126,7 +127,7 @@ export function RulesOverlay({ open = true, onClose, appName, sections = [], chi
       footer={
         showFooter ? (
           <div className="flex flex-col items-center gap-1 text-center text-[10px] text-mg-muted sm:grid sm:grid-cols-[1fr_auto_1fr] sm:gap-2 sm:text-left">
-            <span className="sm:justify-self-start">{lastUpdated()}</span>
+            {!isNativeApp() ? <span className="sm:justify-self-start">{lastUpdated()}</span> : <span className="sm:justify-self-start" aria-hidden="true" />}
             <span className="sm:justify-self-center">© {new Date().getFullYear()} {COPYRIGHT}</span>
             <a href={PRIVACY_URL} target="_blank" rel="noopener noreferrer" className="text-mg-muted underline-offset-2 hover:text-mg-text hover:underline sm:justify-self-end">Privacy Policy</a>
           </div>
