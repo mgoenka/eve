@@ -15,9 +15,9 @@ import { webCreditsProvider } from './creditsWeb';
 /** Same ids and Play credit counts as server-kit/credits/config.ts (the server is the source of truth; its
  *  /api/credits/balance answer replaces these). Kept here for the rules text and the first paint. */
 export const AI_CREDIT_PACKS: ReadonlyArray<{ id: string; credits: number; priceUsd: number }> = [
-  { id: 'ai_credits_099', credits: 346, priceUsd: 0.99 },
-  { id: 'ai_credits_499', credits: 1746, priceUsd: 4.99 },
-  { id: 'ai_credits_1999', credits: 6996, priceUsd: 19.99 },
+  { id: 'ai_credits_099', credits: 300, priceUsd: 0.99 },
+  { id: 'ai_credits_499', credits: 2000, priceUsd: 4.99 },
+  { id: 'ai_credits_1999', credits: 10000, priceUsd: 19.99 },
 ];
 export const AI_STARTER_CREDITS = 100;
 export const CREDITS_BALANCE_URL = '/api/credits/balance';

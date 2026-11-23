@@ -10,8 +10,14 @@ export const CREDIT_USD = 0.001;
  */
 export const GOOGLE_FEE = 0.3;
 
-/** Mohit earns at least this multiple of his AI cost on every credit sold (after GOOGLE_FEE). */
+/**
+ * Pricing target the round packs were chosen against: revenue after fees ÷ the AI cost the Sparks can buy.
+ * Packs are fixed round numbers (same on Play and the web) rather than derived from this; the test
+ * checks every pack still earns at least MIN_MARGIN in the worst case (Play 30 %, Stripe worst case).
+ */
 export const MARGIN = 2;
+/** Floor every pack must clear in the worst case (Play 30 % fee). */
+export const MIN_MARGIN = 1.3;
 
 /** Free credits once per app identity (package + app user id). Covered by the $0.99 app price. */
 export const STARTER_CREDITS = 100;
@@ -32,13 +38,15 @@ export const STRIPE_FEE = { rate: 0.029 + 0.035 + 0.015, fixedUsd: 0.3 } as cons
 export const WEB_MIN_PACK_USD = 4.99;
 
 /**
- * Credit packs: one table for every provider. On Play these are one-time consumable products with the
- * same ids in every app; on the web they will map to Stripe prices. priceUsd = US list price.
+ * Sparks packs: one table for every provider, round numbers, more Sparks per dollar as packs grow
+ * (303 / 401 / 500 per $). On Play these are one-time consumable products with the same ids in every app;
+ * on the web they are Stripe prices (lookup key mg_<id>_v1). priceUsd = US list price.
+ * Worst-case margin (revenue after fees ÷ AI cost): Play 30 % 2.3x / 1.75x / 1.4x; Stripe – / 2.15x / 1.8x.
  */
 export const PACKS = [
-  { id: 'ai_credits_099', priceUsd: 0.99 },
-  { id: 'ai_credits_499', priceUsd: 4.99 },
-  { id: 'ai_credits_1999', priceUsd: 19.99 },
+  { id: 'ai_credits_099', priceUsd: 0.99, credits: 300 },
+  { id: 'ai_credits_499', priceUsd: 4.99, credits: 2000 },
+  { id: 'ai_credits_1999', priceUsd: 19.99, credits: 10000 },
 ] as const;
 
 export type PackId = (typeof PACKS)[number]['id'];
@@ -52,7 +60,12 @@ export function netRevenueMicros(provider: PaymentProvider, priceUsd: number, go
   return price - Math.ceil(price * STRIPE_FEE.rate) - micros(STRIPE_FEE.fixedUsd); // price − (2.9% × price + $0.30)
 }
 
-/** Credits for a pack: floor(net revenue / MARGIN / CREDIT_USD). */
+/** Sparks a price would buy at exactly MARGIN (reference for choosing packs; packs are fixed in PACKS). */
+/** Revenue after fees ÷ the AI cost of a pack's Sparks. */
+export function marginOf(priceUsd: number, credits: number, provider: PaymentProvider, googleFee: number = GOOGLE_FEE): number {
+  return netRevenueMicros(provider, priceUsd, googleFee) / (credits * micros(CREDIT_USD));
+}
+
 export function creditsForPrice(priceUsd: number, provider: PaymentProvider = 'play', googleFee: number = GOOGLE_FEE): number {
   return Math.max(0, Math.floor(netRevenueMicros(provider, priceUsd, googleFee) / MARGIN / micros(CREDIT_USD)));
 }
@@ -68,7 +81,7 @@ export function packsFor(provider: PaymentProvider): PackInfo[] {
   return PACKS.filter((p) => provider !== 'stripe' || p.priceUsd >= WEB_MIN_PACK_USD).map((p) => ({
     id: p.id,
     priceUsd: p.priceUsd,
-    credits: creditsForPrice(p.priceUsd, provider),
+    credits: p.credits,
     provider,
   }));
 }
