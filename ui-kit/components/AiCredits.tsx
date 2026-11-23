@@ -9,6 +9,8 @@ import {
   closeCreditsSheet,
   creditsEnabled,
   redeemPromoCode,
+  createDeviceLinkCode,
+  linkThisDevice,
   getCreditsState,
   initCredits,
   loadPrices,
@@ -105,6 +107,83 @@ function OwnerCodeForm() {
   );
 }
 
+/** Website only: share this browser's Sparks with another device (one-use code), or join another device's. */
+function LinkDevicesForm() {
+  const [open, setOpen] = useState(false);
+  const [code, setCode] = useState<string | null>(null);
+  const [making, setMaking] = useState(false);
+  const [entry, setEntry] = useState('');
+  const [joining, setJoining] = useState(false);
+  if (!open) {
+    return (
+      <button type="button" className="mt-3 block text-xs text-mg-subtle underline underline-offset-2 hover:text-mg-text-2" onClick={() => setOpen(true)}>
+        Use your Sparks on another device
+      </button>
+    );
+  }
+  return (
+    <div className="mt-4 rounded-mg border border-mg-border bg-mg-surface px-4 py-3 text-sm text-mg-text-2">
+      <div className="font-semibold text-mg-text">Use your Sparks on another device</div>
+      <p className="mt-1 text-xs text-mg-subtle">Link your phone and computer browsers to share one Sparks balance in every app on mohitgoenka.com.</p>
+      {code ? (
+        <div className="mt-3" role="status">
+          <div className="font-mono text-2xl font-bold tracking-[0.3em] text-mg-gold">{code.slice(0, 3) + ' ' + code.slice(3)}</div>
+          <p className="mt-1 text-xs text-mg-subtle">On the other device, open ✨ Sparks, tap “Use your Sparks on another device” and enter this code within 10 minutes. It works once.</p>
+        </div>
+      ) : (
+        <Button
+          size="sm"
+          variant="secondary"
+          className="mt-3"
+          loading={making}
+          loadingText="Getting a code"
+          onClick={() => {
+            setMaking(true);
+            void createDeviceLinkCode().then((c) => {
+              setMaking(false);
+              setCode(c);
+            });
+          }}
+        >
+          Get a code for my other device
+        </Button>
+      )}
+      <form
+        className="mt-3 flex items-center gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!entry.trim() || joining) return;
+          setJoining(true);
+          void linkThisDevice(entry).then((ok) => {
+            setJoining(false);
+            if (ok) {
+              setEntry('');
+              setOpen(false);
+            }
+          });
+        }}
+      >
+        <input
+          type="text"
+          inputMode="text"
+          autoComplete="off"
+          autoCapitalize="characters"
+          spellCheck={false}
+          aria-label="Code from your other device"
+          placeholder="Code from other device"
+          value={entry}
+          maxLength={12}
+          onChange={(e) => setEntry(e.target.value)}
+          className="h-9 min-w-0 flex-1 rounded-mg-sm border border-mg-border bg-mg-surface px-3 text-sm uppercase text-mg-text placeholder:normal-case placeholder:text-mg-subtle focus:border-mg-gold focus:outline-none"
+        />
+        <Button size="sm" type="submit" loading={joining} loadingText="Linking" disabled={!entry.trim()}>
+          Link
+        </Button>
+      </form>
+    </div>
+  );
+}
+
 export function CreditsSheet() {
   const s = useCredits();
   const unavailable = s.pricesStatus === 'unavailable';
@@ -189,6 +268,7 @@ export function CreditsSheet() {
           : 'Sparks don’t expire and work in all of Mohit’s apps and games in this browser. Secure checkout by Stripe (sold through Link): prices in US dollars, with sales tax or VAT added at checkout where it applies.'}
       </p>
       {s.owner ? null : <OwnerCodeForm />}
+      {viaPlay ? null : <LinkDevicesForm />}
     </Modal>
   );
 }

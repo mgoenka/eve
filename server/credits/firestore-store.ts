@@ -11,13 +11,14 @@
 // aiCreditConfig/web                              { enabled }                (the web credits switch)
 // aiCreditPromos/{CODE}                           PromoCode { credits, maxRedemptions, redemptions, expiresAt, active, ... }
 // aiCreditPromos/{CODE}/redemptions/{walletKey}   { account, credits, at, app }  (one per wallet)
+// aiCreditLinkCodes/{sha256(code)}               { account, expiresAt, createdAt, usedAt? } (web linking, 10 min)
 //
 // Only the server touches these (no client SDK, no security-rule access needed). The package is
 // imported lazily so web-only traffic and apps without Firestore never load it.
 import type { DocumentReference, Firestore, Transaction } from '@google-cloud/firestore';
 import { COLLECTIONS, WEB_SWITCH_DOC } from './config.ts';
 import { liveHeld, promoProblem } from './store.ts';
-import type { AccountMeta, AccountState, ChargeInput, CreditPurchaseInput, CreditStore, LedgerEntry, PromoCode, PromoResult, PurchaseRecord } from './store.ts';
+import type { AccountMeta, AccountState, ChargeInput, CreditPurchaseInput, CreditStore, LedgerEntry, MergeResult, PromoCode, PromoResult, PurchaseRecord } from './store.ts';
 
 type Holds = Record<string, { credits: number; expiresAt: number }>;
 interface AccountDoc {
@@ -31,6 +32,8 @@ interface AccountDoc {
   updatedAt: string;
   /** Owner wallet: AI logged, never deducted (set by the owner code or scripts/credits-admin.mjs). */
   owner?: boolean;
+  /** Linked into another web wallet (balance 0); late purchases and refunds follow it. */
+  mergedInto?: string;
 }
 
 export interface FirestoreStoreOptions {
@@ -270,18 +273,26 @@ export class FirestoreCreditStore implements CreditStore {
       const accRef = db.collection(COLLECTIONS.accounts).doc(rec.account);
       const aSnap = await tx.get(accRef);
       if (!aSnap.exists) return null;
-      const doc = aSnap.data() as AccountDoc;
+      let accRefNow = accRef;
+      let doc = aSnap.data() as AccountDoc;
+      for (let i = 0; i < 5 && doc.mergedInto; i++) {
+        const nextRef = db.collection(COLLECTIONS.accounts).doc(doc.mergedInto);
+        const next = await tx.get(nextRef);
+        if (!next.exists) break;
+        accRefNow = nextRef;
+        doc = next.data() as AccountDoc;
+      }
       const target = Math.min(rec.credits, Math.max(0, Math.round(rec.credits * Math.min(1, Math.max(0, fraction)))));
       const delta = target - (rec.reversedCredits ?? 0);
-      if (delta <= 0) return { reversed: 0, balance: doc.balance, account: rec.account };
+      if (delta <= 0) return { reversed: 0, balance: doc.balance, account: accRefNow.id };
       const balance = doc.balance - delta;
       const at = now.toISOString();
-      tx.update(accRef, { balance, updatedAt: at });
+      tx.update(accRefNow, { balance, updatedAt: at });
       tx.update(purchaseRef, { reversedCredits: target, reversedAt: at });
       const e: LedgerEntry = { type: 'reversal', credits: -delta, balanceAfter: balance, at, reason, productId: rec.productId, provider: rec.provider };
       if (rec.orderId) e.orderId = rec.orderId;
-      tx.create(accRef.collection('ledger').doc(), e);
-      return { reversed: delta, balance, account: rec.account };
+      tx.create(accRefNow.collection('ledger').doc(), e);
+      return { reversed: delta, balance, account: accRefNow.id };
     });
   }
 
@@ -321,6 +332,60 @@ export class FirestoreCreditStore implements CreditStore {
       tx.update(promoRef, { redemptions: (promo.redemptions ?? 0) + 1, lastRedeemedAt: at });
       return { ok: true, code, credits, balance };
     });
+  }
+
+  async createLinkCode(codeHash: string, key: string, expiresAt: Date, now: Date): Promise<void> {
+    const db = await this.db();
+    await db.collection(COLLECTIONS.linkCodes).doc(codeHash).create({ account: key, expiresAt: expiresAt.getTime(), createdAt: now.toISOString() });
+  }
+
+  async takeLinkCode(codeHash: string, now: Date): Promise<string | null> {
+    const db = await this.db();
+    const ref = db.collection(COLLECTIONS.linkCodes).doc(codeHash);
+    return db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const c = snap.exists ? (snap.data() as { account?: string; expiresAt?: number; usedAt?: string }) : null;
+      if (!c?.account || c.usedAt || (c.expiresAt ?? 0) <= now.getTime()) return null;
+      tx.update(ref, { usedAt: now.toISOString() });
+      return c.account;
+    });
+  }
+
+  async mergeAccounts(fromKey: string, toKey: string, reason: string, now: Date): Promise<MergeResult> {
+    const db = await this.db();
+    const fromRef = db.collection(COLLECTIONS.accounts).doc(fromKey);
+    const toRef = db.collection(COLLECTIONS.accounts).doc(toKey);
+    return db.runTransaction(async (tx) => {
+      const toSnap = await tx.get(toRef);
+      if (!toSnap.exists) throw new Error('merge into a missing wallet');
+      const to = toSnap.data() as AccountDoc;
+      const fromSnap = fromKey === toKey ? null : await tx.get(fromRef);
+      const from = fromSnap?.exists ? (fromSnap.data() as AccountDoc) : null;
+      if (!from || from.mergedInto) return { balance: to.balance, moved: 0, owner: to.owner === true };
+      const moved = from.balance;
+      const balance = to.balance + moved;
+      const owner = to.owner === true || from.owner === true;
+      const at = now.toISOString();
+      tx.update(toRef, { balance, owner, 'totals.merged': ((to.totals as { merged?: number } | undefined)?.merged ?? 0) + moved, updatedAt: at });
+      tx.update(fromRef, { balance: 0, holds: {}, mergedInto: toKey, updatedAt: at });
+      const inTo: LedgerEntry = { type: 'merge', credits: moved, balanceAfter: balance, at, reason: `linked ${reason}: from ${fromKey}` };
+      const outFrom: LedgerEntry = { type: 'merge', credits: -moved, balanceAfter: 0, at, reason: `linked ${reason}: into ${toKey}` };
+      tx.create(toRef.collection('ledger').doc(), inTo);
+      tx.create(fromRef.collection('ledger').doc(), outFrom);
+      return { balance, moved, owner };
+    });
+  }
+
+  async resolveAccount(key: string): Promise<string> {
+    const db = await this.db();
+    let k = key;
+    for (let i = 0; i < 5; i++) {
+      const snap = await db.collection(COLLECTIONS.accounts).doc(k).get();
+      const next = snap.exists ? (snap.data() as AccountDoc).mergedInto : undefined;
+      if (!next) break;
+      k = next;
+    }
+    return k;
   }
 
   async webEnabled(): Promise<boolean> {

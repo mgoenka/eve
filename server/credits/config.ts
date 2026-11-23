@@ -114,9 +114,16 @@ export const COLLECTIONS = {
   externalIds: 'aiCreditOrders', // doc id "<provider>:<secondary id>" (Play orderId, Stripe payment intent) — second idempotency key
   starterIps: 'aiCreditStarterIps', // doc id sha256(salt + IP): web starter grants per address
   promos: 'aiCreditPromos', // doc id = normalized promo code; subcollection "redemptions" (doc id = wallet key)
+  linkCodes: 'aiCreditLinkCodes', // doc id = sha256(link code): { account, expiresAt, usedAt? } (web browser linking)
 } as const;
 
 /** Promo codes are case-insensitive: stored and matched upper-case, spaces removed. Letters, digits, dashes. */
+/** Link codes ("use your Sparks on another device", web only): 6 characters, no 0/O/1/I/L, 10 minutes, one use. */
+export const LINK_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+export const LINK_CODE_LENGTH = 6;
+export const LINK_CODE_TTL_MS = 10 * 60_000;
+export const normalizeLinkCode = (raw: string): string => raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+
 export const PROMO_CODE_RE = /^[A-Z0-9][A-Z0-9-]{2,39}$/;
 export const normalizePromoCode = (raw: string): string => raw.trim().toUpperCase().replace(/\s+/g, '');
 

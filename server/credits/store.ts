@@ -2,7 +2,7 @@
 // Storage contract for balances + append-only ledger, and an in-memory implementation
 // (tests and local runs without Firestore). The Firestore one is in firestore-store.ts.
 
-export type LedgerType = 'grant' | 'purchase' | 'charge' | 'reversal';
+export type LedgerType = 'grant' | 'purchase' | 'charge' | 'reversal' | 'merge';
 
 export interface LedgerEntry {
   type: LedgerType;
@@ -42,6 +42,15 @@ export interface AccountState {
   created: boolean;
   /** Owner wallet (Mohit's own devices): AI is logged but never deducted or refused. */
   owner?: boolean;
+}
+
+/** Result of linking one web wallet into another. */
+export interface MergeResult {
+  /** Balance of the wallet everything went into. */
+  balance: number;
+  /** Sparks moved from the joining wallet. */
+  moved: number;
+  owner: boolean;
 }
 
 export interface PurchaseRecord {
@@ -153,9 +162,22 @@ export interface CreditStore {
    * reason "promo <CODE>") and counts the redemption. Creates the account (with `starter`) if needed.
    */
   redeemPromo(code: string, key: string, meta: AccountMeta, starter: number, now: Date): Promise<PromoResult>;
+  /** Store a one-use link code (by hash) for this wallet. */
+  createLinkCode(codeHash: string, key: string, expiresAt: Date, now: Date): Promise<void>;
+  /** Use a link code once: the wallet key it was made for, or null (unknown, expired or used). */
+  takeLinkCode(codeHash: string, now: Date): Promise<string | null>;
+  /**
+   * Link wallets: move `fromKey`'s balance (and owner flag) into `toKey`, log both sides ('merge'), leave
+   * `fromKey` at 0 with mergedInto = toKey (late purchases and refunds of `fromKey` follow it).
+   * No-op if `fromKey` doesn't exist, is `toKey`, or was already merged. `toKey` must exist.
+   */
+  mergeAccounts(fromKey: string, toKey: string, reason: string, now: Date): Promise<MergeResult>;
+  /** Follow mergedInto (a few hops) to the wallet that holds the Sparks now. */
+  resolveAccount(key: string): Promise<string>;
 }
 
 interface MemAccount {
+  mergedInto?: string;
   meta: AccountMeta;
   balance: number;
   holds: Map<string, { credits: number; expiresAt: number }>;
@@ -179,6 +201,7 @@ export class MemoryCreditStore implements CreditStore {
   /** The web switch for tests. */
   webSwitch = false;
   readonly promos = new Map<string, PromoCode>();
+  readonly linkCodes = new Map<string, { account: string; expiresAt: number; usedAt?: number }>();
   readonly promoRedemptions = new Map<string, Set<string>>();
 
   private ensureSync(key: string, meta: AccountMeta, starter: number, now: Date): { acc: MemAccount; created: boolean } {
@@ -299,13 +322,14 @@ export class MemoryCreditStore implements CreditStore {
     if (!rec) return null;
     const target = Math.min(rec.credits, Math.max(0, Math.round(rec.credits * Math.min(1, Math.max(0, fraction)))));
     const delta = target - (rec.reversedCredits ?? 0);
-    const acc = this.accounts.get(rec.account);
+    const accountKey = await this.resolveAccount(rec.account);
+    const acc = this.accounts.get(accountKey);
     if (!acc) return null;
-    if (delta <= 0) return { reversed: 0, balance: acc.balance, account: rec.account };
+    if (delta <= 0) return { reversed: 0, balance: acc.balance, account: accountKey };
     rec.reversedCredits = target;
     acc.balance -= delta;
     acc.ledger.push({ type: 'reversal', credits: -delta, balanceAfter: acc.balance, at: now.toISOString(), reason, productId: rec.productId, provider: rec.provider, ...(rec.orderId ? { orderId: rec.orderId } : {}) });
-    return { reversed: delta, balance: acc.balance, account: rec.account };
+    return { reversed: delta, balance: acc.balance, account: accountKey };
   }
 
   async webEnabled() {
@@ -332,5 +356,43 @@ export class MemoryCreditStore implements CreditStore {
     used.add(key);
     this.promoRedemptions.set(code, used);
     return { ok: true, code, credits: p.credits, balance: acc.balance };
+  }
+
+  async createLinkCode(codeHash: string, key: string, expiresAt: Date) {
+    this.linkCodes.set(codeHash, { account: key, expiresAt: expiresAt.getTime() });
+  }
+
+  async takeLinkCode(codeHash: string, now: Date) {
+    const c = this.linkCodes.get(codeHash);
+    if (!c || c.usedAt || c.expiresAt <= now.getTime()) return null;
+    c.usedAt = now.getTime();
+    return c.account;
+  }
+
+  async mergeAccounts(fromKey: string, toKey: string, reason: string, now: Date): Promise<MergeResult> {
+    const to = this.accounts.get(toKey);
+    if (!to) throw new Error('merge into a missing wallet');
+    const from = this.accounts.get(fromKey);
+    if (!from || fromKey === toKey || from.mergedInto) return { balance: to.balance, moved: 0, owner: to.owner === true };
+    const moved = from.balance;
+    const at = now.toISOString();
+    to.balance += moved;
+    if (from.owner) to.owner = true;
+    to.ledger.push({ type: 'merge', credits: moved, balanceAfter: to.balance, at, reason: `linked ${reason}: from ${fromKey}` });
+    from.ledger.push({ type: 'merge', credits: -moved, balanceAfter: 0, at, reason: `linked ${reason}: into ${toKey}` });
+    from.balance = 0;
+    from.holds.clear();
+    from.mergedInto = toKey;
+    return { balance: to.balance, moved, owner: to.owner === true };
+  }
+
+  async resolveAccount(key: string) {
+    let k = key;
+    for (let i = 0; i < 5; i++) {
+      const next = this.accounts.get(k)?.mergedInto;
+      if (!next) break;
+      k = next;
+    }
+    return k;
   }
 }

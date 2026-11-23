@@ -7,7 +7,7 @@
 //     requests while aiCreditConfig/web.enabled is true. Switch off: the websites are free, as before.
 //  3. Purchases: creditPurchase({ wallet, provider, externalId, packId }) is idempotent on (provider, externalId).
 //     Adapters: verifyPlay (Play Billing token) and Stripe Checkout (confirm on return + signed webhook).
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import {
   APP_USER_HEADER,
   APP_USER_RE,
@@ -25,6 +25,10 @@ import {
   OWNER_CODE_SECRET,
   PROMO_CODE_RE,
   normalizePromoCode,
+  LINK_CODE_ALPHABET,
+  LINK_CODE_LENGTH,
+  LINK_CODE_TTL_MS,
+  normalizeLinkCode,
   packById,
   packsFor,
 } from './config.ts';
@@ -346,6 +350,7 @@ export function createCredits(options: CreditsOptions) {
   const confirmIpLimit = new Window(30, 60_000);
   const ownerIpLimit = new Window(5, 60 * 60_000);
   const ownerWalletLimit = new Window(5, 24 * 60 * 60_000);
+  const linkCreateLimit = new Window(10, 60 * 60_000);
   const secrets = options.secrets ?? new SecretSource();
 
   const meta = (w: Wallet): AccountMeta => ({ kind: w.kind, app: w.app, id: w.id });
@@ -355,6 +360,24 @@ export function createCredits(options: CreditsOptions) {
 
   /** Web wallets known to exist on this instance (skips a Firestore round trip per AI call). */
   const knownWeb = new Set<string>();
+  /**
+   * Linked browsers: a web wallet that joined another one (mergedInto) is followed, so every browser in a
+   * linked group keeps spending the same Sparks even after the group itself joins another device.
+   * Cached per instance: a followed link for a day, "not linked" for a minute.
+   */
+  const webLinks = new Map<string, { to: string; until: number }>();
+  async function currentWeb(w: Wallet): Promise<Wallet> {
+    if (w.kind !== 'web') return w;
+    const t = Date.now();
+    let to = webLinks.get(w.key);
+    if (!to || to.until <= t) {
+      const resolved = await store.resolveAccount(w.key);
+      if (webLinks.size > 50_000) webLinks.clear();
+      to = { to: resolved, until: t + (resolved === w.key ? 60_000 : 24 * 60 * 60_000) };
+      webLinks.set(w.key, to);
+    }
+    return to.to === w.key ? w : webWallet(to.to.slice('web:'.length), w.address);
+  }
   /** Create a new web wallet; it gets the starter credits only while its address hasn't claimed WEB_STARTER_PER_IP. */
   async function prepareWeb(wallet: Wallet) {
     if (wallet.kind !== 'web' || knownWeb.has(wallet.key)) return;
@@ -422,6 +445,7 @@ export function createCredits(options: CreditsOptions) {
   async function run<T>(wallet: Wallet | null, opts: RunOptions, fn: (meter: Meter) => Promise<T>): Promise<RunResult<T>> {
     const meter = newMeter();
     if (!wallet) return { value: await fn(meter), charged: 0, balance: null };
+    wallet = await currentWeb(wallet).catch(() => wallet!);
 
     const holdId = randomBytes(9).toString('hex');
     const estimate = Math.max(1, Math.ceil(Number.isFinite(opts.estimate) ? opts.estimate : 1));
@@ -508,9 +532,11 @@ export function createCredits(options: CreditsOptions) {
     const credits = p.credits ?? pack.credits;
     if (!Number.isInteger(credits) || credits <= 0) throw new Error('creditPurchase: invalid credits');
     const secondaryKeys = (p.secondaryIds ?? []).filter((s) => SECONDARY_RE.test(s)).map((s) => `${p.provider}:${s}`);
+    // A web wallet that was linked into another one: its late purchases go to the wallet it joined.
+    const key = p.wallet.kind === 'web' ? await store.resolveAccount(p.wallet.key) : p.wallet.key;
     const result = await store.creditPurchase(
       {
-        key: p.wallet.key,
+        key,
         meta: meta(p.wallet),
         starter: starterFor(p.wallet),
         provider: p.provider,
@@ -711,6 +737,54 @@ export function createCredits(options: CreditsOptions) {
     return { status: 200, body: { ok: true, promo: true, credited: r.credits, balance: r.balance } };
   }
 
+  /**
+   * "Use your Sparks on another device" (web only). `create`: a 6-character code for this browser's wallet,
+   * valid 10 minutes, one use (stored as a hash). `join`: this browser joins the wallet the code was made
+   * for: its own Sparks (and owner flag) move there and its mg_wallet cookie switches to that wallet, so
+   * both browsers spend one balance in every *.mohitgoenka.com app. Only wrong codes count toward the limit.
+   */
+  async function linkWeb(req: ReqLike, res: ResLike, body: { linkAction?: unknown; linkCode?: unknown }): Promise<{ status: number; body: Record<string, unknown> }> {
+    if (isNativeRequest(req)) return { status: 403, body: { error: 'web_only' } };
+    if (!(await webEnabled())) return { status: 403, body: { error: 'web_credits_off' } };
+    let wallet = walletFor(req);
+    if (body.linkAction === 'create') {
+      if (!wallet || wallet.kind !== 'web') return { status: 402, body: { error: 'wallet_required' } };
+      const wait = linkCreateLimit.hit(wallet.key);
+      if (wait) return { status: 429, body: { error: 'rate_limited', retryAfter: wait } };
+      await prepareWeb(wallet);
+      const target = await store.resolveAccount(wallet.key);
+      const code = Array.from({ length: LINK_CODE_LENGTH }, () => LINK_CODE_ALPHABET[randomInt(LINK_CODE_ALPHABET.length)]).join('');
+      await store.createLinkCode(createHash('sha256').update(code).digest('hex'), target, new Date(now().getTime() + LINK_CODE_TTL_MS), now());
+      console.log(`[credits] ${app}: link code made for web wallet ${mask(wallet.id)}`);
+      return { status: 200, body: { ok: true, code, expiresInSeconds: Math.round(LINK_CODE_TTL_MS / 1000) } };
+    }
+    const code = typeof body.linkCode === 'string' ? normalizeLinkCode(body.linkCode) : '';
+    const ip = clientIp(req);
+    const waitIp = ownerIpLimit.peek(ip);
+    if (waitIp) return { status: 429, body: { error: 'rate_limited', retryAfter: waitIp } };
+    if (code.length !== LINK_CODE_LENGTH) return { status: 400, body: { error: 'invalid' } };
+    const targetKey = await store.takeLinkCode(createHash('sha256').update(code).digest('hex'), now());
+    if (!targetKey || !targetKey.startsWith('web:')) {
+      ownerIpLimit.hit(ip);
+      return { status: 403, body: { error: 'wrong_link_code' } };
+    }
+    if (!wallet || wallet.kind !== 'web') {
+      const fresh = randomBytes(24).toString('base64url');
+      wallet = webWallet(fresh, ip);
+    }
+    // The whole group this browser is in joins (its other linked browsers follow on their next visit).
+    const group = await currentWeb(wallet);
+    if (group.key === targetKey) return { status: 200, body: { ok: true, linked: true, moved: 0, alreadyLinked: true } };
+    const r = await store.mergeAccounts(group.key, targetKey, app, now());
+    webLinks.set(group.key, { to: targetKey, until: Date.now() + 24 * 60 * 60_000 });
+    webLinks.delete(wallet.key);
+    const targetId = targetKey.slice('web:'.length);
+    appendCookie(res, walletCookie(req, targetId));
+    knownWeb.add(targetKey);
+    console.log(`[credits] ${app}: web wallet ${mask(wallet.id)} linked into ${mask(targetId)} (+${r.moved})`);
+    return { status: 200, body: { ok: true, linked: true, moved: r.moved, balance: r.balance, owner: r.owner } };
+  }
+
   // ---------------------------------------------------------------- HTTP glue (Express-compatible)
 
   /**
@@ -766,8 +840,10 @@ export function createCredits(options: CreditsOptions) {
           res.status(200).json({ enforced: false });
           return;
         }
-        const body = await balance(wallet);
-        if (wallet.kind === 'web') appendCookie(res, walletCookie(req, wallet.id)); // renew the 400-day cookie
+        const current = await currentWeb(wallet);
+        const body = await balance(current);
+        // Renew the 400-day cookie; a browser whose wallet was linked into another switches to it here.
+        if (current.kind === 'web') appendCookie(res, walletCookie(req, current.id));
         res.setHeader(BALANCE_HEADER, String(body.balance));
         res.status(200).json(body);
       } catch (err) {
@@ -813,6 +889,13 @@ export function createCredits(options: CreditsOptions) {
       const wait = checkoutIpLimit.hit(clientIp(req));
       if (wait) return limited(res, wait);
       try {
+        const lb = (req.body ?? {}) as { linkAction?: unknown; linkCode?: unknown };
+        if (lb.linkAction === 'create' || typeof lb.linkCode === 'string') {
+          // Browser linking rides on this route too (same-origin, JSON): no extra wiring in the apps.
+          const o = await linkWeb(req, res, lb);
+          res.status(o.status).json(o.body);
+          return;
+        }
         const ownerCode = codeOf(req.body);
         if (ownerCode !== undefined && !isNativeRequest(req)) {
           // Owner / promo codes on the web ride on this route (same-origin, JSON). Works with the web switch off

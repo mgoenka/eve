@@ -83,6 +83,8 @@ export {
   creditsHeaders,
   enterOwnerCode,
   redeemPromoCode,
+  createDeviceLinkCode,
+  linkThisDevice,
   activeCreditsProvider,
   registerWebCreditsProvider,
   AI_CREDIT_PACKS,

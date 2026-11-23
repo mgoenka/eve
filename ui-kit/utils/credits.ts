@@ -303,6 +303,61 @@ export async function redeemPromoCode(code: string): Promise<boolean> {
 /** @deprecated Use redeemPromoCode (same thing; the field takes owner and promo codes). */
 export const enterOwnerCode = redeemPromoCode;
 
+const LINK_ERRORS: Record<string, string> = {
+  wrong_link_code: 'That code didn’t work. Codes work once, for 10 minutes: get a new one on your other device.',
+  invalid: 'Enter the 6-character code from your other device.',
+  rate_limited: 'Too many tries. Please wait a while.',
+  web_credits_off: 'Sparks aren’t on the website yet.',
+  wallet_required: 'Reload the page and try again.',
+};
+const linkErrorOf = (err: unknown) => {
+  const c = err instanceof FetchError ? (err.body as { error?: string } | null)?.error : undefined;
+  return (c && LINK_ERRORS[c]) || 'Couldn’t link right now. Please try again.';
+};
+
+/**
+ * Website only: a one-use code (6 characters, 10 minutes) that lets another browser share this browser's
+ * Sparks. Resolves the code, or null after showing an error toast.
+ */
+export async function createDeviceLinkCode(): Promise<string | null> {
+  try {
+    const r = await fetchJson<{ code?: string }>('/api/credits/checkout', { method: 'POST', body: { linkAction: 'create' }, headers: creditsHeaders(), timeoutMs: 15000, retries: 0 });
+    return typeof r.code === 'string' ? r.code : null;
+  } catch (err) {
+    showToast({ id: 'mg-credits-link', tone: 'error', message: linkErrorOf(err) });
+    return null;
+  }
+}
+
+/** Website only: join the Sparks of the browser that made `code`. This browser's own Sparks move there too. */
+export async function linkThisDevice(code: string): Promise<boolean> {
+  try {
+    const r = await fetchJson<{ moved?: number; balance?: number; owner?: boolean; alreadyLinked?: boolean }>('/api/credits/checkout', {
+      method: 'POST',
+      body: { linkCode: code },
+      headers: creditsHeaders(),
+      timeoutMs: 15000,
+      retries: 0,
+    });
+    setState({ ...(typeof r.balance === 'number' ? { balance: r.balance } : {}), ...(r.owner ? { owner: true } : {}) });
+    const moved = r.moved ?? 0;
+    showToast({
+      id: 'mg-credits-link',
+      tone: 'success',
+      message: r.alreadyLinked
+        ? 'This browser already shares those Sparks.'
+        : moved > 0
+          ? `Linked! The ${moved.toLocaleString()} Sparks from this browser were added. Both devices now share one balance.`
+          : 'Linked! This browser now shares your Sparks.',
+    });
+    void refreshCredits();
+    return true;
+  } catch (err) {
+    showToast({ id: 'mg-credits-link', tone: 'error', message: linkErrorOf(err) });
+    return false;
+  }
+}
+
 /** Buy a pack with the active provider. */
 export async function buyCredits(packId: string): Promise<void> {
   const provider = activeCreditsProvider();
