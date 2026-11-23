@@ -229,8 +229,8 @@ export class StripeRestApi implements StripeApi {
     if (!id) {
       const credits = pack.credits.toLocaleString('en-US');
       const product = await this.call<{ id: string }>('POST', 'products', {
-        name: `${credits} AI credits`,
-        description: `${credits} credits for the AI features in Mohit's apps and games on mohitgoenka.com. Credits never expire.`,
+        name: `${credits} Sparks`,
+        description: `${credits} Sparks for the magic features in Mohit's apps and games on mohitgoenka.com. Sparks never expire.`,
         tax_code: STRIPE_TAX_CODE,
         metadata: { mg_pack: pack.id, mg_credits: pack.credits },
       });
