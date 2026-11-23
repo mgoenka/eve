@@ -728,7 +728,7 @@ export function createCredits(options: CreditsOptions) {
     if (!PROMO_CODE_RE.test(promo)) return miss('wrong_code');
     await prepare();
     const r = await store.redeemPromo(promo, wallet.key, meta(wallet), starterFor(wallet), now());
-    if (!r.ok) {
+    if (r.ok === false) {
       console.warn(`[credits] ${app}: promo ${r.error === 'promo_unknown' ? 'unknown code' : `${promo} ${r.error}`} for ${wallet.kind} wallet ${mask(wallet.id)}`);
       return miss(r.error === 'promo_unknown' ? 'wrong_code' : r.error);
     }
