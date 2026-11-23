@@ -100,7 +100,12 @@ export const COLLECTIONS = {
   purchases: 'aiCreditPurchases', // doc id "<provider>:<sha256(externalId)>" (Play: purchase token; Stripe: checkout session id)
   externalIds: 'aiCreditOrders', // doc id "<provider>:<secondary id>" (Play orderId, Stripe payment intent) — second idempotency key
   starterIps: 'aiCreditStarterIps', // doc id sha256(salt + IP): web starter grants per address
+  promos: 'aiCreditPromos', // doc id = normalized promo code; subcollection "redemptions" (doc id = wallet key)
 } as const;
+
+/** Promo codes are case-insensitive: stored and matched upper-case, spaces removed. Letters, digits, dashes. */
+export const PROMO_CODE_RE = /^[A-Z0-9][A-Z0-9-]{2,39}$/;
+export const normalizePromoCode = (raw: string): string => raw.trim().toUpperCase().replace(/\s+/g, '');
 
 /** Web wallet cookie: httpOnly, Secure, SameSite=Lax, Domain=.mohitgoenka.com, shared by every app. */
 export const WEB_WALLET_COOKIE = 'mg_wallet';

@@ -26,6 +26,7 @@ export {
   PACKS,
   PACK_INFO,
   PAYMENT_PROVIDERS,
+  PROMO_CODE_RE,
   STARTER_CREDITS,
   STRIPE_FEE,
   STRIPE_TAX_CODE,
@@ -35,6 +36,7 @@ export {
   WEB_WALLET_COOKIE,
   creditsForPrice,
   netRevenueMicros,
+  normalizePromoCode,
   packById,
   packsFor,
 } from './config.ts';
@@ -42,7 +44,7 @@ export type { PackId, PackInfo, PaymentProvider } from './config.ts';
 export { PRICE_TABLE, PRICING_SOURCE, costOfCall, creditsForUsd, estimateCredits, usageOf, groundedRequestsOf } from './pricing.ts';
 export type { CallUsage, ModelPrice, Rates, UsageMetadata } from './pricing.ts';
 export { MemoryCreditStore } from './store.ts';
-export type { CreditStore, LedgerEntry } from './store.ts';
+export type { CreditStore, LedgerEntry, PromoCode, PromoError, PromoResult } from './store.ts';
 export { FirestoreCreditStore } from './firestore-store.ts';
 export { GooglePlayApi, FakePlayApi, PlayApiError } from './play.ts';
 export type { PlayApi, ProductPurchase } from './play.ts';

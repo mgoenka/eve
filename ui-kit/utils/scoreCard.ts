@@ -48,6 +48,10 @@ export interface ScoreCardData {
   challenge?: string;
   /** Adds "Also on Google Play" to the footer. Default true. */
   playStore?: boolean;
+  /** Footer call to action before the host. Default "Play free at" (apps: "Free at", "Cook free at"…). */
+  cta?: string;
+  /** Row markers: 'rank' (crown for the winner, then 2, 3…) or 'none'. Default 'rank'. */
+  marker?: 'rank' | 'none';
 }
 
 export type ScoreCardFormat = 'post' | 'story';
@@ -167,14 +171,36 @@ export function drawScoreCard(ctx: CanvasRenderingContext2D, data: ScoreCardData
   ctx.font = `bold ${story ? 80 : 70}px ${DISPLAY}`;
   const hsMeasured = fitText(ctx, data.headline, W - pad * 2, story ? 80 : 70, DISPLAY);
   const headerH = 40 + (medalR * 2 + 16) + 84 + Math.round(hsMeasured * 0.5) + 30 + (data.subline ? 52 : 0) + (story ? 40 : 18);
-  const rowsN = Math.min(8, data.players?.length ?? 0);
+  const allRows = data.players || [];
   const footerH = story ? 330 : 250;
   const statsH = data.stats && data.stats.length ? (story ? 190 : 150) : 0;
   const top0 = story ? 170 : 96;
-  const rowGap = 16;
-  const avail = H - top0 - headerH - footerH - statsH - 30;
-  const rowH = rowsN ? Math.max(72, Math.min(story ? 128 : 112, (avail - rowGap * (rowsN - 1)) / rowsN)) : 0;
-  const blockH = headerH + (rowsN ? rowsN * (rowH + rowGap) - rowGap : 0) + statsH;
+  const MORE_H = 46;
+  // Rows shrink to fit (gap 16 → 10, height down to 56); past that, the lowest rows fold into "+ N more".
+  let rowGap = 16;
+  let rowsN = Math.min(8, allRows.length);
+  let moreH = allRows.length > 8 ? MORE_H : 0;
+  let avail = H - top0 - headerH - footerH - statsH - 30 - moreH;
+  let rowH = 0;
+  if (rowsN) {
+    rowH = (avail - rowGap * (rowsN - 1)) / rowsN;
+    if (rowH < 72) {
+      rowGap = 10;
+      rowH = (avail - rowGap * (rowsN - 1)) / rowsN;
+    }
+    if (rowH < 56) {
+      if (!moreH) {
+        moreH = MORE_H;
+        avail -= MORE_H;
+      }
+      rowsN = Math.max(1, Math.floor((avail + rowGap) / (56 + rowGap)));
+      rowH = 56;
+    }
+    rowH = Math.min(story ? 128 : 112, rowH);
+  }
+  const moreN = allRows.length - rowsN;
+  if (moreN <= 0) moreH = 0;
+  const blockH = headerH + (rowsN ? rowsN * (rowH + rowGap) - rowGap : 0) + moreH + statsH;
   const slack = H - footerH - 30 - top0 - blockH;
   let y = top0 + (slack > 0 ? Math.round(slack * (story ? 0.45 : 0.5)) : 0);
 
@@ -228,7 +254,8 @@ export function drawScoreCard(ctx: CanvasRenderingContext2D, data: ScoreCardData
   y += story ? 40 : 18;
 
   // leaderboard
-  const rows = (data.players || []).slice(0, 8);
+  const rows = allRows.slice(0, rowsN);
+  const ranks = data.marker !== 'none';
   const anyWinner = rows.some((p) => p.winner);
   rows.forEach((p, i) => {
     const start = 0.7 + i * 0.28;
@@ -255,7 +282,7 @@ export function drawScoreCard(ctx: CanvasRenderingContext2D, data: ScoreCardData
     ctx.textAlign = 'center';
     ctx.fillStyle = isWin ? accent : '#71717a';
     ctx.font = `bold ${Math.round(rowH * 0.36)}px ${SANS}`;
-    ctx.fillText(isWin ? '\u{1F451}' : String(i + 1), rx + 78, mid + 2);
+    if (ranks) ctx.fillText(isWin ? '\u{1F451}' : String(i + 1), rx + 78, mid + 2);
     // score
     ctx.textAlign = 'right';
     ctx.fillStyle = isWin ? accent : '#fafaf9';
@@ -265,8 +292,8 @@ export function drawScoreCard(ctx: CanvasRenderingContext2D, data: ScoreCardData
     ctx.fillText(scoreText, rx + rw - 32, mid + 2);
     // name
     ctx.textAlign = 'left';
-    const nameX = rx + 122;
-    const nameMax = rw - 122 - 32 - scoreW - 40 - (p.ai ? 70 : 0);
+    const nameX = rx + (ranks ? 122 : 56);
+    const nameMax = rw - (nameX - rx) - 32 - scoreW - 40 - (p.ai ? 70 : 0);
     ctx.fillStyle = '#fafaf9';
     ctx.font = `600 ${Math.round(rowH * 0.34)}px ${SANS}`;
     const name = ellipsize(ctx, p.name, Math.max(80, nameMax));
@@ -290,6 +317,17 @@ export function drawScoreCard(ctx: CanvasRenderingContext2D, data: ScoreCardData
   });
   ctx.globalAlpha = 1;
   y += rows.length ? rows.length * (rowH + rowGap) - rowGap : 0;
+  if (moreH) {
+    const ma = t === Infinity ? 1 : easeOut((t - (0.7 + rows.length * 0.28)) / 0.45);
+    ctx.globalAlpha = ma;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#a1a1aa';
+    ctx.font = `600 28px ${SANS}`;
+    ctx.fillText('+ ' + moreN + ' more', W / 2, y + moreH / 2 + 4);
+    ctx.globalAlpha = 1;
+    y += moreH;
+  }
 
   // stats tiles
   const stats = (data.stats || []).slice(0, 4);
@@ -339,8 +377,9 @@ export function drawScoreCard(ctx: CanvasRenderingContext2D, data: ScoreCardData
   ctx.fillText(data.challenge || 'Can you beat this?', pad + 36, fy + fh * 0.36);
   ctx.fillStyle = accent;
   const host = hostOf(data.url);
-  fitText(ctx, 'Play free at ' + host, textMax, 32, SANS, 'bold', 18);
-  ctx.fillText('Play free at ' + host, pad + 36, fy + fh * 0.62);
+  const ctaLine = (data.cta || 'Play free at') + ' ' + host;
+  fitText(ctx, ctaLine, textMax, 32, SANS, 'bold', 18);
+  ctx.fillText(ctaLine, pad + 36, fy + fh * 0.62);
   if (data.playStore !== false) {
     ctx.fillStyle = '#a1a1aa';
     fitText(ctx, 'Also on Google Play', textMax, 28, SANS, '500', 16);

@@ -86,7 +86,7 @@ async function redeem(p: NativePurchase, ev: CreditsProviderEvents): Promise<voi
   if (!p.purchaseToken || inFlight.has(p.purchaseToken)) return;
   if (p.state === 'pending') {
     ev.pending();
-    showToast({ id: 'mg-credits-pending', tone: 'info', message: 'Payment pending — your credits are added as soon as Google Play confirms it.' });
+    showToast({ id: 'mg-credits-pending', tone: 'info', message: 'Payment pending — your Sparks are added as soon as Google Play confirms it.' });
     return;
   }
   if (p.state !== 'purchased') return;
@@ -112,9 +112,9 @@ async function redeem(p: NativePurchase, ev: CreditsProviderEvents): Promise<voi
     if (status === 400 || status === 403 || status === 409) {
       // Terminal for this purchase; Play keeps it unconsumed, so Mohit can refund it from Play Console.
       billing.finish(p.purchaseToken);
-      showToast({ id: 'mg-credits-error', tone: 'error', duration: 0, message: 'We couldn’t add credits for this purchase. Please contact mohit@mohitgoenka.com — you won’t be charged twice.' });
+      showToast({ id: 'mg-credits-error', tone: 'error', duration: 0, message: 'We couldn’t add Sparks for this purchase. Please contact mohit@mohitgoenka.com — you won’t be charged twice.' });
     } else {
-      showToast({ id: 'mg-credits-error', tone: 'warning', message: 'Payment received — we’ll add your credits as soon as the connection is back.' });
+      showToast({ id: 'mg-credits-error', tone: 'warning', message: 'Payment received — we’ll add your Sparks as soon as the connection is back.' });
     }
   } finally {
     inFlight.delete(p.purchaseToken);

@@ -82,6 +82,7 @@ export {
   creditsEnabled,
   creditsHeaders,
   enterOwnerCode,
+  redeemPromoCode,
   activeCreditsProvider,
   registerWebCreditsProvider,
   AI_CREDIT_PACKS,

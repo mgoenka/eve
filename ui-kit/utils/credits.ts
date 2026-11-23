@@ -206,7 +206,7 @@ export function isInsufficientCredits(err: unknown): boolean {
 }
 
 export interface AiFetchJsonOptions extends FetchJsonOptions {
-  /** Open the "Get AI credits" sheet on 402 (default true). Pass false for background calls (auto-naming…). */
+  /** Open the "Get Sparks" sheet on 402 (default true). Pass false for background calls (auto-naming…). */
   creditsSheet?: boolean;
 }
 
@@ -223,7 +223,7 @@ export async function aiFetchJson<T = unknown>(url: string, options: AiFetchJson
     } catch (err) {
       // An Android build from before AI credits (no app user id): the server answers 426.
       if (err instanceof FetchError && err.status === 426) {
-        showToast({ message: 'Update the app from Google Play to use AI features.', tone: 'info' });
+        showToast({ message: 'Update the app from Google Play to use this feature.', tone: 'info' });
       }
       throw err;
     }
@@ -258,27 +258,50 @@ export async function aiFetchJson<T = unknown>(url: string, options: AiFetchJson
   }
 }
 
+const PROMO_ERRORS: Record<string, string> = {
+  wrong_code: 'That promo code isn’t valid.',
+  promo_expired: 'That promo code has expired.',
+  promo_used_up: 'That promo code has been fully claimed.',
+  promo_already_redeemed: 'You’ve already used that promo code.',
+  promo_inactive: 'That promo code is no longer active.',
+  rate_limited: 'Too many tries. Please wait a while.',
+  owner_unavailable: 'Promo codes aren’t available right now.',
+};
+
 /**
- * Owner code: marks this device's wallet as the owner's (AI free, usage still logged). The code rides on
- * the purchase route in the Android app and the checkout route on the web (no extra server routes).
- * Resolves true on success; shows a toast either way.
+ * "Have a promo code?": a promo code adds its Sparks (once per wallet: each Android app on a device, each browser); the owner code makes this
+ * wallet an owner wallet (unlimited, usage still logged). Rides on the purchase route in the Android app and
+ * the checkout route on the web (no extra server routes). Resolves true on success; shows a toast either way.
  */
-export async function enterOwnerCode(code: string): Promise<boolean> {
+export async function redeemPromoCode(code: string): Promise<boolean> {
   const url = isNativeApp() ? '/api/credits/purchase' : '/api/credits/checkout';
   try {
-    await fetchJson<{ ok?: boolean }>(url, { method: 'POST', body: { ownerCode: code }, headers: creditsHeaders(), timeoutMs: 15000, retries: 0 });
-    setState({ owner: true });
-    showToast({ id: 'mg-credits-owner', tone: 'success', message: 'Promo code applied: AI is free on this device.' });
+    // `ownerCode` too, for servers that predate promo codes.
+    const r = await fetchJson<{ ok?: boolean; owner?: boolean; promo?: boolean; credited?: number; balance?: number }>(url, {
+      method: 'POST',
+      body: { code, ownerCode: code },
+      headers: creditsHeaders(),
+      timeoutMs: 15000,
+      retries: 0,
+    });
+    if (r.owner) {
+      setState({ owner: true });
+      showToast({ id: 'mg-credits-owner', tone: 'success', message: 'Promo code applied: unlimited Sparks on this device.' });
+    } else {
+      setState({ ...(typeof r.balance === 'number' ? { balance: r.balance } : {}) });
+      showToast({ id: 'mg-credits-owner', tone: 'success', message: `Promo code applied: +${(r.credited ?? 0).toLocaleString()} Sparks!` });
+      if (state.sheetReason === 'insufficient') closeCreditsSheet();
+    }
     void refreshCredits();
     return true;
   } catch (err) {
     const code2 = err instanceof FetchError ? (err.body as { error?: string } | null)?.error : undefined;
-    const message =
-      code2 === 'wrong_code' ? 'That promo code isn’t valid.' : code2 === 'rate_limited' ? 'Too many tries. Please wait a while.' : code2 === 'owner_unavailable' ? 'Promo codes aren’t available right now.' : 'Couldn’t check the promo code right now.';
-    showToast({ id: 'mg-credits-owner', tone: 'error', message });
+    showToast({ id: 'mg-credits-owner', tone: 'error', message: (code2 && PROMO_ERRORS[code2]) || 'Couldn’t check the promo code right now.' });
     return false;
   }
 }
+/** @deprecated Use redeemPromoCode (same thing; the field takes owner and promo codes). */
+export const enterOwnerCode = redeemPromoCode;
 
 /** Buy a pack with the active provider. */
 export async function buyCredits(packId: string): Promise<void> {
@@ -301,7 +324,7 @@ export function initCredits(): void {
     credited: ({ credited, balance }) => {
       setState({ pending: false, buying: null, ...(typeof balance === 'number' ? { balance } : {}) });
       if (credited > 0) {
-        showToast({ id: 'mg-credits-added', tone: 'success', message: `+${credited.toLocaleString()} AI credits added. Thank you!` });
+        showToast({ id: 'mg-credits-added', tone: 'success', message: `+${credited.toLocaleString()} Sparks added. Thank you!` });
         if (state.sheetReason === 'insufficient') closeCreditsSheet();
       }
     },

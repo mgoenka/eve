@@ -63,7 +63,7 @@ async function confirmReturn(sessionId: string) {
         continue;
       }
       if (r?.otherWallet) {
-        showToast({ tone: 'info', message: 'Payment received. The credits went to the browser where you started the checkout.' });
+        showToast({ tone: 'info', message: 'Payment received. The Sparks went to the browser where you started the checkout.' });
         events?.done();
       } else {
         events?.credited({ credited: r?.credited ?? 0, ...(typeof r?.balance === 'number' ? { balance: r.balance } : {}) });
@@ -71,7 +71,7 @@ async function confirmReturn(sessionId: string) {
       return;
     } catch (err) {
       if (err instanceof FetchError && err.status === 400) {
-        showToast({ tone: 'error', message: 'That checkout couldn’t be found. If you were charged, your credits arrive within a few minutes.' });
+        showToast({ tone: 'error', message: 'That checkout couldn’t be found. If you were charged, your Sparks arrive within a few minutes.' });
         events?.done();
         return;
       }
@@ -108,7 +108,7 @@ export const webCreditsProvider: CreditsProvider = {
       const code = err instanceof FetchError ? (err.body as { error?: string } | null)?.error : undefined;
       showToast({
         tone: 'error',
-        message: code === 'web_credits_off' ? 'Credit purchases aren’t open on the website yet.' : 'Checkout couldn’t open right now. Please try again in a moment.',
+        message: code === 'web_credits_off' ? 'Sparks aren’t on sale on the website yet.' : 'Checkout couldn’t open right now. Please try again in a moment.',
       });
       events?.done();
     }

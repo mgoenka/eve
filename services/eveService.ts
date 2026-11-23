@@ -48,9 +48,9 @@ export interface EveError extends Error {
 
 // Messages for the AI-credits answers (Android app only; the website never gets them).
 const CREDIT_MESSAGES: Record<string, string> = {
-  insufficient_credits: 'You\u2019re out of AI credits. Tap the coin at the top to get more.',
-  credits_unavailable: 'AI credits are temporarily unavailable. Please try again in a minute.',
-  update_required: 'Update Eve from Google Play to use AI features.',
+  insufficient_credits: 'You\u2019re out of Sparks. Tap the \u2728 chip at the top to get more.',
+  credits_unavailable: 'Sparks are temporarily unavailable. Please try again in a minute.',
+  update_required: 'Update Eve from Google Play to use this feature.',
 };
 
 // All API calls go through the kit's fetchJson: per-attempt timeout and

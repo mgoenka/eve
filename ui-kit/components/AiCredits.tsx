@@ -8,7 +8,7 @@ import {
   buyCredits,
   closeCreditsSheet,
   creditsEnabled,
-  enterOwnerCode,
+  redeemPromoCode,
   getCreditsState,
   initCredits,
   loadPrices,
@@ -18,7 +18,7 @@ import {
 import type { CreditsState } from '../utils/credits';
 import { isNativeApp } from '../utils/native';
 import { Button } from './Button';
-import { CoinsIcon } from './icons';
+import { SparklesIcon } from './icons';
 import { Modal } from './Modal';
 import type { RuleSection } from './RulesOverlay';
 
@@ -41,26 +41,26 @@ export function CreditsChip({ className }: CreditsChipProps) {
   const s = useCredits();
   if (!s.enabled) return null;
   const low = !s.owner && s.balance !== null && s.balance < 20;
-  const label = s.owner ? 'AI credits: free with promo code' : s.balance === null ? 'AI credits' : `${fmt(s.balance)} AI credits`;
+  const label = s.owner ? 'Sparks: unlimited' : s.balance === null ? 'Sparks' : `${fmt(s.balance)} Sparks`;
   return (
     <button
       type="button"
       onClick={() => openCreditsSheet('manual')}
       aria-label={label + ', get more'}
-      title="AI credits"
+      title="Sparks"
       className={cx(
         'relative inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-xs font-semibold tabular-nums transition-colors before:absolute before:-inset-1.5 before:content-[""]',
         low ? 'border-mg-warning/50 bg-mg-warning/10 text-amber-200 hover:bg-mg-warning/20' : 'border-mg-gold/30 bg-mg-gold/10 text-mg-gold hover:bg-mg-gold/20',
         className,
       )}
     >
-      <CoinsIcon size={14} />
-      <span>{s.owner ? 'Free' : s.balance === null ? '…' : fmt(s.balance)}</span>
+      <SparklesIcon size={14} />
+      <span>{s.owner ? '∞' : s.balance === null ? '…' : fmt(s.balance)}</span>
     </button>
   );
 }
 
-/** The "Get AI credits" sheet. AiCreditsHost renders it; use directly only if you don't mount the host. */
+/** The "Get Sparks" sheet. AiCreditsHost renders it; use directly only if you don't mount the host. */
 function OwnerCodeForm() {
   const [open, setOpen] = useState(false);
   const [code, setCode] = useState('');
@@ -68,7 +68,7 @@ function OwnerCodeForm() {
   if (!open) {
     return (
       <button type="button" className="mt-3 text-xs text-mg-subtle underline underline-offset-2 hover:text-mg-text-2" onClick={() => setOpen(true)}>
-        Have a promo code?
+        Have a promo code? Get free Sparks
       </button>
     );
   }
@@ -79,7 +79,7 @@ function OwnerCodeForm() {
         e.preventDefault();
         if (!code.trim() || busy) return;
         setBusy(true);
-        void enterOwnerCode(code).then((ok) => {
+        void redeemPromoCode(code).then((ok) => {
           setBusy(false);
           if (ok) {
             setCode('');
@@ -113,8 +113,8 @@ export function CreditsSheet() {
     <Modal
       open={s.sheetOpen}
       onClose={closeCreditsSheet}
-      title="AI credits"
-      description={viaPlay ? 'AI features in the app run on prepaid credits.' : 'AI features on mohitgoenka.com run on prepaid credits.'}
+      title="✨ Sparks"
+      description={viaPlay ? 'Sparks power the magic in this app: freshly made rounds, custom themes and more.' : 'Sparks power the magic in Mohit’s apps and games: freshly made rounds, custom themes and more.'}
       size="sm"
       footer={
         <Button variant="secondary" fullWidth onClick={closeCreditsSheet}>
@@ -124,31 +124,31 @@ export function CreditsSheet() {
     >
       {s.sheetReason === 'insufficient' ? (
         <p role="status" className="mb-4 rounded-mg-sm border border-mg-gold/40 bg-mg-gold/10 px-3 py-2 text-sm text-mg-text">
-          You’re out of AI credits{s.needed ? ` (this needs about ${fmt(s.needed)})` : ''}. Get a pack to keep using AI — everything else stays free.
+          You’re out of Sparks{s.needed ? ` (this one needs about ${fmt(s.needed)})` : ''}. Get more to keep the magic going — everything else stays free.
         </p>
       ) : null}
 
       {s.owner ? (
         <p role="status" className="mb-4 rounded-mg-sm border border-mg-gold/40 bg-mg-gold/10 px-3 py-2 text-sm text-mg-text">
-          Promo code applied: AI is free on this device.
+          Promo code applied: unlimited Sparks on this device.
         </p>
       ) : null}
       <div className="mb-4 flex items-center justify-between gap-3 rounded-mg border border-mg-border bg-mg-surface px-4 py-3">
         <span className="text-sm text-mg-muted">Your balance</span>
         <span className="flex items-center gap-1.5 text-lg font-bold tabular-nums text-mg-gold">
-          <CoinsIcon size={18} />
+          <SparklesIcon size={18} />
           {s.balance === null ? '…' : fmt(s.balance)}
         </span>
       </div>
 
-      <ul className={cx('flex flex-col gap-2', s.owner && 'hidden')} aria-label="Credit packs">
+      <ul className={cx('flex flex-col gap-2', s.owner && 'hidden')} aria-label="Sparks packs">
         {s.packs.map((pack) => {
           const price = s.prices[pack.id];
           const busy = s.buying === pack.id;
           return (
             <li key={pack.id} className="flex min-h-14 items-center justify-between gap-3 rounded-mg border border-mg-border bg-mg-surface px-4 py-2.5">
               <div className="min-w-0">
-                <div className="text-base font-semibold tabular-nums text-mg-text">{fmt(pack.credits)} credits</div>
+                <div className="text-base font-semibold tabular-nums text-mg-text">{fmt(pack.credits)} Sparks</div>
                 {viaPlay ? null : <div className="text-xs text-mg-subtle">+ tax where it applies</div>}
               </div>
               <Button
@@ -157,7 +157,7 @@ export function CreditsSheet() {
                 disabled={unavailable || !price || (s.buying !== null && !busy)}
                 loading={busy}
                 loadingText={viaPlay ? 'Opening Google Play' : 'Opening checkout'}
-                aria-label={`Buy ${fmt(pack.credits)} credits${price ? ' for ' + price : ''}`}
+                aria-label={`Buy ${fmt(pack.credits)} Sparks${price ? ' for ' + price : ''}`}
               >
                 {price ?? (s.pricesStatus === 'loading' ? '…' : `$${pack.priceUsd.toFixed(2)}`)}
               </Button>
@@ -182,11 +182,11 @@ export function CreditsSheet() {
       ) : null}
 
       <p className="mt-4 text-xs leading-relaxed text-mg-subtle">
-        Each AI action uses credits for what the AI really costs (Google Gemini) — usually 1–10 credits, more for long lists or
-        images. Repeats served from cache are free.{' '}
+        Each magic action uses a few Sparks, based on what it really costs to make — usually 1–10, more for long lists or
+        pictures. Repeats are free.{' '}
         {viaPlay
-          ? 'Credits don’t expire and are for this app. Paid through Google Play.'
-          : 'Credits don’t expire and work in all of Mohit’s apps and games in this browser. Secure checkout by Stripe (sold through Link): prices in US dollars, with sales tax or VAT added at checkout where it applies.'}
+          ? 'Sparks don’t expire and are for this app. Paid through Google Play.'
+          : 'Sparks don’t expire and work in all of Mohit’s apps and games in this browser. Secure checkout by Stripe (sold through Link): prices in US dollars, with sales tax or VAT added at checkout where it applies.'}
       </p>
       {s.owner ? null : <OwnerCodeForm />}
     </Modal>
@@ -218,16 +218,17 @@ export function AiCreditsHost() {
  */
 export function aiCreditsRuleSections(): RuleSection[] {
   if (!isNativeApp()) return [];
-  const packs = AI_CREDIT_PACKS.map((p) => `${fmt(p.credits)} credits for $${p.priceUsd.toFixed(2)}`).join(', ');
+  const packs = AI_CREDIT_PACKS.map((p) => `${fmt(p.credits)} Sparks for $${p.priceUsd.toFixed(2)}`).join(', ');
   return [
     {
-      title: 'AI Credits',
-      icon: '🪙',
+      title: 'Sparks',
+      icon: '✨',
       items: [
-        `In the app, AI features use prepaid AI credits. You start with ${AI_STARTER_CREDITS} free credits; the balance is the coin chip at the top.`,
-        'Each AI action costs what the AI really costs (Google Gemini) — usually 1–10 credits, more for very long lists or images. Results served again from cache are free, and everything that isn’t AI is always free.',
-        `Tap the chip to get more: ${packs} (US prices; Google Play shows your local price). Credits are added as soon as Google Play confirms the payment.`,
-        'Credits don’t expire and belong to this app on this device; with Android backup on they come back after a reinstall on the same Google account.',
+        `The magic features (freshly made rounds, custom themes and more) use Sparks ✨. You start with ${AI_STARTER_CREDITS} free Sparks; your balance is the ✨ chip at the top.`,
+        'Each one uses a few Sparks, based on what it really costs to make — usually 1–10, more for very long lists or pictures. Repeats are free, and everything else is always free.',
+        `Tap the chip to get more: ${packs} (US prices; Google Play shows your local price). Sparks are added as soon as Google Play confirms the payment.`,
+        'Have a promo code? Tap the chip, then “Have a promo code?”, for free Sparks (each code works once in this app).',
+        'Sparks don’t expire and belong to this app on this device; with Android backup on they come back after a reinstall on the same Google account.',
       ],
     },
   ];

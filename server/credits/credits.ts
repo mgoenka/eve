@@ -23,6 +23,8 @@ import {
   WEB_WALLET_COOKIE,
   WEB_WALLET_MAX_AGE_S,
   OWNER_CODE_SECRET,
+  PROMO_CODE_RE,
+  normalizePromoCode,
   packById,
   packsFor,
 } from './config.ts';
@@ -268,9 +270,20 @@ class Window {
     b.count += 1;
     return b.count <= this.limit ? 0 : Math.max(1, Math.ceil((b.resetAt - now) / 1000));
   }
+  /** Like hit() but without counting: 0 = a hit would be allowed now. */
+  peek(key: string, now = Date.now()): number {
+    const b = this.hits.get(key);
+    if (!b || b.resetAt <= now || b.count < this.limit) return 0;
+    return Math.max(1, Math.ceil((b.resetAt - now) / 1000));
+  }
 }
 
 const TOKEN_RE = /^[A-Za-z0-9._:\-]{20,4096}$/;
+/** The redeem field: `{ code }` (current clients) or `{ ownerCode }` (older ones). */
+const codeOf = (body: unknown): string | undefined => {
+  const b = body as { code?: unknown; ownerCode?: unknown } | undefined;
+  return typeof b?.code === 'string' ? b.code : typeof b?.ownerCode === 'string' ? b.ownerCode : undefined;
+};
 
 // ---------------------------------------------------------------- the service
 
@@ -651,11 +664,23 @@ export function createCredits(options: CreditsOptions) {
 
   const sha = (s: string) => createHash('sha256').update(s, 'utf8').digest();
   /** Check an owner code and mark the wallet as owner. Answers like the other handlers. */
-  async function enrollOwner(wallet: Wallet, raw: unknown, req: ReqLike): Promise<{ status: number; body: Record<string, unknown> }> {
+  /**
+   * The "Have a promo code?" field: the owner code (wallet becomes an owner wallet: AI free, still logged)
+   * or a promo code from aiCreditPromos (adds its credits once per wallet). Rate limited per IP and wallet.
+   */
+  async function redeemCode(wallet: Wallet, raw: unknown, req: ReqLike): Promise<{ status: number; body: Record<string, unknown> }> {
     const code = typeof raw === 'string' ? raw.trim() : '';
-    const waitIp = ownerIpLimit.hit(clientIp(req));
-    const waitWallet = ownerWalletLimit.hit(wallet.key);
-    if (waitIp || waitWallet) return { status: 429, body: { error: 'rate_limited', retryAfter: Math.max(waitIp, waitWallet) } };
+    // Only unknown codes count (5 per hour per address, 5 per day per wallet): friends redeeming a shared code
+    // on one Wi-Fi aren't blocked (nor by an expired or used-up code), guessing is.
+    const wait = Math.max(ownerIpLimit.peek(clientIp(req)), ownerWalletLimit.peek(wallet.key));
+    if (wait) return { status: 429, body: { error: 'rate_limited', retryAfter: wait } };
+    const miss = (error: string) => {
+      if (error === 'wrong_code') {
+        ownerIpLimit.hit(clientIp(req));
+        ownerWalletLimit.hit(wallet.key);
+      }
+      return { status: 403, body: { error } };
+    };
     if (!code || code.length > 200) return { status: 400, body: { error: 'invalid' } };
     let secret: string | null = null;
     try {
@@ -663,16 +688,27 @@ export function createCredits(options: CreditsOptions) {
     } catch {
       secret = null;
     }
-    if (!secret) return { status: 403, body: { error: 'owner_unavailable' } };
-    if (!timingSafeEqual(sha(code), sha(secret))) {
-      console.warn(`[credits] ${app}: wrong owner code for ${wallet.kind} wallet ${mask(wallet.id)}`);
-      return { status: 403, body: { error: 'wrong_code' } };
+    const prepare = async () => {
+      if (wallet.kind === 'web') await prepareWeb(wallet);
+      else await store.ensure(wallet.key, meta(wallet), starterFor(wallet), now());
+    };
+    if (secret && timingSafeEqual(sha(code), sha(secret))) {
+      await prepare();
+      const r = await store.setOwner(wallet.key, meta(wallet), true, `code (${app})`, now());
+      console.log(`[credits] ${app}: owner mode on for ${wallet.kind} wallet ${mask(wallet.id)}`);
+      return { status: 200, body: { ok: true, owner: true, balance: r.balance } };
     }
-    if (wallet.kind === 'web') await prepareWeb(wallet);
-    else await store.ensure(wallet.key, meta(wallet), starterFor(wallet), now());
-    const r = await store.setOwner(wallet.key, meta(wallet), true, `code (${app})`, now());
-    console.log(`[credits] ${app}: owner mode on for ${wallet.kind} wallet ${mask(wallet.id)}`);
-    return { status: 200, body: { ok: true, owner: true, balance: r.balance } };
+    const promo = normalizePromoCode(code);
+    if (!PROMO_CODE_RE.test(promo)) return miss('wrong_code');
+    await prepare();
+    const r = await store.redeemPromo(promo, wallet.key, meta(wallet), starterFor(wallet), now());
+    if (!r.ok) {
+      console.warn(`[credits] ${app}: promo ${r.error === 'promo_unknown' ? 'unknown code' : `${promo} ${r.error}`} for ${wallet.kind} wallet ${mask(wallet.id)}`);
+      return miss(r.error === 'promo_unknown' ? 'wrong_code' : r.error);
+    }
+    if (wallet.kind === 'web') knownWeb.add(wallet.key);
+    console.log(`[credits] ${app}: promo ${promo} +${r.credits} for ${wallet.kind} wallet ${mask(wallet.id)}`);
+    return { status: 200, body: { ok: true, promo: true, credited: r.credits, balance: r.balance } };
   }
 
   // ---------------------------------------------------------------- HTTP glue (Express-compatible)
@@ -752,9 +788,10 @@ export function createCredits(options: CreditsOptions) {
           res.status(403).json({ error: 'native_only' });
           return;
         }
-        if (typeof (req.body as { ownerCode?: unknown } | undefined)?.ownerCode === 'string') {
-          // Owner code rides on this route so apps need no extra wiring (same-origin, JSON, native wallet).
-          const o = await enrollOwner(wallet, (req.body as { ownerCode: string }).ownerCode, req);
+        const code = codeOf(req.body);
+        if (code !== undefined) {
+          // Owner / promo codes ride on this route so apps need no extra wiring (same-origin, JSON, native wallet).
+          const o = await redeemCode(wallet, code, req);
           res.status(o.status).json(o.body);
           return;
         }
@@ -776,17 +813,17 @@ export function createCredits(options: CreditsOptions) {
       const wait = checkoutIpLimit.hit(clientIp(req));
       if (wait) return limited(res, wait);
       try {
-        const ownerCode = (req.body as { ownerCode?: unknown } | undefined)?.ownerCode;
-        if (typeof ownerCode === 'string' && !isNativeRequest(req)) {
-          // Owner code on the web rides on this route (same-origin, JSON). Works with the web switch off too:
-          // the wallet cookie is minted here if needed, so the owner is ready before the switch goes on.
+        const ownerCode = codeOf(req.body);
+        if (ownerCode !== undefined && !isNativeRequest(req)) {
+          // Owner / promo codes on the web ride on this route (same-origin, JSON). Works with the web switch off
+          // too: the wallet cookie is minted here if needed, so the wallet is ready before the switch goes on.
           let wallet = walletFor(req);
           if (!wallet || wallet.kind !== 'web') {
             const fresh = randomBytes(24).toString('base64url');
             appendCookie(res, walletCookie(req, fresh));
             wallet = webWallet(fresh, clientIp(req));
           }
-          const o = await enrollOwner(wallet, ownerCode, req);
+          const o = await redeemCode(wallet, ownerCode, req);
           res.status(o.status).json(o.body);
           return;
         }

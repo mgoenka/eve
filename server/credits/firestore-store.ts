@@ -9,13 +9,15 @@
 // aiCreditOrders/{provider}:{secondaryId}         { purchaseKey, account }   (Play orderId / Stripe payment intent)
 // aiCreditStarterIps/{sha256(salt+address)}       { count, windowStart }     (web starter grants per address)
 // aiCreditConfig/web                              { enabled }                (the web credits switch)
+// aiCreditPromos/{CODE}                           PromoCode { credits, maxRedemptions, redemptions, expiresAt, active, ... }
+// aiCreditPromos/{CODE}/redemptions/{walletKey}   { account, credits, at, app }  (one per wallet)
 //
 // Only the server touches these (no client SDK, no security-rule access needed). The package is
 // imported lazily so web-only traffic and apps without Firestore never load it.
 import type { DocumentReference, Firestore, Transaction } from '@google-cloud/firestore';
 import { COLLECTIONS, WEB_SWITCH_DOC } from './config.ts';
-import { liveHeld } from './store.ts';
-import type { AccountMeta, AccountState, ChargeInput, CreditPurchaseInput, CreditStore, LedgerEntry, PurchaseRecord } from './store.ts';
+import { liveHeld, promoProblem } from './store.ts';
+import type { AccountMeta, AccountState, ChargeInput, CreditPurchaseInput, CreditStore, LedgerEntry, PromoCode, PromoResult, PurchaseRecord } from './store.ts';
 
 type Holds = Record<string, { credits: number; expiresAt: number }>;
 interface AccountDoc {
@@ -293,6 +295,31 @@ export class FirestoreCreditStore implements CreditStore {
       const e: LedgerEntry = { type: 'grant', credits: 0, balanceAfter: doc.balance, at, reason: (owner ? 'owner on: ' : 'owner off: ') + reason };
       tx.create(ledger(), e);
       return { balance: doc.balance, owner };
+    });
+  }
+
+  async redeemPromo(code: string, key: string, meta: AccountMeta, starter: number, now: Date): Promise<PromoResult> {
+    const { db, account, ledger } = await this.refs(key);
+    const promoRef = db.collection(COLLECTIONS.promos).doc(code);
+    const redemptionRef = promoRef.collection('redemptions').doc(key);
+    return db.runTransaction(async (tx): Promise<PromoResult> => {
+      const pSnap = await tx.get(promoRef);
+      const rSnap = await tx.get(redemptionRef);
+      const promo = pSnap.exists ? (pSnap.data() as PromoCode) : null;
+      const problem = promoProblem(promo, rSnap.exists, now);
+      if (problem || !promo) return { ok: false, error: problem ?? 'promo_unknown' };
+      const { doc, created } = await FirestoreCreditStore.load(tx, account, meta, starter, now);
+      const credits = Math.max(0, Math.floor(promo.credits));
+      const balance = doc.balance + credits;
+      const at = now.toISOString();
+      if (created) {
+        FirestoreCreditStore.writeCreated(tx, account, ledger, { ...doc, balance, totals: { ...doc.totals, granted: doc.totals.granted + credits } }, starter, now);
+      } else tx.update(account, { balance, 'totals.granted': (doc.totals?.granted ?? 0) + credits, updatedAt: at });
+      const e: LedgerEntry = { type: 'grant', credits, balanceAfter: balance, at, reason: `promo ${code}` };
+      tx.create(ledger(), e);
+      tx.create(redemptionRef, { account: key, credits, at, app: meta.app });
+      tx.update(promoRef, { redemptions: (promo.redemptions ?? 0) + 1, lastRedeemedAt: at });
+      return { ok: true, code, credits, balance };
     });
   }
 

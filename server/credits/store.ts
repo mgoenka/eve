@@ -76,6 +76,33 @@ export interface CreditPurchaseInput {
   purchaseType?: number;
 }
 
+/** aiCreditPromos/{CODE}: grants `credits` once per wallet, at most `maxRedemptions` times, until `expiresAt`. */
+export interface PromoCode {
+  code: string;
+  credits: number;
+  maxRedemptions: number;
+  redemptions: number;
+  /** ISO time; null = no expiry. */
+  expiresAt: string | null;
+  /** false = revoked. */
+  active: boolean;
+  createdAt: string;
+  note?: string;
+}
+
+export type PromoError = 'promo_unknown' | 'promo_inactive' | 'promo_expired' | 'promo_used_up' | 'promo_already_redeemed';
+export type PromoResult = { ok: true; code: string; credits: number; balance: number } | { ok: false; error: PromoError };
+
+/** Shared validity check (both stores). */
+export function promoProblem(p: PromoCode | null, alreadyRedeemed: boolean, now: Date): PromoError | null {
+  if (!p) return 'promo_unknown';
+  if (!p.active) return 'promo_inactive';
+  if (p.expiresAt && Date.parse(p.expiresAt) <= now.getTime()) return 'promo_expired';
+  if (alreadyRedeemed) return 'promo_already_redeemed';
+  if (p.redemptions >= p.maxRedemptions) return 'promo_used_up';
+  return null;
+}
+
 export interface ChargeInput {
   credits: number;
   action: string;
@@ -120,6 +147,12 @@ export interface CreditStore {
   webEnabled(): Promise<boolean>;
   /** Mark (or unmark) an owner wallet; creates the account (no starter) if needed. Logged in the ledger. */
   setOwner(key: string, meta: AccountMeta, owner: boolean, reason: string, now: Date): Promise<{ balance: number; owner: boolean }>;
+  /**
+   * Redeem a promo code (already normalized) for this wallet in one transaction: checks it is active, not
+   * expired, not used up and not yet redeemed by this wallet, then adds its credits (ledger 'grant',
+   * reason "promo <CODE>") and counts the redemption. Creates the account (with `starter`) if needed.
+   */
+  redeemPromo(code: string, key: string, meta: AccountMeta, starter: number, now: Date): Promise<PromoResult>;
 }
 
 interface MemAccount {
@@ -145,6 +178,8 @@ export class MemoryCreditStore implements CreditStore {
   readonly starterIps = new Map<string, { count: number; windowStart: number }>();
   /** The web switch for tests. */
   webSwitch = false;
+  readonly promos = new Map<string, PromoCode>();
+  readonly promoRedemptions = new Map<string, Set<string>>();
 
   private ensureSync(key: string, meta: AccountMeta, starter: number, now: Date): { acc: MemAccount; created: boolean } {
     const existing = this.accounts.get(key);
@@ -282,5 +317,20 @@ export class MemoryCreditStore implements CreditStore {
     acc.owner = owner;
     acc.ledger.push({ type: 'grant', credits: 0, balanceAfter: acc.balance, at: now.toISOString(), reason: (owner ? 'owner on: ' : 'owner off: ') + reason });
     return { balance: acc.balance, owner };
+  }
+
+  async redeemPromo(code: string, key: string, meta: AccountMeta, starter: number, now: Date): Promise<PromoResult> {
+    const p = this.promos.get(code) ?? null;
+    const used = this.promoRedemptions.get(code) ?? new Set<string>();
+    const problem = promoProblem(p, used.has(key), now);
+    if (problem || !p) return { ok: false, error: problem ?? 'promo_unknown' };
+    const { acc } = this.ensureSync(key, meta, starter, now);
+    acc.balance += p.credits;
+    acc.totals.granted += p.credits;
+    acc.ledger.push({ type: 'grant', credits: p.credits, balanceAfter: acc.balance, at: now.toISOString(), reason: `promo ${code}` });
+    p.redemptions += 1;
+    used.add(key);
+    this.promoRedemptions.set(code, used);
+    return { ok: true, code, credits: p.credits, balance: acc.balance };
   }
 }
