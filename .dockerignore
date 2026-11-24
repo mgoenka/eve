@@ -34,6 +34,7 @@ migrated_prompt_history
 cloudbuild.yaml
 # Eve: build output and the Capacitor native shells are not needed in the image
 dist
+dist-server
 android
 ios
 scripts/seed-demo.sh

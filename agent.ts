@@ -22,6 +22,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { recordCloudTts, recordGemini } from './server/aiMeter.ts';
 import { guardedCall, isAiBusy } from './server/ai-guard.ts';
+import { ttsFixture } from './server/ai-fixtures.ts';
 
 // One retry for transient upstream errors only; 429 / 503 go to ai-guard (no retry).
 const RETRY = { attempts: 2, httpStatusCodes: [500, 502, 504] };
@@ -182,6 +183,8 @@ export function makeVoiceLineTool(geminiKey: string): Tool {
         voice: { languageCode: 'en-US', name: 'en-US-Chirp3-HD-Aoede' },
         audioConfig: { audioEncoding: 'MP3', speakingRate: 0.96, pitch: -0.5 },
       };
+      const fixtureAudio = ttsFixture(); // free AI test mode: silent clip, no Cloud TTS call
+      if (fixtureAudio) return { audioData: fixtureAudio, audioMime: 'audio/mpeg' };
       // Key goes in the header, never the URL query string, so it can't leak
       // into request logs (same approach as the /api/tts route in server.ts).
       const r = await fetch(
@@ -209,11 +212,11 @@ export function makeVoiceLineTool(geminiKey: string): Tool {
 export function buildEveBrainAgent(ai: GoogleGenAI, geminiKey: string): Agent {
   return {
     name: 'EveBrain',
-    model: 'gemini-flash-latest',
+    model: 'gemini-3.8-flash', // pinned (see server.ts TEXT_MODEL)
     systemPrompt:
       'You are Eve, a quietly devoted evening concierge. You plan three-stop evenings using grounded venue research, AI-illustrated venue cards, and synthesized voice. Always respect dietary preferences and budget. Always ground venue names in real places.',
     tools: [
-      makePlacesSearchTool(ai, 'gemini-flash-latest'),
+      makePlacesSearchTool(ai, 'gemini-3.8-flash'),
       makeSceneCardTool(ai, 'gemini-2.5-flash-image'),
       makeVoiceLineTool(geminiKey),
     ],

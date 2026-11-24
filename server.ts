@@ -31,16 +31,20 @@ import { createCredits, costOfCall } from './server/credits/index.ts';
 import type { Meter } from './server/credits/index.ts';
 import { cloudTtsUsage, recordCloudTts, recordGemini, withMeter } from './server/aiMeter.ts';
 import { guardedCall, isAiBusy, sendAiBusy } from './server/ai-guard.ts';
+import { aiTestModeMiddleware } from './server/ai-guard.ts';
+import { ttsFixture } from './server/ai-fixtures.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || '').trim();
 const PORT = parseInt(process.env.PORT || '8080', 10);
 
-const TEXT_MODEL = 'gemini-flash-latest';
+const TEXT_MODEL = 'gemini-3.8-flash'; // pinned: gemini-flash-latest moves to new, pricier models without notice
 const IMAGE_MODEL = 'gemini-2.5-flash-image';
 
 const app = express();
+// Smoke tests and headless browsers get free AI fixtures (never Gemini). Off Cloud Run every AI call does.
+app.use(aiTestModeMiddleware);
 app.disable('x-powered-by');
 // Cloud Run puts exactly one proxy in front of us, so req.ip is the real
 // client address (the right-most X-Forwarded-For hop, which clients can't forge).
@@ -244,7 +248,7 @@ const GROUNDED_TIMEOUT_MS = 40_000;
 const IMAGE_TIMEOUT_MS = 55_000;
 const RETRY = { attempts: 2, httpStatusCodes: [500, 502, 504] };
 
-// If the model behind gemini-flash-latest ever rejects thinkingLevel, stop
+// If the text model ever rejects thinkingLevel, stop
 // sending it instead of failing every request.
 let thinkingLevelSupported = true;
 
@@ -2189,6 +2193,8 @@ app.post('/api/tts', metered('tts', estTts, async (req, res) => {
 
   // Cloud TTS bills every input character, SSML markup included.
   const ttsChars = (ttsBody.input.ssml ?? ttsBody.input.text ?? '').length;
+  const fixtureAudio = ttsFixture(); // free AI test mode: silent clip, no Cloud TTS call
+  if (fixtureAudio) return sendAudio(fixtureAudio);
   try {
     const ttsRes = await fetch(
       'https://texttospeech.googleapis.com/v1/text:synthesize',

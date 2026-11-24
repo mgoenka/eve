@@ -75,11 +75,12 @@ export default defineConfig({ plugins: [react(), tailwindcss(), mgKit()] });
 `mgKit()` on `vite build`:
 1. injects the font preloads (above);
 2. writes `dist/sw.js` from `ui-kit/sw-template.js` with the precache list (every built html/js/css/font/image
-   ≤1.5 MB, minus maps, og images, screenshots) and a content-hash version.
+   ≤1.5 MB, minus maps, og images, screenshots, and lazy JS chunks over 100 KB that `index.html` doesn't load —
+   PDF export, share video, QR scanner…; they're cached on first use) and a content-hash version.
 
 Options: `mgKit({ sw: false })`, `mgKit({ preloadFonts: false })`,
 `mgKit({ sw: { swSrc: 'public/sw.js' } })` to keep an app's own worker (put `[/* __MG_PRECACHE__ */]` and
-`'__MG_VERSION__'` in it to get the list/version injected), `sw: { extra: ['/offline.html'], exclude: [/big\.mp3$/] }`.
+`'__MG_VERSION__'` in it to get the list/version injected), `sw: { extra: ['/offline.html'], exclude: [/big\.mp3$/], lazyMaxBytes: 200 * 1024 }`.
 If the app already has a working `public/sw.js`, either keep it (pass `swSrc`) or delete it and use the template —
 `dist/sw.js` from the plugin overwrites the copied public one.
 Not on Vite: `node ui-kit/vite-plugin-mg.mjs dist` after the build.
@@ -457,8 +458,28 @@ Apps can keep lucide-react for everything else.
 - `HUB_URL` (`https://mohitgoenka.com/apps/`), `HUB_LABEL`, `PRIVACY_URL`, `TERMS_URL` (mohitgoenka.com/terms), `COPYRIGHT`, `cx(...)`,
   `safeGet/safeSet/safeRemove/readJson` (storage that never throws), `getSettings/setSettings`.
 
+### `createLazySocket` (Socket.IO client: lazy, and lets go of the server when unused)
+```ts
+import type { Socket } from 'socket.io-client';
+const socket = createLazySocket<Socket>(() => import('socket.io-client'), { transports: ['websocket'] });
+```
+Drop-in for `io({ ..., autoConnect: false })`: `on/off/once/emit/timeout().emit/io.on/io.off/connect/disconnect`,
+`connected`, `active`, `id`. socket.io-client (~40 KB) downloads on the first `connect()`. After 5 minutes in a
+hidden tab (`{ hiddenDisconnectMs }`) it disconnects and reconnects when the tab is shown; after the server's idle
+sweep (`server-kit/idle-sockets`, `'idle-disconnect'`) it reconnects on the next tap/key or when the tab is shown.
+Those reconnects fire the app's `'connect'` and `socket.io` `'reconnect'` listeners, so rejoin-by-token code keeps
+working; messages queued while suspended are dropped. `disconnect()` from the app stops any resume.
+
+### Free AI test mode (browser side, automatic)
+`utils/testMode.ts` runs on import of the kit: in an automated browser (`navigator.webdriver`: Playwright, Puppeteer,
+most agent browsers) every same-origin `fetch` carries `x-mg-ai-test: 1`, so the server's ai-guard answers AI routes
+with fixtures instead of Gemini, and `createLazySocket` adds `mgTest=1` to the handshake (idle test sockets are
+dropped after 2 min). `isAutomatedBrowser()` is exported. Real visitors are untouched.
+
 ### `sw-template.js` (reference service worker)
-Precache shell (list injected at build) · navigations network-first (3 s) → cached `index.html` offline ·
+Precache shell (list injected at build) · navigations network-first, but after 800 ms without an answer (Cloud Run
+cold start, slow network) the cached `index.html` is served and the network answer refreshes the cache in the
+background; first visits wait for the network · offline → cached `index.html` ·
 `/assets/*` cache-first · other same-origin GETs stale-while-revalidate · **never cached**: non-GET, cross-origin,
 `/api`, `/socket.io`, `/auth|oauth|login|logout|session|callback|admin`, requests with `Authorization`/`Range`,
 responses that aren't 200 basic or carry `no-store`/`private`/`Set-Cookie` · old `mg-*` caches deleted on activate ·

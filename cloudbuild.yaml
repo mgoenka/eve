@@ -49,7 +49,7 @@ steps:
       - '1'
       - '--cpu-boost'
       - '--max-instances'
-      - '20'
+      - '3'
       - '--concurrency=300'
       - '--timeout'
       - '600'

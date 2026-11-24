@@ -82,6 +82,10 @@ export type { FetchJsonOptions, FetchErrorKind } from './utils/fetchJson';
 export { lazyWithRetry, importWithRetry, isChunkLoadError, reloadOnceForNewVersion } from './utils/lazyWithRetry';
 export { registerServiceWorker } from './utils/serviceWorker';
 export type { RegisterServiceWorkerOptions } from './utils/serviceWorker';
+export { createLazySocket, IDLE_DISCONNECT_EVENT } from './utils/lazySocket';
+// Side effect: automated browsers tag their requests so AI routes answer with free fixtures.
+export { isAutomatedBrowser, AI_TEST_HEADER } from './utils/testMode';
+export type { LazySocketOptions } from './utils/lazySocket';
 export { safeGet, safeSet, safeRemove, readJson } from './utils/storage';
 export { isNativeApp, nativePlatform, goToHub, NATIVE_UA_TOKEN, isTvDevice, applyTvClass, installDpadNav } from './utils/native';
 export { reportContent, REPORT_CONTENT_URL, REPORT_REASONS, REPORT_LIMITS } from './utils/reportContent';

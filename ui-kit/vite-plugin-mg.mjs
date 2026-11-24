@@ -21,6 +21,9 @@ const DEFAULT_SW = join(HERE, 'sw-template.js');
 const DEFAULT_INCLUDE = /\.(html|js|mjs|css|woff2|svg|png|webp|avif|jpg|jpeg|ico|json|webmanifest|txt)$/i;
 const DEFAULT_EXCLUDE = [/\.map$/i, /(^|\/)sw\.js$/i, /(^|\/)og\.(png|jpg)$/i, /(^|\/)screenshots?\//i, /(^|\/)\.well-known\//i, /(^|\/)robots\.txt$/i, /(^|\/)sitemap/i];
 const MAX_FILE_BYTES = 1.5 * 1024 * 1024;
+// Lazy JS chunks (not referenced by index.html) bigger than this are left out of the precache: most visits never
+// load them (PDF export, share video, QR scanner…), and the service worker caches them on first use anyway.
+const LAZY_MAX_BYTES = 100 * 1024;
 
 function walk(dir) {
   /** @type {string[]} */
@@ -37,7 +40,7 @@ function walk(dir) {
 /**
  * Inject the precache list + a content-hash version into the service worker and write it to outDir.
  * @param {string} outDir
- * @param {{ swSrc?: string, swDest?: string, include?: RegExp, exclude?: RegExp[], extra?: string[], base?: string }} [opts]
+ * @param {{ swSrc?: string, swDest?: string, include?: RegExp, exclude?: RegExp[], extra?: string[], base?: string, lazyMaxBytes?: number }} [opts]
  */
 export function injectPrecache(outDir, opts = {}) {
   const swSrc = opts.swSrc ? resolve(opts.swSrc) : DEFAULT_SW;
@@ -45,6 +48,17 @@ export function injectPrecache(outDir, opts = {}) {
   const include = opts.include ?? DEFAULT_INCLUDE;
   const exclude = [...DEFAULT_EXCLUDE, ...(opts.exclude ?? [])];
   const base = (opts.base ?? '/').replace(/\/?$/, '/');
+  const lazyMax = opts.lazyMaxBytes ?? LAZY_MAX_BYTES;
+  // What the first paint needs (entry script, modulepreloads, CSS): always precached, whatever its size.
+  const indexPath = join(outDir, 'index.html');
+  const html = existsSync(indexPath) ? readFileSync(indexPath, 'utf8') : '';
+  /** @type {Set<string>} */
+  const entry = new Set();
+  for (const m of html.matchAll(/(?:src|href)="([^"]+)"/g)) {
+    const href = (m[1] ?? '').split(/[?#]/)[0] ?? '';
+    const u = href.startsWith(base) ? href.slice(base.length) : href.replace(/^\.?\//, '');
+    if (u) entry.add(u);
+  }
   const hash = createHash('sha256');
   /** @type {string[]} */
   const urls = [];
@@ -53,6 +67,7 @@ export function injectPrecache(outDir, opts = {}) {
     if (!include.test(rel) || exclude.some((re) => re.test(rel))) continue;
     const size = statSync(file).size;
     if (size > MAX_FILE_BYTES) continue;
+    if (/\.m?js$/i.test(rel) && size > lazyMax && !entry.has(rel)) continue;
     urls.push(base + rel);
     hash.update(rel + ':' + size + ';');
     if (!rel.startsWith('assets/')) hash.update(readFileSync(file)); // un-hashed files: hash content
@@ -68,7 +83,7 @@ export function injectPrecache(outDir, opts = {}) {
 }
 
 /**
- * @param {{ sw?: boolean | { swSrc?: string, swDest?: string, include?: RegExp, exclude?: RegExp[], extra?: string[] }, preloadFonts?: boolean }} [options]
+ * @param {{ sw?: boolean | { swSrc?: string, swDest?: string, include?: RegExp, exclude?: RegExp[], extra?: string[], lazyMaxBytes?: number }, preloadFonts?: boolean }} [options]
  * @returns {any[]}
  */
 export function mgKit(options = {}) {

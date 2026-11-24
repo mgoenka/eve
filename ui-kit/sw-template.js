@@ -2,8 +2,9 @@
 /*
  * Reference service worker for Mohit's apps.
  *  - Precaches the app shell (list injected at build time by ui-kit/vite-plugin-mg.mjs).
- *  - Navigations: network-first (3 s timeout) → cached index.html, so a deploy is picked up immediately
- *    online and the app still opens offline.
+ *  - Navigations: network-first, but if the network has not answered within 800 ms (a Cloud Run cold start, a
+ *    slow phone network) the cached index.html is served at once and the network answer still refreshes the
+ *    cache in the background. A deploy is picked up immediately on a quick network; the app opens offline.
  *  - Same-origin GET assets: hashed /assets/* cache-first (immutable), everything else stale-while-revalidate.
  *  - NEVER cached: non-GET, cross-origin, /api, /socket.io, auth/login/oauth/session paths, requests with
  *    credentials headers, Range requests, and responses that are not plain 200 OK or say no-store/private.
@@ -15,7 +16,7 @@ const CACHE_PREFIX = 'mg-';
 const CACHE_NAME = CACHE_PREFIX + CACHE_VERSION;
 const PRECACHE = [/* __MG_PRECACHE__ */ '/', '/index.html'];
 const SHELL_URL = '/index.html';
-const NAV_TIMEOUT_MS = 3000;
+const NAV_TIMEOUT_MS = 800;
 
 // Paths that must always go to the network and never be stored.
 const NEVER_CACHE = [
@@ -65,23 +66,27 @@ async function put(request, response) {
   await cache.put(request, response);
 }
 
-async function networkFirstNavigation(request) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), NAV_TIMEOUT_MS);
-  try {
-    const response = await fetch(request, { signal: controller.signal });
-    clearTimeout(timer);
+async function networkFirstNavigation(event, request) {
+  const network = fetch(request).then((response) => {
     if (cacheable(response)) {
       const copy = response.clone();
       caches.open(CACHE_NAME).then((c) => c.put(SHELL_URL, copy)).catch(() => {});
     }
     return response;
-  } catch (err) {
-    clearTimeout(timer);
-    const cached = (await caches.match(SHELL_URL)) || (await caches.match('/'));
-    if (cached) return cached;
-    throw err;
+  });
+  network.catch(() => {}); // a failure after the cached page was served is not an error
+  let timer;
+  const slow = new Promise((resolve) => { timer = setTimeout(resolve, NAV_TIMEOUT_MS); });
+  const first = await Promise.race([network.then((r) => ({ r }), (e) => ({ e })), slow.then(() => null)]);
+  clearTimeout(timer);
+  if (first && 'r' in first) return first.r;
+  const cached = (await caches.match(SHELL_URL)) || (await caches.match('/'));
+  if (cached) {
+    if (!first) event.waitUntil(network.catch(() => {})); // slow: keep refreshing the cache after answering
+    return cached;
   }
+  // Nothing cached yet (first visit): wait for the network, however slow.
+  return network;
 }
 
 async function cacheFirst(request) {
@@ -118,7 +123,7 @@ self.addEventListener('fetch', (event) => {
   if (request.cache === 'no-store') return;
 
   if (request.mode === 'navigate') {
-    event.respondWith(networkFirstNavigation(request));
+    event.respondWith(networkFirstNavigation(event, request));
     return;
   }
   if (url.pathname.startsWith('/assets/')) {
