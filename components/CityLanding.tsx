@@ -3,7 +3,7 @@ import { Sparkles, ArrowRight, MapPin, Utensils } from 'lucide-react';
 import { EveLogo } from './EveLogo';
 import type { CityContent } from '../data/cities';
 import { useOpenRules, useOpenSettings } from './RulesContext';
-import { AppFooter, AppHeader, isNativeApp } from '../ui-kit';
+import { AppHeader, COPYRIGHT, PRIVACY_URL, TERMS_URL, isNativeApp } from '../ui-kit';
 
 interface Props {
   city: CityContent;
@@ -49,7 +49,7 @@ export function CityLanding({ city, onPlanInCity }: Props) {
 
       <main className="flex-1 max-w-5xl mx-auto w-full px-4 sm:px-6 py-8 md:py-14">
         <div className="text-center mb-10 md:mb-14">
-          <p className="text-mg-2xs tracking-[0.4em] uppercase text-eve-gold/85 mb-3 font-header font-semibold">
+          <p className="text-[12px] tracking-[0.4em] uppercase text-eve-gold/85 mb-3 font-header font-semibold">
             {city.metro}
           </p>
           <h1 className="font-header text-5xl md:text-7xl leading-[1.0] mb-5">
@@ -74,7 +74,7 @@ export function CityLanding({ city, onPlanInCity }: Props) {
         <section className="mt-12 md:mt-16">
           <div className="flex items-center gap-2 mb-6">
             <Utensils size={14} className="text-eve-gold/85" />
-            <p className="text-xs tracking-[0.3em] uppercase text-eve-gold/85 font-header font-semibold">
+            <p className="text-[11px] tracking-[0.3em] uppercase text-eve-gold/85 font-header font-semibold">
               Featured in {city.shortName}
             </p>
           </div>
@@ -87,16 +87,16 @@ export function CityLanding({ city, onPlanInCity }: Props) {
                 <div className="flex items-start justify-between gap-3 mb-2">
                   <div>
                     <h3 className="font-header text-2xl text-eve-cream font-semibold">{r.name}</h3>
-                    <p className="text-mg-2xs text-eve-cream/60 mt-0.5 inline-flex items-center gap-1">
+                    <p className="text-[12px] text-eve-cream/60 mt-0.5 inline-flex items-center gap-1">
                       <MapPin size={11} />
                       {r.area} · <span className="text-eve-gold/80">{r.cuisine}</span>
                     </p>
                   </div>
                 </div>
-                <p className="text-[0.9375rem] text-eve-cream/85 italic font-serif leading-snug mb-3">
+                <p className="text-[15px] text-eve-cream/85 italic font-serif leading-snug mb-3">
                   {r.blurb}
                 </p>
-                <div className="text-mg-2xs tracking-wide text-eve-cream/70">
+                <div className="text-[12px] tracking-wide text-eve-cream/70">
                   <span className="text-eve-gold/85 italic font-serif">Order:</span> {r.signatureDish}
                 </div>
               </article>
@@ -124,14 +124,40 @@ export function CityLanding({ city, onPlanInCity }: Props) {
         </section>
       </main>
 
-      <AppFooter className="py-8">
-        <p className="flex flex-wrap items-center justify-center text-xs text-white/55 italic font-serif">
-          <span className="px-2">Yours, quietly.</span>
-          <a href="/" className="inline-flex min-h-11 items-center px-2 hover:text-eve-cream">Eve home</a>
-          <a href="/restaurant" className="inline-flex min-h-11 items-center px-2 hover:text-eve-cream">For restaurants</a>
-          {!native && <a href="/pricing" className="inline-flex min-h-11 items-center px-2 hover:text-eve-cream">Pricing</a>}
+      <footer>
+        <p className="text-center py-8 px-6 text-[11px] text-white/55 italic font-serif">
+        Yours, quietly. <span className="text-eve-cream/40 not-italic">·</span>{' '}
+        <a href="/" className="hover:text-eve-cream">Eve home</a>{' '}
+        <span className="text-eve-cream/40">·</span>{' '}
+        <a href="/restaurant" className="hover:text-eve-cream">For restaurants</a>
+        {!native && (
+          <>
+            {' '}
+            <span className="text-eve-cream/40">·</span>{' '}
+            <a href="/pricing" className="hover:text-eve-cream">Pricing</a>
+          </>
+        )}
         </p>
-      </AppFooter>
+        <div className="border-t border-mg-border-subtle px-4 py-3 flex flex-col items-center text-center gap-1 sm:grid sm:grid-cols-[1fr_auto_1fr] sm:text-left sm:gap-2 text-[10px] text-mg-muted">
+          <span>
+            {!native && (<>
+            Last Updated:{' '}
+            {new Date(document.lastModified).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}{' '}
+            {new Date(document.lastModified).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}
+            </>)}
+          </span>
+          <span className="sm:text-center">© {new Date().getFullYear()} {COPYRIGHT}</span>
+          <span className="sm:justify-self-end flex items-center gap-2">
+            <a href={PRIVACY_URL} target="_blank" rel="noopener noreferrer" className="hover:text-mg-text transition-colors">
+              Privacy Policy
+            </a>
+            <span aria-hidden="true">·</span>
+            <a href={TERMS_URL} target="_blank" rel="noopener noreferrer" className="hover:text-mg-text transition-colors">
+              Terms
+            </a>
+          </span>
+        </div>
+      </footer>
     </div>
   );
 }

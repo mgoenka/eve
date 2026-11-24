@@ -64,7 +64,7 @@ import type { SavedEvening } from '../services/savedEvenings';
 import { StopCard } from './StopCard';
 import { EveLogo } from './EveLogo';
 import { useOpenRules, useOpenSettings } from './RulesContext';
-import { AppFooter, AppHeader, CreditsChip, IconButton, ReportContentButton, isNativeApp, shareOrCopy, speculativeAiAllowed, useToast } from '../ui-kit';
+import { AppFooter, AppHeader, COPYRIGHT, CreditsChip, IconButton, PRIVACY_URL, ReportContentButton, TERMS_URL, isNativeApp, shareOrCopy, speculativeAiAllowed, useToast } from '../ui-kit';
 
 interface Props {
   onSwitchToRestaurant: () => void;
@@ -1787,7 +1787,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                     />
                   </div>
                   {eveSpeaking && (
-                    <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 px-2.5 py-0.5 rounded-full bg-eve-rose/90 text-eve-ink text-xs font-bold tracking-wide font-serif italic inline-flex items-center gap-1 shadow-md">
+                    <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 px-2.5 py-0.5 rounded-full bg-eve-rose/90 text-eve-ink text-[10px] font-bold tracking-wide font-serif italic inline-flex items-center gap-1 shadow-md">
                       <span className="w-1 h-1 rounded-full bg-eve-ink animate-pulse" />
                       speaking
                     </span>
@@ -1798,7 +1798,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                 </div>
               </div>
             )}
-            <p className="text-mg-2xs tracking-wider text-eve-gold/85 mb-3 italic font-serif">
+            <p className="text-[12px] tracking-wider text-eve-gold/85 mb-3 italic font-serif">
               Hi, I'm <span className="text-shimmer not-italic font-semibold">Eve</span>.
             </p>
             <h1 className="font-serif text-5xl md:text-7xl leading-[1.0]">
@@ -1810,7 +1810,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
               Or hit <em className="not-italic font-semibold text-eve-gold">Surprise Me</em>,
               I'll find you somewhere good.
             </p>
-            <p className="mt-2 text-mg-2xs tracking-wider text-eve-rose/80 italic font-serif">
+            <p className="mt-2 text-[12px] tracking-wider text-eve-rose/80 italic font-serif">
               Yours, quietly.
             </p>
           </div>
@@ -1850,7 +1850,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
             )}
             <button
               onClick={surpriseMe}
-              className="group inline-flex items-center gap-2 px-7 py-3.5 rounded-xl font-bold text-base transition-all border outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink hover:scale-[1.02] active:scale-[0.98] bg-eve-gold text-eve-ink border-eve-gold hover:bg-amber-200 hover:border-amber-200 shadow-lg shadow-eve-gold/20"
+              className="group inline-flex items-center gap-2 px-7 py-3.5 rounded-xl font-bold text-base transition-all border outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink hover:scale-[1.02] active:scale-[0.98] bg-eve-ink-soft text-eve-gold border-eve-gold/25 hover:bg-mg-surface-2 hover:border-eve-gold/45 shadow-lg shadow-eve-gold/10"
             >
               <Shuffle size={18} />
               Surprise me
@@ -1859,7 +1859,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
 
           {(voiceListening || parsing) && (
             <div className="max-w-xl mx-auto mb-5 px-4 py-3 rounded-2xl border border-eve-rose/35 bg-eve-rose/5 text-center animate-fade-in">
-              <p className="text-xs tracking-wide text-eve-rose/85 mb-1 italic font-serif inline-flex items-center gap-1.5">
+              <p className="text-[11px] tracking-wide text-eve-rose/85 mb-1 italic font-serif inline-flex items-center gap-1.5">
                 {parsing ? (
                   <>
                     <Loader2 size={10} className="animate-spin" />
@@ -1885,7 +1885,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
               <div className="absolute top-1 right-1">
                 <ReportContentButton app="eve" kind="chat" label="Report what Eve said" content={`Eve says: "${eveIntroText}"`} />
               </div>
-              <p className="text-xs tracking-wide text-eve-gold/80 mb-1 italic font-serif inline-flex items-center gap-1.5">
+              <p className="text-[11px] tracking-wide text-eve-gold/80 mb-1 italic font-serif inline-flex items-center gap-1.5">
                 {eveSpeaking && (
                   <span className="w-1.5 h-1.5 rounded-full bg-eve-gold animate-pulse" />
                 )}
@@ -1897,7 +1897,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
 
           {recentEvenings.length > 0 && (
             <section aria-labelledby="recent-evenings" className="max-w-2xl mx-auto mb-7">
-              <h2 id="recent-evenings" className="text-center text-mg-2xs tracking-wide text-eve-gold/80 mb-2 italic font-serif inline-flex w-full items-center justify-center gap-1.5">
+              <h2 id="recent-evenings" className="text-center text-[12px] tracking-wide text-eve-gold/80 mb-2 italic font-serif inline-flex w-full items-center justify-center gap-1.5">
                 <History size={12} aria-hidden="true" />
                 Your recent evenings
               </h2>
@@ -1909,8 +1909,8 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                       className="min-w-0 pl-3.5 pr-2 py-1.5 text-left rounded-l-full outline-none focus-visible:ring-2 focus-visible:ring-eve-gold"
                       title={`Reopen "${e.title}"`}
                     >
-                      <span className="block truncate max-w-[16rem] text-[0.8125rem] font-serif italic text-eve-cream/90">{e.title}</span>
-                      <span className="block truncate max-w-[16rem] text-xs text-eve-cream/55">
+                      <span className="block truncate max-w-[16rem] text-[13px] font-serif italic text-eve-cream/90">{e.title}</span>
+                      <span className="block truncate max-w-[16rem] text-[11px] text-eve-cream/55">
                         {(e.city || '').split(',')[0]} · {e.stops.length} {e.stops.length === 1 ? 'stop' : 'stops'} · {timeAgo(e.savedAt)}
                       </span>
                     </button>
@@ -1932,16 +1932,16 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
             <button
               onClick={() => setFormExpanded((v) => !v)}
               aria-expanded={formExpanded}
-              className="inline-flex items-center gap-1.5 min-h-11 px-4 rounded-full text-sm tracking-wide text-eve-cream/60 hover:text-eve-cream italic font-serif transition-colors outline-none focus-visible:ring-2 focus-visible:ring-eve-gold"
+              className="inline-flex items-center gap-1.5 text-[12px] tracking-wider text-eve-cream/50 hover:text-eve-cream italic font-serif transition-colors"
             >
-              <ChevronDown size={14} className={`transition-transform ${formExpanded ? 'rotate-180' : ''}`} />
+              <ChevronDown size={11} className={`transition-transform ${formExpanded ? 'rotate-180' : ''}`} />
               {formExpanded ? 'Hide details, just talk to Eve' : 'Show all the details'}
             </button>
           </div>
 
           <div className={`space-y-5 ${formExpanded ? '' : 'hidden'}`}>
             <div>
-              <label className="block text-mg-2xs tracking-wide text-eve-gold/80 mb-2 font-medium">
+              <label className="block text-[12px] tracking-wide text-eve-gold/80 mb-2 font-medium">
                 The vibe
               </label>
               <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
@@ -1971,14 +1971,14 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                   );
                 })}
               </div>
-              <p className="mt-2 text-mg-2xs text-eve-cream/60 italic">
+              <p className="mt-2 text-[12px] text-eve-cream/60 italic">
                 {VIBES.find((v) => v.id === vibe)?.hint}
               </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="md:col-span-2">
-                <label className="block text-mg-2xs tracking-wide text-eve-gold/80 mb-2 font-medium">
+                <label className="block text-[12px] tracking-wide text-eve-gold/80 mb-2 font-medium">
                   Location
                 </label>
                 <div className="relative">
@@ -2000,14 +2000,14 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                     disabled={locating}
                     title="Use my location"
                     aria-label="Use my location"
-                    className="absolute right-1.5 top-1/2 -translate-y-1/2 w-11 h-11 inline-flex items-center justify-center rounded-xl bg-eve-gold/15 hover:bg-eve-gold/25 text-eve-gold disabled:opacity-50 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-eve-gold"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-xl bg-eve-gold/15 hover:bg-eve-gold/25 text-eve-gold disabled:opacity-50 transition-colors"
                   >
-                    {locating ? <Loader2 size={18} className="animate-spin" /> : <MapPin size={18} />}
+                    {locating ? <Loader2 size={16} className="animate-spin" /> : <MapPin size={16} />}
                   </button>
                 </div>
               </div>
               <div>
-                <label className="block text-mg-2xs tracking-wide text-eve-gold/80 mb-2 font-medium">
+                <label className="block text-[12px] tracking-wide text-eve-gold/80 mb-2 font-medium">
                   When
                 </label>
                 <div className="relative">
@@ -2020,10 +2020,10 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                     value={whenISO}
                     min={todayISO()}
                     onChange={(e) => setWhenISO(e.target.value)}
-                    className="w-full min-h-[52px] pl-14 pr-4 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none focus-visible:ring-2 focus-visible:ring-eve-gold/50 transition-colors text-base text-eve-cream font-sans [color-scheme:dark] appearance-none [&::-webkit-calendar-picker-indicator]:opacity-70 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-date-and-time-value]:text-left"
+                    className="w-full pl-12 pr-4 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-base text-eve-cream"
                   />
                 </div>
-                <p className="mt-1 text-xs text-eve-cream/55 italic font-serif">
+                <p className="mt-1 text-[11px] text-eve-cream/55 italic font-serif">
                   {formatDate(whenISO)}
                 </p>
               </div>
@@ -2031,7 +2031,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-mg-2xs tracking-wide text-eve-gold/80 mb-2 font-medium">
+                <label className="block text-[12px] tracking-wide text-eve-gold/80 mb-2 font-medium">
                   Start time
                 </label>
                 <div className="relative">
@@ -2043,12 +2043,12 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                     aria-label="Start time"
                     value={startTime}
                     onChange={(e) => setStartTime(e.target.value)}
-                    className="w-full min-h-[52px] pl-14 pr-4 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none focus-visible:ring-2 focus-visible:ring-eve-gold/50 transition-colors text-base text-eve-cream font-sans [color-scheme:dark] appearance-none [&::-webkit-calendar-picker-indicator]:opacity-70 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-date-and-time-value]:text-left"
+                    className="w-full pl-12 pr-4 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-base text-eve-cream"
                   />
                 </div>
               </div>
               <div>
-                <label className="block text-mg-2xs tracking-wide text-eve-gold/80 mb-2 font-medium">
+                <label className="block text-[12px] tracking-wide text-eve-gold/80 mb-2 font-medium">
                   Duration · {durationHours}h
                 </label>
                 <div className="relative">
@@ -2062,7 +2062,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                     onChange={(e) => setDurationHours(parseFloat(e.target.value))}
                     className="w-full mt-3 accent-eve-gold"
                   />
-                  <div className="flex justify-between text-xs text-eve-cream/55 italic font-serif mt-1">
+                  <div className="flex justify-between text-[11px] text-eve-cream/55 italic font-serif mt-1">
                     <span>1.5h</span>
                     <span>4h</span>
                     <span>8h</span>
@@ -2073,7 +2073,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <label className="block text-mg-2xs tracking-wide text-eve-gold/80 mb-2 font-medium">
+                <label className="block text-[12px] tracking-wide text-eve-gold/80 mb-2 font-medium">
                   Party
                 </label>
                 <input
@@ -2087,7 +2087,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                 />
               </div>
               <div>
-                <label className="block text-mg-2xs tracking-wide text-eve-gold/80 mb-2 font-medium">
+                <label className="block text-[12px] tracking-wide text-eve-gold/80 mb-2 font-medium">
                   Cuisine
                 </label>
                 <input
@@ -2106,7 +2106,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                 </datalist>
               </div>
               <div>
-                <label className="block text-mg-2xs tracking-wide text-eve-gold/80 mb-2 font-medium">
+                <label className="block text-[12px] tracking-wide text-eve-gold/80 mb-2 font-medium">
                   Budget per person
                 </label>
                 <div className="relative">
@@ -2121,14 +2121,14 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                     className="w-full pl-8 pr-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-base"
                   />
                 </div>
-                <p className="mt-1 text-xs text-eve-cream/60 italic font-serif">
+                <p className="mt-1 text-[11px] text-eve-cream/60 italic font-serif">
                   ~${budgetPerPerson * party} for {party}
                 </p>
               </div>
             </div>
 
             <div>
-              <label className="block text-mg-2xs tracking-wide text-eve-gold/80 mb-2 font-medium">
+              <label className="block text-[12px] tracking-wide text-eve-gold/80 mb-2 font-medium">
                 Dietary
               </label>
               <div className="flex flex-wrap gap-2">
@@ -2154,13 +2154,13 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
 
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="block text-mg-2xs tracking-wide text-eve-gold/80 font-medium">
+                <label className="block text-[12px] tracking-wide text-eve-gold/80 font-medium">
                   Tell Eve more (optional)
                 </label>
                 {!voiceUnsupported && (
                   <button
                     onClick={toggleVoiceListening}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all ${
+                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium transition-all ${
                       voiceListening
                         ? 'bg-eve-rose/20 text-eve-rose border border-eve-rose/50'
                         : 'bg-white/[0.04] text-eve-cream/70 border border-white/10 hover:border-eve-rose/40'
@@ -2177,7 +2177,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                 onChange={(e) => setFreeText(e.target.value)}
                 placeholder="Indian or Italian dinner, dessert nearby, then a quiet garden walk under stringlights..."
                 rows={3}
-                className="w-full px-5 py-4 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-[0.9375rem] leading-relaxed resize-none placeholder:text-eve-cream/45 placeholder:italic placeholder:font-serif"
+                className="w-full px-5 py-4 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-[15px] leading-relaxed resize-none placeholder:text-eve-cream/45 placeholder:italic placeholder:font-serif"
               />
               <div className="mt-2 flex flex-wrap gap-2">
                 {SAMPLE_QUERIES.map((s) => (
@@ -2212,13 +2212,13 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
               <button
                 onClick={() => buildPlan()}
                 disabled={!city.trim()}
-                className="w-full group inline-flex items-center justify-center gap-3 px-8 py-4 rounded-xl font-bold text-lg transition-all border outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink hover:scale-[1.01] active:scale-[0.99] bg-eve-gold text-eve-ink border-eve-gold hover:bg-amber-200 hover:border-amber-200 disabled:bg-eve-ink disabled:text-eve-cream/35 disabled:border-white/10 disabled:cursor-not-allowed shadow-lg shadow-eve-gold/15"
+                className="w-full group inline-flex items-center justify-center gap-3 px-8 py-4 rounded-xl font-bold text-lg transition-all border outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink hover:scale-[1.01] active:scale-[0.99] bg-eve-ink-soft text-eve-gold border-eve-gold/25 hover:bg-mg-surface-2 hover:border-eve-gold/45 disabled:bg-eve-ink disabled:text-eve-cream/35 disabled:border-white/10 disabled:cursor-not-allowed shadow-lg shadow-eve-gold/15"
               >
                 <Wand2 size={20} />
                 Plan my evening
               </button>
               {imageLimit && (
-                <p className="mt-2 text-center text-mg-2xs text-eve-cream/60 italic font-serif" aria-live="polite">
+                <p className="mt-2 text-center text-[12px] text-eve-cream/60 italic font-serif" aria-live="polite">
                   {imageLimit.remaining > 0
                     ? `Eve paints the first stop card; tap Show picture for the others. ${imageLimit.remaining} of ${imageLimit.limit} paintings left this hour; repeat cards are free.`
                     : `Eve has painted her ${imageLimit.limit} cards for this hour. Plans still work, with photos, until she rests (about ${Math.max(1, Math.ceil(imageLimit.resetInSec / 60))} min).`}
@@ -2228,9 +2228,28 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           </div>
         </main>
 
-        <AppFooter className="py-6">
-          <p className="text-xs text-white/55 italic font-serif">Eve · Yours, quietly</p>
-        </AppFooter>
+        <footer className="mt-auto">
+          <p className="text-center py-6 text-[11px] text-white/55 italic font-serif">Eve · Yours, quietly</p>
+          <div className="border-t border-mg-border-subtle px-4 py-3 flex flex-col items-center text-center gap-1 sm:grid sm:grid-cols-[1fr_auto_1fr] sm:text-left sm:gap-2 text-[10px] text-mg-muted">
+            <span>
+              {!isNativeApp() && (<>
+              Last Updated:{' '}
+              {new Date(document.lastModified).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}{' '}
+              {new Date(document.lastModified).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}
+              </>)}
+            </span>
+            <span className="sm:text-center">© {new Date().getFullYear()} {COPYRIGHT}</span>
+            <span className="sm:justify-self-end flex items-center gap-2">
+              <a href={PRIVACY_URL} target="_blank" rel="noopener noreferrer" className="hover:text-mg-text transition-colors">
+                Privacy Policy
+              </a>
+              <span aria-hidden="true">·</span>
+              <a href={TERMS_URL} target="_blank" rel="noopener noreferrer" className="hover:text-mg-text transition-colors">
+                Terms
+              </a>
+            </span>
+          </div>
+        </footer>
       </div>
     );
   }

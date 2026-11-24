@@ -163,9 +163,8 @@ html[data-reduce-motion='true'] *, html[data-reduce-motion='true'] *::before, ht
   scroll-behavior: auto !important;
 }
 
-/* Big screens and TVs (html.mg-tv is set by the apps' kit on Android TV / Google TV / Fire TV / Chromecast). */
+/* TVs (html.mg-tv is set by the apps' kit on Android TV / Google TV / Fire TV / Chromecast). */
 :root { --mg-content-max: 64rem; }
-@media (min-width: 1600px) { html:not(.mg-tv) { font-size: 125%; --mg-content-max: min(80rem, 92vw); } }
 html.mg-tv { font-size: 150%; --mg-content-max: min(90rem, 92vw); }
-input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--color-mg-gold, #f5c542); outline-offset: 1px; box-shadow: 0 0 0 4px rgb(245 197 66 / 0.25); }
+html.mg-tv input:focus-visible, html.mg-tv select:focus-visible, html.mg-tv textarea:focus-visible { outline: 2px solid var(--color-mg-gold, #f5c542); outline-offset: 1px; box-shadow: 0 0 0 4px rgb(245 197 66 / 0.25); }
 .font-mono { font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif; font-variant-numeric: tabular-nums; }
