@@ -6,7 +6,7 @@ import { generateContentPack, postSpecial, synthesize, suggestSpecial } from '..
 import type { SuggestSpecialResponse } from '../services/eveService';
 import { EveLogo } from './EveLogo';
 import { useOpenRules, useOpenSettings } from './RulesContext';
-import { AppHeader, CreditsChip, IconButton, ReportContentButton, isNativeApp } from '../ui-kit';
+import { AppFooter, AppHeader, CreditsChip, IconButton, ReportContentButton, isNativeApp, speculativeAiAllowed, useCredits } from '../ui-kit';
 
 interface Props {
   onSwitchToDiner: () => void;
@@ -167,7 +167,8 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
     window.history.replaceState({}, '', cleanUrl);
   }, []);
 
-  const cancelRef = useRef(false);
+  // Making the kit can take a minute or two (images): the user can cancel it.
+  const generateAbortRef = useRef<AbortController | null>(null);
 
   // Brand auto-save on edit (so localStorage is always in sync)
   useEffect(() => {
@@ -177,9 +178,12 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
   // Auto-suggest a special the moment we have a name + city. The dish becomes
   // a placeholder the user can either keep or overwrite. Runs once.
   const autoSuggestedRef = useRef(false);
+  // Speculative: waits for the Sparks balance and runs only when it can't spend Sparks the user didn't choose to.
+  const creditsLoaded = useCredits().loaded;
   useEffect(() => {
     if (autoSuggestedRef.current) return;
     if (!name.trim() || !city.trim()) return;
+    if (!speculativeAiAllowed()) return;
     autoSuggestedRef.current = true;
     setSuggesting(true);
     // Automatic on page open: never pops the AI-credits sheet (Android app).
@@ -199,7 +203,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
       })
       .catch(() => {})
       .finally(() => setSuggesting(false));
-  }, []);
+  }, [creditsLoaded]);
 
   const generate = async () => {
     // "Regenerate" asks for a new pack; a first generate may reuse an
@@ -210,7 +214,8 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
     setReelAudio(null);
     setPosted(false);
     setEvePulse(null);
-    cancelRef.current = false;
+    const ctrl = new AbortController();
+    generateAbortRef.current = ctrl;
     setGenerating(true);
     try {
       // If the user didn't fill in a dish, do the magic behind the scenes:
@@ -224,7 +229,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
           city: city.trim(),
           cuisine,
           signatureDishes: signature,
-        });
+        }, { signal: ctrl.signal });
         useDish = result.dishName;
         useDesc = result.dishDescription;
         setSuggestion(result);
@@ -241,7 +246,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
         city,
         signatureDishes: signature,
         fresh: regenerating,
-      });
+      }, { signal: ctrl.signal });
       setPack(result);
 
       if (result.reel.fullVoiceoverScript) {
@@ -250,8 +255,9 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
           .catch(() => {});
       }
     } catch (err: any) {
-      setError(err?.message || 'Eve could not put tonight together.');
+      if (!ctrl.signal.aborted) setError(err?.message || 'Eve could not put tonight together.');
     } finally {
+      if (generateAbortRef.current === ctrl) generateAbortRef.current = null;
       setGenerating(false);
     }
   };
@@ -422,7 +428,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
 
       <main className="flex-1 max-w-4xl mx-auto w-full px-4 md:px-8 py-8">
         <div className="mb-7">
-          <p className="text-[12px] tracking-wide text-eve-gold/80 italic font-serif mb-2">
+          <p className="text-mg-2xs tracking-wide text-eve-gold/80 italic font-serif mb-2">
             For restaurants
           </p>
           <h1 className="font-serif text-4xl md:text-5xl leading-tight">
@@ -438,13 +444,13 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
 
         {/* BRAND + DISH (single block) */}
         <section className="rounded-3xl border border-white/10 bg-white/[0.03] backdrop-blur p-6 md:p-8">
-          <p className="text-[11px] tracking-wide text-eve-gold/80 italic font-serif mb-1">
+          <p className="text-xs tracking-wide text-eve-gold/80 italic font-serif mb-1">
             Your restaurant
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
             <div>
-              <label className="block text-[11px] tracking-wide text-eve-cream/65 font-medium mb-1.5">
+              <label className="block text-xs tracking-wide text-eve-cream/65 font-medium mb-1.5">
                 Restaurant name
               </label>
               <input
@@ -453,11 +459,11 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                 onChange={(e) => setName(e.target.value)}
                 onFocus={(e) => { if (e.target.value === seed.name) e.target.select(); }}
                 placeholder={seed.name}
-                className={`w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] ${ghostClass(name, seed.name)}`}
+                className={`w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[0.9375rem] ${ghostClass(name, seed.name)}`}
               />
             </div>
             <div>
-              <label className="block text-[11px] tracking-wide text-eve-cream/65 font-medium mb-1.5">
+              <label className="block text-xs tracking-wide text-eve-cream/65 font-medium mb-1.5">
                 City or area
               </label>
               <input
@@ -466,11 +472,11 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                 onChange={(e) => setCity(e.target.value)}
                 onFocus={(e) => { if (e.target.value === seed.city) e.target.select(); }}
                 placeholder={seed.city}
-                className={`w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] ${ghostClass(city, seed.city)}`}
+                className={`w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[0.9375rem] ${ghostClass(city, seed.city)}`}
               />
             </div>
             <div>
-              <label className="block text-[11px] tracking-wide text-eve-cream/65 font-medium mb-1.5">
+              <label className="block text-xs tracking-wide text-eve-cream/65 font-medium mb-1.5">
                 Cuisine <span className="opacity-75">(optional — Eve will infer)</span>
               </label>
               <input
@@ -480,14 +486,14 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                 onFocus={(e) => { if (e.target.value === seed.cuisine) e.target.select(); }}
                 placeholder="Eve infers from name + city"
                 list="restaurant-cuisine-suggestions"
-                className={`w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] ${ghostClass(cuisine, seed.cuisine)}`}
+                className={`w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[0.9375rem] ${ghostClass(cuisine, seed.cuisine)}`}
               />
               <datalist id="restaurant-cuisine-suggestions">
                 {CUISINES.map((c) => (<option key={c.id} value={c.id} />))}
               </datalist>
             </div>
             <div>
-              <label className="block text-[11px] tracking-wide text-eve-cream/65 font-medium mb-1.5">
+              <label className="block text-xs tracking-wide text-eve-cream/65 font-medium mb-1.5">
                 Brand voice <span className="opacity-75">(optional)</span>
               </label>
               <input
@@ -496,13 +502,13 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                 onChange={(e) => setVoice(e.target.value)}
                 onFocus={(e) => { if (e.target.value === seed.voice) e.target.select(); }}
                 placeholder={seed.voice}
-                className={`w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] ${ghostClass(voice, seed.voice)}`}
+                className={`w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[0.9375rem] ${ghostClass(voice, seed.voice)}`}
               />
             </div>
           </div>
 
           <div className="mt-4">
-            <label className="block text-[11px] tracking-wide text-eve-cream/65 font-medium mb-1.5">
+            <label className="block text-xs tracking-wide text-eve-cream/65 font-medium mb-1.5">
               Signature dishes <span className="opacity-75">(optional)</span>
             </label>
             <textarea
@@ -511,7 +517,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
               onChange={(e) => setSignature(e.target.value)}
               onFocus={(e) => { if (e.target.value === seed.signatureDishes) e.target.select(); }}
               placeholder={seed.signatureDishes}
-              className={`w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] leading-relaxed resize-none ${ghostClass(signature, seed.signatureDishes)}`}
+              className={`w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[0.9375rem] leading-relaxed resize-none ${ghostClass(signature, seed.signatureDishes)}`}
             />
           </div>
 
@@ -543,23 +549,23 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
 
           {/* WHAT'S ON TONIGHT — same page, just before Generate button */}
           <div className="mt-7 pt-7 border-t border-white/10">
-            <p className="text-[11px] tracking-wide text-eve-gold/80 italic font-serif mb-1">
+            <p className="text-xs tracking-wide text-eve-gold/80 italic font-serif mb-1">
               What's on tonight?
             </p>
-            <p className="text-[13px] text-eve-cream/65 italic font-serif mb-3">
+            <p className="text-[0.8125rem] text-eve-cream/65 italic font-serif mb-3">
               Optional. Leave blank and Eve picks one for you from your reviews and trends.
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="md:col-span-1">
-                <label className="block text-[11px] tracking-wide text-eve-cream/65 font-medium mb-1.5">
+                <label className="block text-xs tracking-wide text-eve-cream/65 font-medium mb-1.5">
                   Dish name
                 </label>
                 <input
                   value={dishName}
                   onChange={(e) => setDishName(e.target.value)}
                   placeholder={suggesting ? 'Eve is reading your reviews…' : (suggestion?.dishName || 'Eve will pick one')}
-                  className={`w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] ${
+                  className={`w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[0.9375rem] ${
                     !dishName
                       ? 'text-eve-cream placeholder:text-eve-cream/55 placeholder:italic placeholder:font-serif'
                       : 'text-eve-cream'
@@ -567,14 +573,14 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                 />
               </div>
               <div className="md:col-span-2">
-                <label className="block text-[11px] tracking-wide text-eve-cream/65 font-medium mb-1.5">
+                <label className="block text-xs tracking-wide text-eve-cream/65 font-medium mb-1.5">
                   Tonight's note <span className="opacity-75">(optional)</span>
                 </label>
                 <input
                   value={dishDescription}
                   onChange={(e) => setDishDescription(e.target.value)}
                   placeholder={suggestion?.dishDescription || 'e.g. Made with the new spice blend, small batch'}
-                  className={`w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[15px] ${
+                  className={`w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none text-[0.9375rem] ${
                     !dishDescription
                       ? 'text-eve-cream placeholder:text-eve-cream/55 placeholder:italic placeholder:font-serif'
                       : 'text-eve-cream'
@@ -584,7 +590,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
             </div>
 
             {suggestion && !pack && (
-              <p className="mt-3 text-[12px] text-eve-cream/55 italic font-serif">
+              <p className="mt-3 text-mg-2xs text-eve-cream/55 italic font-serif">
                 Eve suggested <span className="text-eve-gold">{suggestion.dishName}</span> based on {suggestion.mode === 'from_reviews' ? 'your recent reviews' : 'tonight\u2019s trends'}.
                 {suggestion.alternatives?.length > 0 && (
                   <>
@@ -631,6 +637,14 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                 {generating ? <Loader2 size={16} className="animate-spin" /> : <ChefHat size={18} />}
                 {generating ? 'Eve is making your kit…' : pack ? 'Regenerate tonight\u2019s look' : 'Generate tonight\u2019s look'}
               </button>
+              {generating && (
+                <button
+                  onClick={() => generateAbortRef.current?.abort()}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-medium text-eve-cream/70 hover:text-eve-cream transition-colors"
+                >
+                  Cancel
+                </button>
+              )}
               {!generating && pack && (
                 <button
                   onClick={pickDifferent}
@@ -660,22 +674,22 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
             {/* Illustrative numbers, not live metrics: never shown inside the native app. */}
             {evePulse && !isNativeApp() && (
               <div className="mt-5 p-4 rounded-2xl border border-eve-rose/35 bg-gradient-to-br from-eve-rose/8 to-eve-gold/5 animate-fade-in">
-                <p className="text-[12px] tracking-wide text-eve-rose italic font-serif mb-3 inline-flex items-center gap-1.5">
+                <p className="text-mg-2xs tracking-wide text-eve-rose italic font-serif mb-3 inline-flex items-center gap-1.5">
                   <TrendingUp size={12} />
                   Live on Eve right now
                 </p>
                 <div className="grid grid-cols-3 gap-3">
                   <div className="text-center">
                     <div className="font-serif text-3xl text-eve-cream">{evePulse.viewers}</div>
-                    <div className="text-[11px] text-eve-cream/60 italic font-serif">diners viewing</div>
+                    <div className="text-xs text-eve-cream/60 italic font-serif">diners viewing</div>
                   </div>
                   <div className="text-center">
                     <div className="font-serif text-3xl text-eve-gold">{evePulse.planning}</div>
-                    <div className="text-[11px] text-eve-cream/60 italic font-serif">planning to come</div>
+                    <div className="text-xs text-eve-cream/60 italic font-serif">planning to come</div>
                   </div>
                   <div className="text-center">
                     <div className="font-serif text-3xl text-eve-rose">#{evePulse.cuisineRank}</div>
-                    <div className="text-[11px] text-eve-cream/60 italic font-serif">in {cuisine || 'cuisine'} tonight</div>
+                    <div className="text-xs text-eve-cream/60 italic font-serif">in {cuisine || 'cuisine'} tonight</div>
                   </div>
                 </div>
               </div>
@@ -688,7 +702,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
             {/* Instagram */}
             <section className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur overflow-hidden animate-fade-in-up">
               <header className="px-5 py-3 flex items-center justify-between border-b border-white/5">
-                <span className="text-[10px] tracking-wide text-eve-gold/80 italic font-serif">Instagram post</span>
+                <span className="text-xs tracking-wide text-eve-gold/80 italic font-serif">Instagram post</span>
                 <div className="flex items-center gap-1">
                   <ReportContentButton
                     app="eve"
@@ -703,7 +717,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                   {!igConnected && igAvailable && (
                     <a
                       href={`/api/auth/instagram/start?brandId=${encodeURIComponent(brandId)}`}
-                      className="px-3 py-1 rounded-full bg-white/5 hover:bg-white/10 text-[10px] font-bold tracking-wide uppercase text-eve-cream/85 border border-white/15 hover:border-eve-gold/45 inline-flex items-center gap-1"
+                      className="px-3 py-1 rounded-full bg-white/5 hover:bg-white/10 text-xs font-bold tracking-wide uppercase text-eve-cream/85 border border-white/15 hover:border-eve-gold/45 inline-flex items-center gap-1"
                       title="Connect Instagram for one-click publishing"
                     >
                       <LinkIcon size={10} />
@@ -713,7 +727,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                   <button
                     onClick={igConnected ? publishToInstagramAPI : openInstagramShare}
                     disabled={igPublishing}
-                    className="px-3 py-1 rounded-full bg-gradient-to-r from-pink-500/20 to-purple-500/20 hover:from-pink-500/30 hover:to-purple-500/30 border border-pink-400/40 text-[10px] font-bold tracking-wide uppercase text-pink-300 inline-flex items-center gap-1 disabled:opacity-50"
+                    className="px-3 py-1 rounded-full bg-gradient-to-r from-pink-500/20 to-purple-500/20 hover:from-pink-500/30 hover:to-purple-500/30 border border-pink-400/40 text-xs font-bold tracking-wide uppercase text-pink-300 inline-flex items-center gap-1 disabled:opacity-50"
                     title={igConnected ? 'Post directly to Instagram' : 'Copy + open Instagram'}
                   >
                     {igPublishing ? (
@@ -744,14 +758,14 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                           pack.instagramPost.imageData!
                         )
                       }
-                      className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 text-[10px] font-semibold tracking-wide uppercase text-eve-cream/70 inline-flex items-center gap-1"
+                      className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 text-xs font-semibold tracking-wide uppercase text-eve-cream/70 inline-flex items-center gap-1"
                     >
                       <Download size={10} />
                     </button>
                   )}
                   <button
                     onClick={() => copyToClipboard('ig', `${pack.instagramPost.caption}\n\n${pack.instagramPost.hashtags.map((h) => '#' + h).join(' ')}`)}
-                    className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 text-[10px] font-semibold tracking-wide uppercase text-eve-cream/70 inline-flex items-center gap-1"
+                    className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 text-xs font-semibold tracking-wide uppercase text-eve-cream/70 inline-flex items-center gap-1"
                   >
                     {copied === 'ig' ? <Check size={10} /> : <Copy size={10} />}
                   </button>
@@ -765,12 +779,12 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                 />
               )}
               <div className="p-5">
-                <p className="text-[14px] leading-relaxed whitespace-pre-line text-eve-cream/90">
+                <p className="text-[0.875rem] leading-relaxed whitespace-pre-line text-eve-cream/90">
                   {pack.instagramPost.caption}
                 </p>
                 <div className="mt-3 flex flex-wrap gap-1.5">
                   {pack.instagramPost.hashtags.map((h, i) => (
-                    <span key={i} className="text-[11px] text-eve-rose/85">
+                    <span key={i} className="text-xs text-eve-rose/85">
                       #{h}
                     </span>
                   ))}
@@ -781,7 +795,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
             {/* Reel */}
             <section className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur overflow-hidden animate-fade-in-up">
               <header className="px-5 py-3 flex items-center justify-between border-b border-white/5">
-                <span className="text-[10px] tracking-wide text-eve-gold/80 italic font-serif">15-sec Reel · 3 scenes + voiceover</span>
+                <span className="text-xs tracking-wide text-eve-gold/80 italic font-serif">15-sec Reel · 3 scenes + voiceover</span>
                 <div className="flex items-center gap-1">
                 <ReportContentButton
                   app="eve"
@@ -797,7 +811,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                 />
                 <button
                   onClick={() => copyToClipboard('reel', pack.reel.fullVoiceoverScript)}
-                  className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 text-[10px] font-semibold tracking-wide uppercase text-eve-cream/70 inline-flex items-center gap-1"
+                  className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 text-xs font-semibold tracking-wide uppercase text-eve-cream/70 inline-flex items-center gap-1"
                 >
                   {copied === 'reel' ? <Check size={10} /> : <Copy size={10} />} script
                 </button>
@@ -813,12 +827,12 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                         className="w-full h-full object-cover"
                       />
                     ) : (
-                      <div className="absolute inset-0 flex items-center justify-center text-[10px] uppercase tracking-widest text-white/30">
+                      <div className="absolute inset-0 flex items-center justify-center text-xs uppercase tracking-widest text-white/30">
                         scene {i + 1}
                       </div>
                     )}
                     <div className="absolute bottom-0 inset-x-0 p-2 bg-gradient-to-t from-eve-ink/95 to-transparent">
-                      <p className="text-[11px] text-eve-cream/95 italic font-serif leading-tight">
+                      <p className="text-xs text-eve-cream/95 italic font-serif leading-tight">
                         "{sc.voiceover}"
                       </p>
                     </div>
@@ -826,7 +840,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                 ))}
               </div>
               <div className="p-5">
-                <p className="text-[12px] text-eve-cream/70 leading-snug italic">
+                <p className="text-mg-2xs text-eve-cream/70 leading-snug italic">
                   Full voiceover: "{pack.reel.fullVoiceoverScript}"
                 </p>
                 {reelAudio && (
@@ -838,7 +852,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
             {/* Menu Card */}
             <section className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur overflow-hidden animate-fade-in-up">
               <header className="px-5 py-3 flex items-center justify-between border-b border-white/5">
-                <span className="text-[10px] tracking-wide text-eve-gold/80 italic font-serif">Menu card</span>
+                <span className="text-xs tracking-wide text-eve-gold/80 italic font-serif">Menu card</span>
                 <div className="flex items-center gap-1">
                 <ReportContentButton
                   app="eve"
@@ -857,7 +871,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                       `${pack.menuCard.name} ${pack.menuCard.suggestedPrice ? `— ${pack.menuCard.suggestedPrice}` : ''}\n${pack.menuCard.description}\n\n${pack.menuCard.allergenTags.join(' · ')}`
                     )
                   }
-                  className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 text-[10px] font-semibold tracking-wide uppercase text-eve-cream/70 inline-flex items-center gap-1"
+                  className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 text-xs font-semibold tracking-wide uppercase text-eve-cream/70 inline-flex items-center gap-1"
                 >
                   <Download size={10} /> txt
                 </button>
@@ -870,11 +884,11 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                     <span className="font-serif text-xl text-eve-gold">{pack.menuCard.suggestedPrice}</span>
                   )}
                 </div>
-                <p className="text-[14px] text-eve-cream/85 leading-relaxed">{pack.menuCard.description}</p>
+                <p className="text-[0.875rem] text-eve-cream/85 leading-relaxed">{pack.menuCard.description}</p>
                 {pack.menuCard.allergenTags.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-1.5">
                     {pack.menuCard.allergenTags.map((tag, i) => (
-                      <span key={i} className="px-2 py-0.5 rounded-full text-[10px] tracking-wide uppercase text-eve-rose/90 border border-eve-rose/30 bg-eve-rose/5">
+                      <span key={i} className="px-2 py-0.5 rounded-full text-xs tracking-wide uppercase text-eve-rose/90 border border-eve-rose/30 bg-eve-rose/5">
                         {tag}
                       </span>
                     ))}
@@ -886,7 +900,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
             {/* Email + SMS */}
             <section className="rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur overflow-hidden animate-fade-in-up">
               <header className="px-5 py-3 flex items-center justify-between border-b border-white/5">
-                <span className="text-[10px] tracking-wide text-eve-gold/80 italic font-serif">Email + SMS</span>
+                <span className="text-xs tracking-wide text-eve-gold/80 italic font-serif">Email + SMS</span>
                 <div className="flex items-center gap-1">
                 <ReportContentButton
                   app="eve"
@@ -905,7 +919,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                       `Subject: ${pack.emailBlast.subject}\n\n${pack.emailBlast.bodyHtml.replace(/<[^>]+>/g, '')}\n\n— SMS —\n${pack.smsBlast}`
                     )
                   }
-                  className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 text-[10px] font-semibold tracking-wide uppercase text-eve-cream/70 inline-flex items-center gap-1"
+                  className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 text-xs font-semibold tracking-wide uppercase text-eve-cream/70 inline-flex items-center gap-1"
                 >
                   {copied === 'email' ? <Check size={10} /> : <Copy size={10} />} all
                 </button>
@@ -913,20 +927,20 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
               </header>
               <div className="p-5 space-y-4">
                 <div>
-                  <p className="text-[10px] tracking-wide text-eve-cream/55 mb-1 italic font-serif">Email subject</p>
-                  <p className="text-[15px] text-eve-cream font-medium">{pack.emailBlast.subject}</p>
+                  <p className="text-xs tracking-wide text-eve-cream/55 mb-1 italic font-serif">Email subject</p>
+                  <p className="text-[0.9375rem] text-eve-cream font-medium">{pack.emailBlast.subject}</p>
                 </div>
                 <div>
-                  <p className="text-[10px] tracking-wide text-eve-cream/55 mb-1 italic font-serif">Email body</p>
-                  <div className="text-[13px] text-eve-cream/85 leading-relaxed prose-eve space-y-2">
+                  <p className="text-xs tracking-wide text-eve-cream/55 mb-1 italic font-serif">Email body</p>
+                  <div className="text-[0.8125rem] text-eve-cream/85 leading-relaxed prose-eve space-y-2">
                     {emailParagraphs(pack.emailBlast.bodyHtml).map((para, i) => (
                       <p key={i}>{para}</p>
                     ))}
                   </div>
                 </div>
                 <div className="pt-4 border-t border-white/10">
-                  <p className="text-[10px] tracking-wide text-eve-cream/55 mb-1 italic font-serif">SMS blast</p>
-                  <p className="text-[14px] text-eve-cream/90 italic font-serif leading-snug">{pack.smsBlast}</p>
+                  <p className="text-xs tracking-wide text-eve-cream/55 mb-1 italic font-serif">SMS blast</p>
+                  <p className="text-[0.875rem] text-eve-cream/90 italic font-serif leading-snug">{pack.smsBlast}</p>
                 </div>
               </div>
             </section>
@@ -934,7 +948,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
         )}
 
         {pack && (
-          <div className="mt-8 max-w-2xl mx-auto text-center text-[12px] tracking-wide uppercase text-eve-cream/60">
+          <div className="mt-8 max-w-2xl mx-auto text-center text-mg-2xs tracking-wide uppercase text-eve-cream/60">
             <span className="inline-flex items-center gap-2">
               <RotateCcw size={11} />
               <span>Tomorrow night, drop a new dish — Eve does this again, on brand, in 60 seconds.</span>
@@ -943,9 +957,9 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
         )}
       </main>
 
-      <footer className="text-center py-6 text-[10px] text-white/55 tracking-[0.3em] uppercase">
-        Eve · For Restaurants
-      </footer>
+      <AppFooter className="py-6">
+        <p className="text-xs text-white/55 tracking-[0.3em] uppercase">Eve · For Restaurants</p>
+      </AppFooter>
     </div>
   );
 }

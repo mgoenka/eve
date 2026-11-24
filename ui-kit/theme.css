@@ -73,6 +73,14 @@
   /* type */
   --font-display: 'Syne', 'DM Sans', ui-sans-serif, system-ui, sans-serif;
   --font-sans: 'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  /* font-mono = DM Sans with tabular figures (scores, timers, codes line up; never Courier). */
+  --font-mono: 'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono--font-feature-settings: 'tnum' 1;
+  /* text floor: text-mg-2xs = 12px (at the default root size). Use it instead of text-[9px] / text-[10px]. */
+  --text-mg-2xs: 0.75rem;
+  --text-mg-2xs--line-height: 1rem;
+  /* page content width: max-w-mg-content (wider on big screens and TVs, see --mg-content-max) */
+  --container-mg-content: var(--mg-content-max);
 
   /* radii */
   --radius-mg-sm: 0.5rem;
@@ -103,6 +111,23 @@
 
 /* ------------------------------------------------------------------- base */
 @layer base {
+  :root {
+    --mg-content-max: 64rem;
+  }
+  /* Big screens: larger type and a wider content column. TV = html.mg-tv (set by utils/native.ts). */
+  @media (min-width: 1600px) {
+    html:not(.mg-tv) {
+      font-size: 125%;
+      --mg-content-max: min(80rem, 92vw);
+    }
+  }
+  html.mg-tv {
+    font-size: 150%;
+    --mg-content-max: min(90rem, 92vw); /* 90rem = 2160px at 150%: never wider than the screen */
+  }
+  .font-mono {
+    font-variant-numeric: tabular-nums;
+  }
   html {
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
@@ -131,6 +156,12 @@
   :focus-visible {
     outline: 2px solid var(--color-mg-gold);
     outline-offset: 2px;
+  }
+  /* Form fields: a gold ring even when the field sets focus:outline-none (keyboard and D-pad users). */
+  input:focus-visible, select:focus-visible, textarea:focus-visible {
+    outline: 2px solid var(--color-mg-gold);
+    outline-offset: 1px;
+    box-shadow: 0 0 0 4px rgb(245 197 66 / 0.25);
   }
   ::selection {
     background: rgb(245 197 66 / 0.3);

@@ -7,7 +7,9 @@
 // aiCreditAccounts/{walletKey}/ledger/{autoId}    append-only LedgerEntry (never updated or deleted by code)
 // aiCreditPurchases/{provider}:{sha256(extId)}    { account, provider, productId, orderId, credits, finalized, createdAt, finalizedAt }
 // aiCreditOrders/{provider}:{secondaryId}         { purchaseKey, account }   (Play orderId / Stripe payment intent)
-// aiCreditStarterIps/{sha256(salt+address)}       { count, windowStart }     (web starter grants per address)
+// aiCreditStarterIps/{sha256(salt+address)}       { claims: [ms…] }          (starter grants per address, rolling window)
+// aiCreditStarterBudget/{YYYY-MM-DD}/shards/{0..9} { count }                 (global daily starter budget, sharded)
+// aiCreditSync/{name}                             { lastRunAt, checkpoint }  (e.g. play-voided:<package>)
 // aiCreditConfig/web                              { enabled }                (the web credits switch)
 // aiCreditPromos/{CODE}                           PromoCode { credits, maxRedemptions, redemptions, expiresAt, active, ... }
 // aiCreditPromos/{CODE}/redemptions/{walletKey}   { account, credits, at, app }  (one per wallet)
@@ -17,8 +19,8 @@
 // imported lazily so web-only traffic and apps without Firestore never load it.
 import type { DocumentReference, Firestore, Transaction } from '@google-cloud/firestore';
 import { COLLECTIONS, WEB_SWITCH_DOC } from './config.ts';
-import { liveHeld, promoProblem } from './store.ts';
-import type { AccountMeta, AccountState, ChargeInput, CreditPurchaseInput, CreditStore, LedgerEntry, MergeResult, PromoCode, PromoResult, PurchaseRecord } from './store.ts';
+import { hasPromoLimit, liveClaims, liveHeld, promoProblem } from './store.ts';
+import type { AccountMeta, AccountState, ChargeInput, CreditPurchaseInput, CreditStore, LedgerEntry, MergeResult, PromoCode, PromoResult, PurchaseRecord, StarterOutcome, StarterRule, StarterState } from './store.ts';
 
 type Holds = Record<string, { credits: number; expiresAt: number }>;
 interface AccountDoc {
@@ -34,6 +36,10 @@ interface AccountDoc {
   owner?: boolean;
   /** Linked into another web wallet (balance 0); late purchases and refunds follow it. */
   mergedInto?: string;
+  /** When the starter grant was made (accounts from before 2026-11-24 got it at creation without this field). */
+  starterGrantedAt?: string;
+  /** Starter not granted yet: 'pending' | 'paused' | 'address_limit' (see AccountState.starterState). */
+  starterState?: StarterState;
 }
 
 export interface FirestoreStoreOptions {
@@ -77,7 +83,9 @@ export class FirestoreCreditStore implements CreditStore {
 
   private static fresh(meta: AccountMeta, starter: number, now: Date): AccountDoc {
     const at = now.toISOString();
-    return { kind: meta.kind, app: meta.app, id: meta.id, balance: starter, holds: {}, totals: { granted: starter, purchased: 0, spent: 0 }, createdAt: at, updatedAt: at };
+    const doc: AccountDoc = { kind: meta.kind, app: meta.app, id: meta.id, balance: starter, holds: {}, totals: { granted: starter, purchased: 0, spent: 0 }, createdAt: at, updatedAt: at };
+    if (starter <= 0) doc.starterState = 'pending'; // written with the account: the starter comes on its first action
+    return doc;
   }
 
   /** Read-or-create inside a transaction. Writes the starter grant when creating. */
@@ -94,7 +102,7 @@ export class FirestoreCreditStore implements CreditStore {
   }
 
   private static writeCreated(tx: Transaction, ref: DocumentReference, newLedger: () => DocumentReference, doc: AccountDoc, starter: number, now: Date) {
-    tx.create(ref, doc);
+    tx.create(ref, starter > 0 ? { ...doc, starterGrantedAt: now.toISOString() } : doc);
     if (starter > 0) {
       const e: LedgerEntry = { type: 'grant', credits: starter, balanceAfter: starter, at: now.toISOString(), reason: 'starter' };
       tx.create(newLedger(), e);
@@ -107,14 +115,181 @@ export class FirestoreCreditStore implements CreditStore {
     return out;
   }
 
+  private static stateOf(doc: AccountDoc, created: boolean, now: Date): AccountState {
+    const holds = FirestoreCreditStore.live(doc.holds, now.getTime());
+    return {
+      balance: doc.balance,
+      available: doc.balance - liveHeld(Object.values(holds), now.getTime()),
+      created,
+      owner: doc.owner === true,
+      ...((doc.totals?.purchased ?? 0) > 0 ? { paid: true } : {}),
+      ...(doc.starterState && !doc.starterGrantedAt ? { starterState: doc.starterState } : {}),
+    };
+  }
+
   async ensure(key: string, meta: AccountMeta, starter: number, now: Date): Promise<AccountState> {
     const { db, account, ledger } = await this.refs(key);
     return db.runTransaction(async (tx) => {
       const { doc, created } = await FirestoreCreditStore.load(tx, account, meta, starter, now);
       if (created) FirestoreCreditStore.writeCreated(tx, account, ledger, doc, starter, now);
-      const holds = FirestoreCreditStore.live(doc.holds, now.getTime());
-      return { balance: doc.balance, available: doc.balance - liveHeld(Object.values(holds), now.getTime()), created, owner: doc.owner === true };
+      return FirestoreCreditStore.stateOf(doc, created, now);
     });
+  }
+
+  async getAccount(key: string, now: Date): Promise<AccountState | null> {
+    const { account } = await this.refs(key);
+    const snap = await account.get();
+    return snap.exists ? FirestoreCreditStore.stateOf(snap.data() as AccountDoc, false, now) : null;
+  }
+
+  async claimStarterGrant(key: string, meta: AccountMeta, credits: number, rule: StarterRule, now: Date): Promise<{ outcome: StarterOutcome; balance: number }> {
+    const { db, account, ledger } = await this.refs(key);
+    const ipRef = db.collection(COLLECTIONS.starterIps).doc(rule.addressKey);
+    const shards = db.collection(COLLECTIONS.starterBudget).doc(rule.day).collection('shards');
+    const n = Math.max(1, Math.floor(rule.shards));
+    const per = Math.ceil(rule.dailyCap / n);
+    const { FieldValue } = await import('@google-cloud/firestore');
+    return db.runTransaction(async (tx) => {
+      // Every read first (account, address, shards until one has room), then the writes.
+      const { doc, created } = await FirestoreCreditStore.load(tx, account, meta, 0, now);
+      if (doc.starterGrantedAt || (doc.starterState !== 'pending' && doc.starterState !== 'paused')) return { outcome: 'already' as const, balance: doc.balance };
+      const at = now.toISOString();
+      const settle = (state: StarterState) => {
+        if (created) tx.create(account, { ...doc, starterState: state });
+        else if (doc.starterState !== state) tx.update(account, { starterState: state, updatedAt: at });
+      };
+      const t = now.getTime();
+      const ipSnap = await tx.get(ipRef);
+      const claims = liveClaims(ipSnap.exists ? ipSnap.data() : null, rule.windowMs, t);
+      if (claims.length >= rule.perAddress) {
+        settle('address_limit');
+        return { outcome: 'address_limit' as const, balance: doc.balance };
+      }
+      let shardRef: DocumentReference | null = null;
+      let shardCount = 0;
+      const start = Math.floor(Math.random() * n);
+      for (let k = 0; per > 0 && k < n && !shardRef; k++) {
+        const ref = shards.doc(String((start + k) % n));
+        const snap = await tx.get(ref);
+        const count = snap.exists ? Number((snap.data() as { count?: number }).count) || 0 : 0;
+        if (count < per) {
+          shardRef = ref;
+          shardCount = count;
+        }
+      }
+      if (!shardRef) {
+        settle('paused');
+        return { outcome: 'paused' as const, balance: doc.balance };
+      }
+      const balance = doc.balance + credits;
+      if (created) {
+        const { starterState: _s, ...rest } = doc;
+        tx.create(account, { ...rest, balance, totals: { ...doc.totals, granted: credits }, starterGrantedAt: at });
+      } else tx.update(account, { balance, 'totals.granted': (doc.totals?.granted ?? 0) + credits, starterGrantedAt: at, starterState: FieldValue.delete(), updatedAt: at });
+      tx.set(ipRef, { claims: [...claims, t], updatedAt: at });
+      tx.set(shardRef, { count: shardCount + 1, updatedAt: at });
+      const e: LedgerEntry = { type: 'grant', credits, balanceAfter: balance, at, reason: 'starter' };
+      tx.create(ledger(), e);
+      return { outcome: 'granted' as const, balance };
+    });
+  }
+
+  async claimStarterBudget(day: string, cap: number, shards: number, now: Date) {
+    const db = await this.db();
+    const n = Math.max(1, Math.floor(shards));
+    const per = Math.ceil(cap / n);
+    if (per <= 0) return false;
+    const col = db.collection(COLLECTIONS.starterBudget).doc(day).collection('shards');
+    // Random start, then the next shards in turn: each transaction touches one small doc.
+    const start = Math.floor(Math.random() * n);
+    for (let k = 0; k < n; k++) {
+      const ref = col.doc(String((start + k) % n));
+      const ok = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        const count = snap.exists ? Number((snap.data() as { count?: number }).count) || 0 : 0;
+        if (count >= per) return false;
+        tx.set(ref, { count: count + 1, updatedAt: now.toISOString() });
+        return true;
+      });
+      if (ok) return true;
+    }
+    return false;
+  }
+
+  async starterBudgetUsed(day: string) {
+    const db = await this.db();
+    const snap = await db.collection(COLLECTIONS.starterBudget).doc(day).collection('shards').get();
+    return snap.docs.reduce((s, d) => s + (Number((d.data() as { count?: number }).count) || 0), 0);
+  }
+
+  async claimSyncRun(name: string, minIntervalMs: number, now: Date) {
+    const db = await this.db();
+    const ref = db.collection(COLLECTIONS.sync).doc(name);
+    return db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const cur = snap.exists ? (snap.data() as { nextRunAt?: number; lastRunAt?: number; checkpoint?: number | null }) : null;
+      const checkpoint = typeof cur?.checkpoint === 'number' ? cur.checkpoint : null;
+      const next = cur ? (cur.nextRunAt ?? (cur.lastRunAt ?? 0) + minIntervalMs) : 0;
+      if (next > now.getTime()) return { ok: false, checkpoint };
+      tx.set(ref, { lastRunAt: now.getTime(), nextRunAt: now.getTime() + minIntervalMs, checkpoint }, { merge: true });
+      return { ok: true, checkpoint };
+    });
+  }
+
+  async deferSyncRun(name: string, at: Date) {
+    const db = await this.db();
+    await db.collection(COLLECTIONS.sync).doc(name).set({ nextRunAt: at.getTime() }, { merge: true });
+  }
+
+  async reversePurchaseOnce(find: { purchaseKey?: string; secondaryKey?: string }, reversalId: string, credits: number, reason: string, now: Date) {
+    const db = await this.db();
+    let purchaseKey = find.purchaseKey;
+    if (!purchaseKey && find.secondaryKey) {
+      const s = await db.collection(COLLECTIONS.externalIds).doc(find.secondaryKey).get();
+      purchaseKey = (s.data() as { purchaseKey?: string } | undefined)?.purchaseKey;
+    }
+    if (!purchaseKey) return null;
+    const purchaseRef = db.collection(COLLECTIONS.purchases).doc(purchaseKey);
+    return db.runTransaction(async (tx) => {
+      const pSnap = await tx.get(purchaseRef);
+      if (!pSnap.exists) return null;
+      const rec = pSnap.data() as PurchaseRecord;
+      const found = await FirestoreCreditStore.followMerges(tx, db, rec.account);
+      if (!found) return null;
+      const { ref: accRef, doc } = found;
+      if (rec.reversals?.[reversalId] !== undefined) return { reversed: 0, balance: doc.balance, account: accRef.id };
+      const delta = Math.max(0, Math.min(Math.floor(credits), rec.credits - (rec.reversedCredits ?? 0)));
+      const at = now.toISOString();
+      tx.update(purchaseRef, { [`reversals.${reversalId}`]: delta, ...(delta > 0 ? { reversedCredits: (rec.reversedCredits ?? 0) + delta, reversedAt: at } : {}) });
+      if (delta <= 0) return { reversed: 0, balance: doc.balance, account: accRef.id };
+      const balance = doc.balance - delta;
+      tx.update(accRef, { balance, updatedAt: at });
+      const e: LedgerEntry = { type: 'reversal', credits: -delta, balanceAfter: balance, at, reason, productId: rec.productId, provider: rec.provider };
+      if (rec.orderId) e.orderId = rec.orderId;
+      tx.create(accRef.collection('ledger').doc(), e);
+      return { reversed: delta, balance, account: accRef.id };
+    });
+  }
+
+  /** The account a purchase's wallet points to now (follows mergedInto a few hops), read inside a transaction. */
+  private static async followMerges(tx: Transaction, db: Firestore, key: string): Promise<{ ref: DocumentReference; doc: AccountDoc } | null> {
+    let ref = db.collection(COLLECTIONS.accounts).doc(key);
+    const snap = await tx.get(ref);
+    if (!snap.exists) return null;
+    let doc = snap.data() as AccountDoc;
+    for (let i = 0; i < 5 && doc.mergedInto; i++) {
+      const nextRef = db.collection(COLLECTIONS.accounts).doc(doc.mergedInto);
+      const next = await tx.get(nextRef);
+      if (!next.exists) break;
+      ref = nextRef;
+      doc = next.data() as AccountDoc;
+    }
+    return { ref, doc };
+  }
+
+  async saveSyncCheckpoint(name: string, checkpoint: number, now: Date) {
+    const db = await this.db();
+    await db.collection(COLLECTIONS.sync).doc(name).set({ checkpoint, savedAt: now.toISOString() }, { merge: true });
   }
 
   async reserve(key: string, meta: AccountMeta, starter: number, holdId: string, credits: number, ttlMs: number, now: Date) {
@@ -242,17 +417,19 @@ export class FirestoreCreditStore implements CreditStore {
     });
   }
 
-  async claimStarter(addressKey: string, limit: number, windowMs: number, now: Date) {
+  async claimStarter(addressKey: string, limit: number, windowMs: number, now: Date, dryRun = false) {
     const db = await this.db();
     const ref = db.collection(COLLECTIONS.starterIps).doc(addressKey);
+    const t = now.getTime();
+    if (dryRun) {
+      const snap = await ref.get();
+      return liveClaims(snap.exists ? snap.data() : null, windowMs, t).length < limit;
+    }
     return db.runTransaction(async (tx) => {
       const snap = await tx.get(ref);
-      const t = now.getTime();
-      const cur = snap.exists ? (snap.data() as { count?: number; windowStart?: number }) : null;
-      const fresh = !cur || (cur.windowStart ?? 0) + windowMs <= t;
-      const count = fresh ? 0 : (cur?.count ?? 0);
-      if (count >= limit) return false;
-      tx.set(ref, { count: count + 1, windowStart: fresh ? t : (cur?.windowStart ?? t) });
+      const claims = liveClaims(snap.exists ? snap.data() : null, windowMs, t);
+      if (claims.length >= limit) return false;
+      tx.set(ref, { claims: [...claims, t], updatedAt: now.toISOString() });
       return true;
     });
   }
@@ -329,7 +506,9 @@ export class FirestoreCreditStore implements CreditStore {
       const e: LedgerEntry = { type: 'grant', credits, balanceAfter: balance, at, reason: `promo ${code}` };
       tx.create(ledger(), e);
       tx.create(redemptionRef, { account: key, credits, at, app: meta.app });
-      tx.update(promoRef, { redemptions: (promo.redemptions ?? 0) + 1, lastRedeemedAt: at });
+      // Codes without a limit keep no counter: no write to the shared promo doc, so a popular code can't get hot
+      // (the redemptions subcollection still records each wallet once).
+      if (hasPromoLimit(promo)) tx.update(promoRef, { redemptions: (promo.redemptions ?? 0) + 1, lastRedeemedAt: at });
       return { ok: true, code, credits, balance };
     });
   }

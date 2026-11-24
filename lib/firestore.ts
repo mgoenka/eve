@@ -69,9 +69,39 @@ export interface RestaurantBrandDoc {
   updatedAtISO: string;
 }
 
-// In-memory fallback when Firestore isn't available.
+// In-memory fallback when Firestore isn't available. Bounded so a long Firestore
+// outage (every write falling back here) can't grow the instance without limit.
 const memorySpecials: PostedSpecialDoc[] = [];
 const memoryBrands = new Map<string, RestaurantBrandDoc>();
+const MEMORY_SPECIALS_MAX = 200;
+const MEMORY_BRANDS_MAX = 500;
+function pushMemorySpecial(s: PostedSpecialDoc) {
+  memorySpecials.push(s);
+  if (memorySpecials.length > MEMORY_SPECIALS_MAX) memorySpecials.splice(0, memorySpecials.length - MEMORY_SPECIALS_MAX);
+}
+function setMemoryBrand(id: string, b: RestaurantBrandDoc) {
+  memoryBrands.delete(id);
+  memoryBrands.set(id, b);
+  if (memoryBrands.size > MEMORY_BRANDS_MAX) memoryBrands.delete(memoryBrands.keys().next().value!);
+}
+
+// Every plan request (and /api/specials) reads the latest ~200 specials. Cache that
+// read for 60 s per instance; writes from this instance drop it at once. Other
+// instances catch up within the TTL. Concurrent misses share one Firestore read.
+// Specials carry their image, so an unusually large result isn't kept.
+const SPECIALS_CACHE_LIMIT = 200;
+const SPECIALS_CACHE_TTL_MS = 60_000;
+const SPECIALS_CACHE_MAX_BYTES = 48 * 1024 * 1024;
+let specialsCache: { at: number; docs: PostedSpecialDoc[] } | null = null;
+let specialsInFlight: Promise<PostedSpecialDoc[]> | null = null;
+let specialsGeneration = 0;
+
+/** Drop the cached specials (call after any write to the specials collection). */
+export function invalidateSpecialsCache() {
+  specialsCache = null;
+  specialsInFlight = null;
+  specialsGeneration++;
+}
 
 // ---------- Specials (the dining index) ----------
 
@@ -80,16 +110,40 @@ function publicSpecial({ ownerKeyHash: _owner, ...s }: PostedSpecialDoc): Posted
   return s;
 }
 
+async function querySpecials(d: Firestore, limit: number): Promise<PostedSpecialDoc[]> {
+  const snap = await d
+    .collection('specials')
+    .orderBy('postedAtISO', 'desc')
+    .limit(limit)
+    .get();
+  return snap.docs.map((doc) => publicSpecial({ id: doc.id, ...(doc.data() as PostedSpecialDoc) }));
+}
+
+/** The latest SPECIALS_CACHE_LIMIT specials, from the 60 s cache when fresh. */
+function recentSpecialsCached(d: Firestore): Promise<PostedSpecialDoc[]> {
+  if (specialsCache && Date.now() - specialsCache.at < SPECIALS_CACHE_TTL_MS) return Promise.resolve(specialsCache.docs);
+  if (specialsInFlight) return specialsInFlight;
+  const generation = specialsGeneration;
+  const p = querySpecials(d, SPECIALS_CACHE_LIMIT)
+    .then((docs) => {
+      const bytes = docs.reduce((n, s) => n + (s.imageData?.length || 0) + (s.caption?.length || 0), 0);
+      // A write while the read was in flight makes this result stale: don't keep it.
+      if (generation === specialsGeneration && bytes <= SPECIALS_CACHE_MAX_BYTES) specialsCache = { at: Date.now(), docs };
+      return docs;
+    })
+    .finally(() => {
+      if (specialsInFlight === p) specialsInFlight = null;
+    });
+  specialsInFlight = p;
+  return p;
+}
+
 export async function listSpecials(limit = 50): Promise<PostedSpecialDoc[]> {
   const d = await getDb();
   if (!d) return memorySpecials.slice(-limit).reverse().map(publicSpecial);
   try {
-    const snap = await d
-      .collection('specials')
-      .orderBy('postedAtISO', 'desc')
-      .limit(limit)
-      .get();
-    return snap.docs.map((doc) => publicSpecial({ id: doc.id, ...(doc.data() as PostedSpecialDoc) }));
+    if (limit <= SPECIALS_CACHE_LIMIT) return (await recentSpecialsCached(d)).slice(0, limit);
+    return await querySpecials(d, limit);
   } catch (err: any) {
     console.warn('[firestore] listSpecials failed:', err?.message || err);
     return memorySpecials.slice(-limit).reverse().map(publicSpecial);
@@ -115,16 +169,17 @@ export async function addSpecial(s: PostedSpecialDoc): Promise<string> {
   };
   if (!d) {
     const id = `mem_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    memorySpecials.push({ ...enriched, id });
+    pushMemorySpecial({ ...enriched, id });
     return id;
   }
   try {
     const ref = await d.collection('specials').add(enriched);
+    invalidateSpecialsCache();
     return ref.id;
   } catch (err: any) {
     console.warn('[firestore] addSpecial failed, falling back to memory:', err?.message || err);
     const id = `mem_${Date.now()}`;
-    memorySpecials.push({ ...enriched, id });
+    pushMemorySpecial({ ...enriched, id });
     return id;
   }
 }
@@ -143,6 +198,7 @@ export async function bumpSpecialMetric(
   try {
     const { FieldValue } = await import('@google-cloud/firestore');
     await d.collection('specials').doc(id).update({ [metric]: FieldValue.increment(by) });
+    invalidateSpecialsCache();
   } catch (err: any) {
     // Fall through silently — analytics are non-critical
     console.warn('[firestore] bumpSpecialMetric failed:', err?.message || err);
@@ -169,7 +225,7 @@ export async function saveBrand(id: string, data: Partial<RestaurantBrandDoc>): 
   const d = await getDb();
   if (!d) {
     const existing = memoryBrands.get(id);
-    memoryBrands.set(id, {
+    setMemoryBrand(id, {
       ...(existing || {
         name: '',
         city: '',
@@ -241,6 +297,7 @@ export async function deleteOwnedData(ownerKeyHash: string): Promise<DeletedCoun
       const batch = d.batch();
       snap.docs.forEach((doc) => batch.delete(doc.ref));
       await batch.commit();
+      if (name === 'specials') invalidateSpecialsCache();
       counts[name] += snap.size;
       if (snap.size < 400) break;
     }

@@ -21,6 +21,10 @@
 
 import { GoogleGenAI } from '@google/genai';
 import { recordCloudTts, recordGemini } from './server/aiMeter.ts';
+import { guardedCall, isAiBusy } from './server/ai-guard.ts';
+
+// One retry for transient upstream errors only; 429 / 503 go to ai-guard (no retry).
+const RETRY = { attempts: 2, httpStatusCodes: [500, 502, 504] };
 
 export interface ToolSchemaProperty {
   type: 'string' | 'number' | 'boolean' | 'array' | 'object';
@@ -77,6 +81,8 @@ export class AgentRuntime {
         calls.push({ tool: step.tool, ok: true, latencyMs: Date.now() - t0 });
         outputs.push({ tool: step.tool, output: out });
       } catch (err: any) {
+        // Gemini busy / out of quota: fail the whole run (the route answers 503 + Retry-After).
+        if (isAiBusy(err)) throw err;
         calls.push({ tool: step.tool, ok: false, latencyMs: Date.now() - t0 });
         outputs.push({ tool: step.tool, output: { error: err?.message || 'tool error' } });
       }
@@ -100,16 +106,18 @@ export function makePlacesSearchTool(ai: GoogleGenAI, textModel: string): Tool {
     required: ['name', 'city'],
     async run(input: { name: string; city: string; kind?: string }) {
       const prompt = `Search the web for "${input.name}" in "${input.city}". In ONE paragraph (max 55 words), describe what the place actually looks like and what to expect — concrete sensory cues only. Output ONLY the paragraph.`;
-      const response = await ai.models.generateContent({
-        model: textModel,
-        contents: prompt,
-        config: {
-          temperature: 0.4,
-          tools: [{ googleSearch: {} }],
-          maxOutputTokens: 1024,
-          httpOptions: { timeout: 40_000, retryOptions: { attempts: 2 } },
-        },
-      });
+      const response = await guardedCall(() =>
+        ai.models.generateContent({
+          model: textModel,
+          contents: prompt,
+          config: {
+            temperature: 0.4,
+            tools: [{ googleSearch: {} }],
+            maxOutputTokens: 1024,
+            httpOptions: { timeout: 40_000, retryOptions: RETRY },
+          },
+        })
+      );
       recordGemini(response, textModel); // AI credits (no-op unless a paying app request)
       return { details: ((response.text || '').trim() || '').slice(0, 600) };
     },
@@ -138,14 +146,16 @@ export function makeSceneCardTool(ai: GoogleGenAI, imageModel: string): Tool {
 Venue: ${input.name}, ${input.city}. Kind: ${input.kind}. Vibe: ${input.vibe}. Atmosphere: ${input.oneLineVibe || ''}.
 ${input.venueDetails ? `Real venue details: ${input.venueDetails}` : ''}
 Photoreal but slightly painterly, like Bon Appetit / Cereal Magazine. NO text, NO logos, NO watermarks. Square framing.`;
-      const response = await ai.models.generateContent({
-        model: imageModel,
-        contents: prompt,
-        config: {
-          responseModalities: ['TEXT', 'IMAGE'],
-          httpOptions: { timeout: 55_000, retryOptions: { attempts: 2 } },
-        },
-      });
+      const response = await guardedCall(() =>
+        ai.models.generateContent({
+          model: imageModel,
+          contents: prompt,
+          config: {
+            responseModalities: ['TEXT', 'IMAGE'],
+            httpOptions: { timeout: 55_000, retryOptions: RETRY },
+          },
+        })
+      );
       recordGemini(response, imageModel);
       const parts = response.candidates?.[0]?.content?.parts || [];
       for (const p of parts as Array<any>) {

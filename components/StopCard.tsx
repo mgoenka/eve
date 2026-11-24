@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { MapPin, Clock, Footprints, Sparkles, ExternalLink, BookOpen, RotateCcw } from 'lucide-react';
+import { MapPin, Clock, Footprints, Sparkles, ExternalLink, BookOpen, RotateCcw, ImageIcon } from 'lucide-react';
 import type { ExperienceStop, StopKind } from '../types';
 import { STOP_KINDS } from '../constants';
 import { buildReservationLinks } from '../lib/reservations';
-import { ReportContentButton } from '../ui-kit';
+import { ReportContentButton, openCreditsSheet, speculativeAiAllowed, useCredits } from '../ui-kit';
 import { checkReservations } from '../services/eveService';
 
 interface Props {
@@ -17,6 +17,8 @@ interface Props {
   dimmed?: boolean;
   /** Repaint this card after a failed image. */
   onRetryImage?: () => void;
+  /** Paint this card's picture on request (only the first stop is painted automatically). */
+  onShowImage?: () => void;
 }
 
 const RESERVABLE_KINDS: StopKind[] = ['dinner', 'dessert', 'drink', 'live_music'];
@@ -51,12 +53,15 @@ const KIND_GRADIENTS: Record<StopKind, { from: string; via: string; to: string }
   activity: { from: 'from-emerald-500/25', via: 'via-teal-500/25', to: 'to-amber-400/25' },
 };
 
-export function StopCard({ stop, index, city, whenISO, startTime, party, highlighted, dimmed, onRetryImage }: Props) {
+export function StopCard({ stop, index, city, whenISO, startTime, party, highlighted, dimmed, onRetryImage, onShowImage }: Props) {
   const kindMeta = STOP_KINDS.find((k) => k.kind === stop.kind);
   const grad = KIND_GRADIENTS[stop.kind] || KIND_GRADIENTS.dinner;
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${stop.name} ${city || ''}`.trim())}`;
   const hasError = stop.status === 'error';
-  const showSkeleton = !stop.imageData && (stop.status === 'pending' || stop.status === 'generating');
+  const showSkeleton = !stop.imageData && stop.status === 'generating';
+  // Not painted yet (waiting for a tap on "Show picture").
+  const awaitingTap = !stop.imageData && stop.status === 'pending' && !!onShowImage;
+  const outOfSparks = hasError && stop.errorCode === 'insufficient_credits';
 
   const isReservable = RESERVABLE_KINDS.includes(stop.kind);
   const allReservationLinks = isReservable
@@ -73,8 +78,11 @@ export function StopCard({ stop, index, city, whenISO, startTime, party, highlig
   // (Gemini + Google Search). Filter out platforms that don't list the
   // venue. Falls back to all-three on error so the user always has a path.
   const [availability, setAvailability] = useState<AvailabilityMap | null>(null);
+  // Speculative: re-checked once the Sparks balance is known; skipped (all three links stay) when it could spend
+  // Sparks the user didn't choose to spend.
+  const creditsLoaded = useCredits().loaded;
   useEffect(() => {
-    if (!isReservable || !stop.name) return;
+    if (!isReservable || !stop.name || !speculativeAiAllowed()) return;
     let cancelled = false;
     // Background check (AI credits in the Android app; never opens the credits sheet).
     checkReservations({ restaurantName: stop.name, city: city || '' })
@@ -90,7 +98,7 @@ export function StopCard({ stop, index, city, whenISO, startTime, party, highlig
     return () => {
       cancelled = true;
     };
-  }, [isReservable, stop.name, city]);
+  }, [isReservable, stop.name, city, creditsLoaded]);
 
   const reservationLinks = allReservationLinks.filter((l) => {
     if (!availability) return true; // optimistic until check returns
@@ -126,18 +134,42 @@ export function StopCard({ stop, index, city, whenISO, startTime, party, highlig
               decoding="async"
             />
             <div className={`absolute inset-0 bg-gradient-to-br ${grad.from} ${grad.via} ${grad.to} ${showSkeleton ? 'opacity-90 animate-pulse mix-blend-overlay' : 'opacity-40 mix-blend-overlay'}`} />
+            {awaitingTap && (
+              <div className="absolute inset-0 bg-eve-ink/60 flex items-center justify-center">
+                <button
+                  onClick={onShowImage}
+                  className="inline-flex items-center gap-2 min-h-11 px-5 rounded-full bg-eve-ink/85 hover:bg-eve-ink border border-eve-gold/55 text-eve-gold text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-eve-gold transition-colors"
+                >
+                  <ImageIcon size={16} />
+                  Show picture
+                </button>
+              </div>
+            )}
           </>
         )}
 
         {/* Graceful error state — never expose raw error JSON */}
         {hasError && !stop.imageData && (
           <div className="absolute inset-0 bg-gradient-to-br from-eve-plum/55 via-eve-ink/70 to-eve-plum/55 flex flex-col items-center justify-center gap-2 px-6 text-center backdrop-blur-sm">
-            {stop.errorCode === 'image_limit' ? (
+            {outOfSparks ? (
+              <>
+                <span className="font-serif italic text-eve-rose/95 text-base leading-snug">
+                  "I'll paint this one when you have Sparks."
+                </span>
+                <button
+                  onClick={() => openCreditsSheet('insufficient')}
+                  className="mt-1 inline-flex items-center gap-1.5 min-h-11 px-4 rounded-full bg-eve-ink/70 hover:bg-eve-ink/90 border border-eve-gold/40 text-eve-gold text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-eve-gold"
+                >
+                  <Sparkles size={14} />
+                  Get Sparks to see pictures
+                </button>
+              </>
+            ) : stop.errorCode === 'image_limit' ? (
               <>
                 <span className="font-serif italic text-eve-rose/95 text-base leading-snug">
                   "I've painted all I can for this hour."
                 </span>
-                <span className="text-[12px] text-eve-cream/80 italic font-serif">
+                <span className="text-xs text-eve-cream/80 italic font-serif">
                   The plan is all here. Try repainting a little later.
                 </span>
               </>
@@ -146,15 +178,15 @@ export function StopCard({ stop, index, city, whenISO, startTime, party, highlig
                 <span className="font-serif italic text-eve-rose/95 text-base leading-snug">
                   "The light wouldn't quite catch this one."
                 </span>
-                <span className="text-[12px] text-eve-cream/80 italic font-serif">
+                <span className="text-xs text-eve-cream/80 italic font-serif">
                   Picture it warmer than that.
                 </span>
               </>
             )}
-            {onRetryImage && (
+            {onRetryImage && !outOfSparks && (
               <button
                 onClick={onRetryImage}
-                className="mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-eve-ink/70 hover:bg-eve-ink/90 border border-eve-gold/40 text-eve-gold text-xs font-semibold outline-none focus-visible:ring-2 focus-visible:ring-eve-gold"
+                className="mt-1 inline-flex items-center gap-1.5 min-h-11 px-4 rounded-full bg-eve-ink/70 hover:bg-eve-ink/90 border border-eve-gold/40 text-eve-gold text-xs font-semibold outline-none focus-visible:ring-2 focus-visible:ring-eve-gold"
               >
                 <RotateCcw size={12} />
                 Repaint
@@ -173,8 +205,8 @@ export function StopCard({ stop, index, city, whenISO, startTime, party, highlig
             <img
               src={`data:${stop.imageMime || 'image/png'};base64,${stop.imageData}`}
               alt={stop.name}
-              width={1024}
-              height={1024}
+              width={512}
+              height={512}
               decoding="async"
               className="absolute inset-0 w-full h-full object-cover scale-110 animate-fade-in"
             />
@@ -185,16 +217,16 @@ export function StopCard({ stop, index, city, whenISO, startTime, party, highlig
 
         {/* Top labels */}
         <div className="absolute top-3 left-3 inline-flex items-center gap-2 z-10">
-          <span className="px-2.5 py-1 rounded-full bg-eve-ink/85 backdrop-blur text-[11px] font-bold tracking-wide text-eve-gold border border-eve-gold/40">
+          <span className="px-2.5 py-1 rounded-full bg-eve-ink/85 backdrop-blur text-xs font-bold tracking-wide text-eve-gold border border-eve-gold/40">
             Stop {index + 1}
           </span>
           {kindMeta && (
-            <span className="px-2.5 py-1 rounded-full bg-eve-ink/75 backdrop-blur text-[11px] font-semibold tracking-wide text-eve-cream/95">
+            <span className="px-2.5 py-1 rounded-full bg-eve-ink/75 backdrop-blur text-xs font-semibold tracking-wide text-eve-cream/95">
               {kindMeta.label}
             </span>
           )}
           {stop.isEveOriginal && (
-            <span className="px-2.5 py-1 rounded-full bg-eve-rose/25 border border-eve-rose/55 backdrop-blur text-[10px] font-bold tracking-wide text-eve-rose inline-flex items-center gap-1">
+            <span className="px-2.5 py-1 rounded-full bg-eve-rose/25 border border-eve-rose/55 backdrop-blur text-xs font-bold tracking-wide text-eve-rose inline-flex items-center gap-1">
               <Sparkles size={10} />
               Eve Original
             </span>
@@ -214,7 +246,7 @@ export function StopCard({ stop, index, city, whenISO, startTime, party, highlig
             contentKey={`${stop.name}|${stop.oneLineVibe}|${stop.imageData ? stop.imageData.length : 0}`}
           />
         </div>
-        <div className="absolute bottom-3 right-3 px-2.5 py-1 rounded-full bg-eve-ink/85 backdrop-blur text-[11px] font-semibold tracking-wide text-eve-cream/95 inline-flex items-center gap-1 z-10">
+        <div className="absolute bottom-3 right-3 px-2.5 py-1 rounded-full bg-eve-ink/85 backdrop-blur text-xs font-semibold tracking-wide text-eve-cream/95 inline-flex items-center gap-1 z-10">
           <Clock size={11} />
           {stop.approxArrival}
         </div>
@@ -224,21 +256,21 @@ export function StopCard({ stop, index, city, whenISO, startTime, party, highlig
         <h3 className="font-serif text-2xl md:text-[28px] leading-tight text-eve-cream">
           {stop.name}
         </h3>
-        <p className="mt-2 text-[15px] text-eve-cream/85 italic font-serif leading-snug">
+        <p className="mt-2 text-[0.9375rem] text-eve-cream/85 italic font-serif leading-snug">
           {stop.oneLineVibe}
         </p>
-        <p className="mt-3 text-[14px] text-white/75 leading-relaxed">{stop.whyThisFits}</p>
+        <p className="mt-3 text-[0.875rem] text-white/75 leading-relaxed">{stop.whyThisFits}</p>
 
         {stop.signatureItem && (
           <div className="mt-4 pt-4 border-t border-white/15">
-            <p className="text-[11px] tracking-wide italic font-serif text-eve-gold/90 mb-1">
+            <p className="text-xs tracking-wide italic font-serif text-eve-gold/90 mb-1">
               Order or try
             </p>
-            <p className="text-[14px] text-eve-cream font-medium">{stop.signatureItem}</p>
+            <p className="text-[0.875rem] text-eve-cream font-medium">{stop.signatureItem}</p>
           </div>
         )}
 
-        <div className="mt-4 flex items-center justify-between gap-3 text-[12px] text-white/65">
+        <div className="mt-4 flex items-center justify-between gap-3 text-xs text-white/65">
           <div className="flex items-center gap-3">
             {stop.walkMinutesFromPrev > 0 && (
               <span className="inline-flex items-center gap-1">
@@ -256,7 +288,7 @@ export function StopCard({ stop, index, city, whenISO, startTime, party, highlig
             href={mapsUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-eve-gold/15 hover:bg-eve-gold/25 border border-eve-gold/40 text-eve-gold text-[11px] font-semibold tracking-wide transition-colors"
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-eve-gold/15 hover:bg-eve-gold/25 border border-eve-gold/40 text-eve-gold text-xs font-semibold tracking-wide transition-colors"
           >
             <MapPin size={10} />
             Maps
@@ -270,7 +302,7 @@ export function StopCard({ stop, index, city, whenISO, startTime, party, highlig
           <div className="mt-3 pt-3 border-t border-white/10">
             <div className="flex items-center gap-1.5 mb-1.5">
               <BookOpen size={11} className="text-eve-gold/80" />
-              <span className="text-[10px] tracking-wide uppercase text-eve-cream/55 font-semibold">
+              <span className="text-xs tracking-wide uppercase text-eve-cream/55 font-semibold">
                 Book a table
               </span>
             </div>
@@ -281,7 +313,7 @@ export function StopCard({ stop, index, city, whenISO, startTime, party, highlig
                   href={link.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-eve-ink-soft hover:bg-mg-surface-2 border border-eve-gold/25 hover:border-eve-gold/45 text-eve-gold text-[11px] font-semibold tracking-wide transition-colors"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-eve-ink-soft hover:bg-mg-surface-2 border border-eve-gold/25 hover:border-eve-gold/45 text-eve-gold text-xs font-semibold tracking-wide transition-colors"
                 >
                   {link.label}
                   <ExternalLink size={9} />

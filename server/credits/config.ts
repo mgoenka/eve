@@ -19,8 +19,36 @@ export const MARGIN = 2;
 /** Floor every pack must clear in the worst case (Play 30 % fee). */
 export const MIN_MARGIN = 1.3;
 
-/** Free credits once per app identity (package + app user id). Covered by the $0.99 app price. */
+/**
+ * Free Sparks once per wallet (Android: package + app user id; web: browser), granted on the wallet's first
+ * metered action or explicit claim (purchase, promo code, checkout), never on a plain balance read. Limited
+ * per client address (STARTER_PER_IP) and by a global daily budget (STARTER_DAILY_CAP).
+ */
 export const STARTER_CREDITS = 100;
+
+/**
+ * Starter grants per client address (IPv4 address, IPv6 /64) per rolling STARTER_WINDOW_MS, counted separately
+ * for Android wallets and web wallets. 5 a day lets a party on one Wi-Fi or a carrier NAT start with free
+ * Sparks; clearing app data / cookies in a loop does not mint free AI. Later wallets from the address start at 0.
+ */
+export const STARTER_PER_IP = 5;
+export const STARTER_WINDOW_MS = 24 * 60 * 60_000;
+
+/**
+ * Global backstop across every app: at most this many starter grants per UTC day (env STARTER_DAILY_CAP
+ * overrides; 0 pauses starter grants). Kept in a sharded counter (STARTER_BUDGET_SHARDS docs per day, each
+ * allowed ceil(cap / shards)) so no single Firestore doc gets hot. Exhausted: new wallets start at 0 and the
+ * balance answer says starterPaused (the sheet explains it).
+ */
+export const STARTER_DAILY_CAP = 3000;
+export const STARTER_BUDGET_SHARDS = 10;
+export function starterDailyCap(env: string | undefined = process.env.STARTER_DAILY_CAP): number {
+  const n = env === undefined || env.trim() === '' ? NaN : Number(env);
+  return Number.isInteger(n) && n >= 0 ? n : STARTER_DAILY_CAP;
+}
+
+/** Play voided purchases (refunds, chargebacks) are fetched at most this often per package. */
+export const PLAY_VOIDED_SYNC_MS = 6 * 60 * 60_000;
 
 /** Payment providers that sell credit packs: Play in the Android apps, Stripe Checkout on the websites. */
 export const PAYMENT_PROVIDERS = ['play', 'stripe'] as const;
@@ -40,7 +68,7 @@ export const WEB_MIN_PACK_USD = 4.99;
 /**
  * Sparks packs: one table for every provider, round numbers, more Sparks per dollar as packs grow
  * (303 / 401 / 500 per $). On Play these are one-time consumable products with the same ids in every app;
- * on the web they are Stripe prices (lookup key mg_<id>_v1). priceUsd = US list price.
+ * on the web they are Stripe prices (lookup key stripeLookupKey(id)). priceUsd = US list price.
  * Worst-case margin (revenue after fees ÷ AI cost): Play 30 % 2.3x / 1.75x / 1.4x; Stripe – / 2.15x / 1.8x.
  */
 export const PACKS = [
@@ -115,6 +143,8 @@ export const COLLECTIONS = {
   starterIps: 'aiCreditStarterIps', // doc id sha256(salt + IP): web starter grants per address
   promos: 'aiCreditPromos', // doc id = normalized promo code; subcollection "redemptions" (doc id = wallet key)
   linkCodes: 'aiCreditLinkCodes', // doc id = sha256(link code): { account, expiresAt, usedAt? } (web browser linking)
+  starterBudget: 'aiCreditStarterBudget', // doc id = UTC day "YYYY-MM-DD"; subcollection "shards" (doc id 0..9): { count }
+  sync: 'aiCreditSync', // doc id e.g. "play-voided:<package>": { lastRunAt, checkpoint } (background syncs)
 } as const;
 
 /** Promo codes are case-insensitive: stored and matched upper-case, spaces removed. Letters, digits, dashes. */
@@ -134,12 +164,9 @@ export const WEB_WALLET_MAX_AGE_S = 400 * 24 * 60 * 60;
 /** Parent domain of every app: one web wallet works in all of them. */
 export const WEB_COOKIE_DOMAIN = 'mohitgoenka.com';
 
-/**
- * Starter credits for a new web wallet, at most WEB_STARTER_PER_IP new wallets per IP address per
- * WEB_STARTER_WINDOW_MS (clearing cookies must not mint free AI). Later wallets from that address start at 0.
- */
-export const WEB_STARTER_PER_IP = 3;
-export const WEB_STARTER_WINDOW_MS = 30 * 24 * 60 * 60_000;
+/** Older names: web wallets follow the same per-address rule as Android ones (STARTER_PER_IP per STARTER_WINDOW_MS). */
+export const WEB_STARTER_PER_IP = STARTER_PER_IP;
+export const WEB_STARTER_WINDOW_MS = STARTER_WINDOW_MS;
 
 /**
  * The one switch for web credits, read by every app (cached ~1 min): Firestore doc
@@ -155,8 +182,13 @@ export const STRIPE_API_VERSION = '2025-03-31.basil';
  * Personal Use", one of the codes Managed Payments accepts. Confirm with Stripe before going live.
  */
 export const STRIPE_TAX_CODE = 'txcd_10105001';
-/** Price lookup keys: bump the version when a pack's credits change (old prices stay for old sessions). */
-export const stripeLookupKey = (packId: string) => `mg_${packId}_v1`;
+/**
+ * Price lookup keys: bump the version when a pack's credits or product name change (old prices stay for old
+ * sessions; archive them in the Dashboard). v2: products named "N Sparks", Terms consent at checkout.
+ */
+export const stripeLookupKey = (packId: string) => `mg_${packId}_v2`;
+/** Terms of service (consent at Stripe Checkout, links in the Sparks sheet). */
+export const TERMS_URL = 'https://mohitgoenka.com/terms';
 /** Secret Manager secret names (project public-mohit-260610); env vars of the same meaning override them. */
 export const STRIPE_SECRETS = {
   apiKey: { secret: 'stripe-secret-key', env: 'CREDITS_STRIPE_SECRET_KEY' },

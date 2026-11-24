@@ -74,6 +74,8 @@ function friendly(kind: FetchErrorKind, status: number): string {
   }
 }
 
+const isBusyBody = (b: unknown) => !!b && typeof b === 'object' && (b as { error?: unknown }).error === 'ai_busy';
+
 /**
  * fetch + JSON with a per-attempt timeout (AbortController), bounded retries with backoff, and typed errors.
  * Credentials are sent only to the same origin — never cross-origin, whatever `credentials` says.
@@ -143,7 +145,8 @@ export async function fetchJson<T = unknown>(url: string, options: FetchJsonOpti
       else if (signal?.aborted) throw new FetchError('aborted', friendly('aborted', 0), { url, attempts: attempt + 1 });
       else if (timedOut) lastError = new FetchError('timeout', friendly('timeout', 0), { url, attempts: attempt + 1 });
       else lastError = new FetchError('network', friendly('network', 0), { url, attempts: attempt + 1 });
-      if (!lastError.retryable || attempt === maxRetries) throw lastError;
+      // The server's ai_busy (HTTP 503 + retryAfter) means "come back in N s": never retry it right away.
+      if (!lastError.retryable || attempt === maxRetries || isBusyBody(lastError.body)) throw lastError;
       const wait = backoffMs * 2 ** attempt * (0.75 + Math.random() * 0.5);
       await sleep(wait, signal);
     } finally {

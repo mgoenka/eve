@@ -8,7 +8,7 @@ import type {
   PostedSpecial,
   EveStory,
 } from '@/types';
-import { aiFetchJson, canRunLocally, fetchJson, FetchError, runLocalFirst } from '../ui-kit';
+import { aiFetchJson, canRunLocally, fetchJson, FetchError, runLocalFirst, speculativeAiAllowed } from '../ui-kit';
 import { LOCAL_TOKENS, localIntro, localNarration, localOutro, localPackText, localParseIntent, localStory } from './localEve';
 
 // ---------- Image budget (shown in the UI) ----------
@@ -64,8 +64,23 @@ const CREDIT_MESSAGES: Record<string, string> = {
 async function call<T>(
   url: string,
   body: unknown,
-  opts: { timeoutMs: number; retries?: number; ai?: true | 'background' }
+  opts: {
+    timeoutMs: number;
+    retries?: number;
+    ai?: true | 'background';
+    signal?: AbortSignal;
+    /** A background call the user did choose (Eve's voice after "Activate"): not gated by speculativeAiAllowed. */
+    userAsked?: boolean;
+  }
 ): Promise<T> {
+  // Speculative AI (avatar, story, narration, outro, auto pictures, reservation checks…) only runs when it can't
+  // spend Sparks the user didn't choose to spend. Callers already fall back quietly when a background call fails.
+  if (opts.ai === 'background' && !opts.userAsked && !speculativeAiAllowed()) {
+    const err = new Error('Skipped: AI extras are paused for this balance.') as EveError;
+    err.code = 'ai_skipped';
+    err.retryable = false;
+    throw err;
+  }
   try {
     const request = {
       method: body === undefined ? 'GET' : 'POST',
@@ -73,15 +88,16 @@ async function call<T>(
       timeoutMs: opts.timeoutMs,
       retries: opts.retries ?? 1,
       backoffMs: 1200,
+      signal: opts.signal,
     };
     const data = opts.ai
-      ? await aiFetchJson<T>(url, { ...request, creditsSheet: opts.ai !== 'background' })
+      ? await aiFetchJson<T>(url, { ...request, ai: opts.ai === 'background' ? 'background' : 'action', toastOnBusy: false })
       : await fetchJson<T>(url, request);
     publishLimit((data as any)?.imageLimit);
     return data;
   } catch (e) {
     if (e instanceof FetchError) {
-      const b = (e.body && typeof e.body === 'object' ? e.body : {}) as { code?: string; error?: unknown; imageLimit?: unknown };
+      const b = (e.body && typeof e.body === 'object' ? e.body : {}) as { code?: string; error?: unknown; message?: unknown; imageLimit?: unknown };
       publishLimit(b.imageLimit);
       const creditCode = typeof b.error === 'string' && CREDIT_MESSAGES[b.error] ? b.error : undefined;
       if (creditCode) {
@@ -91,14 +107,19 @@ async function call<T>(
         err.retryable = creditCode === 'credits_unavailable';
         throw err;
       }
+      // Gemini busy (HTTP 503 ai_busy + Retry-After): the server's friendly line. The form keeps
+      // what the user typed, so one more tap retries.
+      const aiBusy = e.status === 503 && b.error === 'ai_busy';
       const message =
-        e.status === 503
-          ? 'Eve is resting right now. Please try again in a little while.'
-          : e.kind === 'timeout'
-            ? 'Eve took too long to answer. Please try again.'
-            : e.message;
+        aiBusy && typeof b.message === 'string'
+          ? b.message
+          : e.status === 503
+            ? 'Eve is resting right now. Please try again in a little while.'
+            : e.kind === 'timeout'
+              ? 'Eve took too long to answer. Please try again.'
+              : e.message;
       const err = new Error(message) as EveError;
-      err.code = b.code;
+      err.code = aiBusy ? 'ai_busy' : b.code;
       err.status = e.status;
       err.retryable = e.retryable;
       throw err;
@@ -147,8 +168,15 @@ export interface StopImageRequest {
   vibe: Vibe;
 }
 
-export async function stopImage(req: StopImageRequest): Promise<{ imageData: string; imageMime: string }> {
-  return call('/api/plan-experience/stop-image', req, { timeoutMs: 120_000, retries: 0, ai: true });
+/**
+ * One stop picture. `background` (the automatic first picture of a plan) never opens the
+ * "Get Sparks" sheet on 402: the card shows a small "Get Sparks to see pictures" link instead.
+ */
+export async function stopImage(
+  req: StopImageRequest,
+  opts: { background?: boolean } = {}
+): Promise<{ imageData: string; imageMime: string }> {
+  return call('/api/plan-experience/stop-image', req, { timeoutMs: 120_000, retries: 0, ai: opts.background ? 'background' : true });
 }
 
 export interface NarrationRequest {
@@ -167,9 +195,10 @@ export async function narrationText(req: NarrationRequest): Promise<{ narration:
 
 export async function synthesize(
   text: string,
-  voiceMode: 'eve' | 'reel' = 'eve'
+  voiceMode: 'eve' | 'reel' = 'eve',
+  opts: { userAsked?: boolean } = {}
 ): Promise<{ audioData: string; audioMime: string }> {
-  return call('/api/tts', { text, voiceMode }, { timeoutMs: 25_000, ai: 'background' });
+  return call('/api/tts', { text, voiceMode }, { timeoutMs: 25_000, ai: 'background', userAsked: !!opts.userAsked });
 }
 
 export interface ContentPackRequest {
@@ -189,13 +218,13 @@ export interface ContentPackRequest {
  * the other text (Instagram, email, SMS, Reel storyboard) is written here first and sent along, so the
  * server skips those calls.
  */
-export async function generateContentPack(req: ContentPackRequest): Promise<ContentPack> {
+export async function generateContentPack(req: ContentPackRequest, opts: { signal?: AbortSignal } = {}): Promise<ContentPack> {
   let body: ContentPackRequest & { local?: unknown } = req;
   if (await canRunLocally({ minOutputTokens: LOCAL_TOKENS.contentPack })) {
     const text = await localPackText(req).catch(() => null);
     if (text) body = { ...req, local: { ...text.copy, reel: text.reel } };
   }
-  return call('/api/content-pack', body, { timeoutMs: 180_000, retries: 0, ai: true });
+  return call('/api/content-pack', body, { timeoutMs: 180_000, retries: 0, ai: true, signal: opts.signal });
 }
 
 export async function postSpecial(input: {
@@ -299,8 +328,8 @@ export async function suggestSpecial(input: {
   signatureDishes: string;
   /** Skip the server cache (the "pick a different dish" button). */
   fresh?: boolean;
-}, opts: { background?: boolean } = {}): Promise<SuggestSpecialResponse> {
-  return call('/api/suggest-special', input, { timeoutMs: 75_000, retries: 0, ai: opts.background ? 'background' : true });
+}, opts: { background?: boolean; signal?: AbortSignal } = {}): Promise<SuggestSpecialResponse> {
+  return call('/api/suggest-special', input, { timeoutMs: 75_000, retries: 0, ai: opts.background ? 'background' : true, signal: opts.signal });
 }
 
 export interface ParsedIntent {

@@ -116,8 +116,13 @@ registerServiceWorker(); // prod builds only; shows "Update available — Reload
 All accept `className` unless noted. Phones = below Tailwind `sm` (640px).
 
 ### `AppHeader`
-The shared one-line header: `[Apps and Games 🎮] [title + favicon] [right slot · ? · ⚙]` — same 3-column grid,
-colors and sizes the apps use today; on phones the hub link collapses to 🎮.
+The shared one-line header: `[Apps and Games 🎮] [title + favicon] [right slot · ? · ⚙]`. Wide screens: 3 columns,
+title centred. Phones, and whenever nothing is on the left (inside the Android app the hub link is hidden):
+`[title | controls]` so the title gets the room (no more "Mohit'…"); mute, settings and install fold into one ⋯
+menu when there are two or more of them, or whenever the app passes `menuItems`. Header icons are 1.125rem (scale
+with the root size on big screens and TVs). Title `text-sm`, `md:text-base`, larger on TVs. **Every app gets a gear**:
+without `onSettings` the header opens the kit's `SettingsSheet` itself (haptics, reduce motion, on-device AI, and
+"Sound effects" when `sound` is given). On the website an "Install app" button appears when the browser offers it.
 
 | prop | type | default |
 | --- | --- | --- |
@@ -128,7 +133,11 @@ colors and sizes the apps use today; on phones the hub link collapses to 🎮.
 | `hubHref` | string \| false | `'https://mohitgoenka.com/apps/'` (false omits; always hidden when `isNativeApp()`) |
 | `hubLabel` / `hubNewTab` | string / boolean | `'Apps and Games'` / `true` (as today) |
 | `onRules` / `rulesLabel` | `() => void` / string | Help (?) button shown when set / `'Help'` |
-| `onSettings` | `() => void` | gear button shown when set |
+| `onSettings` | `() => void` | your settings; without it the gear opens the kit's `SettingsSheet` |
+| `settingsSheet` | `false` \| SettingsSheetProps (minus open/onClose) | props for the built-in sheet (`show`, `children`, `footnote`); `false` = no gear |
+| `sound` | `{ muted, onToggle }` | mute icon (⋯ menu item on phones); the built-in sheet's "Sound effects" follows it |
+| `menuItems` | `{ label, icon?, onClick, checked? }[]` | extra ⋯ menu entries (phones only; one is enough to show the menu) |
+| `install` | boolean | `true`: "Install app" on the web when `beforeinstallprompt` fired (never in the app / once installed) |
 | `right` | ReactNode | extra controls before ?/⚙ (use `IconButton`) |
 | `left` | ReactNode | replaces the hub link |
 | `showOffline` | boolean | `true` (Offline pill when offline) |
@@ -140,10 +149,22 @@ colors and sizes the apps use today; on phones the hub link collapses to 🎮.
   onTitleClick={() => (phase === 'setup' ? (location.href = HUB_URL) : confirmBack ? backToSetup() : setConfirmBack(true))}
   confirmBack={confirmBack}
   onRules={() => setShowRules(true)}
-  onSettings={() => setShowSettings(true)}
-  right={<IconButton aria-label={muted ? 'Unmute' : 'Mute'} pressed={muted} onClick={toggleMute}><VolumeOnIcon /></IconButton>}
+  sound={{ muted, onToggle: toggleMute }}   // instead of a mute IconButton in `right`: folds into ⋯ on phones
+  right={<CreditsChip />}
 />
 ```
+
+### `AppFooter`, `StatusChip` / `RoomChip`, `PlayerSetupRow`, `GameHero`, `InstallButton` (shared screens)
+All targets ≥ 44px, text ≥ 12px (`text-mg-2xs`), no `.slice()`-ing of names or codes.
+
+| component | props |
+| --- | --- |
+| `<AppFooter />` | `buildInfo?: ReactNode` (e.g. "Last updated …"; hidden inside the Android app) · `links?: { label, href }[]` (after Privacy · Terms) · `children?` · `className?`. Renders © Mohit's Creations · Privacy (`PRIVACY_URL`) · Terms (`TERMS_URL`, mohitgoenka.com/terms). Only links to another origin open in a new tab. |
+| `<StatusChip />` | `label?`, `value?` (tabular numbers), `icon?`, `tone?: 'neutral' \| 'gold' \| 'success' \| 'warning' \| 'danger' \| 'info'`, `onClick?` (then a button), `aria-label?`, `title?`, `className?`. Wraps between words, never mid-word. |
+| `<RoomChip />` | `code` (shown in full), `label?` ('Room'), `joinUrl?` (QR button opens a big QR sheet; copy copies the link), `onQr?` (own QR handler), `copy?` (true), `className?` |
+| `<PlayerSetupRow />` | `name`, `onNameChange`, `nameLabel?`, `maxLength?` (20), `color?`, `colors?: string[]` (swatch cycles; > 6 opens a picker), `onColorChange?`, `isAi?`, `onAiChange?` (Human / 🤖 AI switch), `stepper?: { value, onChange, min?, max?, label, format? }` (−/+), `onRemove?`, `disabled?`, `className?` |
+| `<GameHero />` | `title`, `subtitle?`, `icon?`, `children?` (buttons), `compact?` (default auto: compact at `max-height: 500px`, landscape phones), `level?: 1 \| 2`, `className?` |
+| `<InstallButton />` | `variant?: 'icon' \| 'button'`, `label?` ('Install app'), `className?`. `useInstallPrompt()` → `{ canInstall, installed, promptInstall() }` for your own UI; `installApp()` = prompt + success toast (what the button and the ⋯ item use). Web only. |
 
 ### `Button`
 `variant`: `primary` (solid gold) · `secondary` (dark surface + border) · `outline` (gold outline on dark) · `ghost` · `danger`.
@@ -202,7 +223,7 @@ error("Couldn't generate the board", { action: { label: 'Retry', onClick: retry 
 
 ### `RulesOverlay`
 The shared "How to play" overlay (same look as the apps' current one: gold headings with emoji, `›` bullets,
-Download-as-PDF button, Last Updated / © Mohit's Creations / Privacy Policy footer). PDF uses the browser's print
+Download-as-PDF button, Last Updated / © Mohit's Creations / Privacy Policy · Terms footer). PDF uses the browser's print
 dialog on the rendered DOM — no jsPDF/html2canvas CDN scripts.
 
 `appName`, `onClose`, `sections?: { title, icon?, items: ReactNode[] }[]` (pass your `GAME_RULES` / `APP_RULES`
@@ -215,6 +236,9 @@ WebView has no print dialog), `showFooter` (true).
 ```
 
 ### `SettingsSheet` (+ `Switch`)
+`sound?: { on, onChange }` makes the "Sound effects" switch show and set the app's own mute (AppHeader passes its `sound` prop).
+"✨ Use this device's AI" shows only in apps with AI features: `AiCreditsHost` (every Sparks app) and the local-AI
+helpers turn it on; elsewhere call `enableLocalAiSetting()` or pass `show={{ onDeviceAi: true }}` (`false` hides it).
 Sound / Haptics / Reduce motion toggles bound to `useSettings()` (persisted, shared across the app and tabs),
 plus an app-specific slot. `open`, `onClose`, `title` ('Settings'), `show={{ sound?, haptics?, reduceMotion? }}`
 (hide what doesn't apply), `children`, `footnote`.
@@ -290,8 +314,23 @@ bridge (an app build from the `ai-credits` native template).
 - The sheet lists the packs from the server with Google Play's **localized** prices, the balance, "Payment pending",
   and a friendly "Purchases are unavailable on this device right now" (+ try again) when Play Billing isn't available.
 - `aiFetchJson(url, opts)` — `fetchJson` plus the `X-MG-App-User` header, live balance from `X-MG-Credits-Balance`, and
-  on HTTP 402 `insufficient_credits` it opens the sheet and rethrows (`creditsSheet: false` for background calls).
+  on HTTP 402 `insufficient_credits` it opens the sheet and rethrows. `ai: 'action'` (default: the user tapped
+  something) or `ai: 'background'` (loading tips, prefetch, auto-naming: never opens the sheet, never toasts;
+  `creditsSheet: false` still works). Gate speculative calls with **`speculativeAiAllowed()`**: false while the
+  balance is unknown; on the web true only while the web is free or the balance is above 0; in the app only for
+  owners, paying users (`paid`) or with ≥ 50 Sparks. Right after page load the balance isn't known yet: use
+  `await speculativeAiAllowedAsync()` (or `await whenCreditsLoaded()` first; resolves when the balance arrives, at
+  once on pages without credits, after 8 s at the latest, never rejects).
   `isInsufficientCredits(err)`, `openCreditsSheet()`, `refreshCredits()`, `useCredits()`.
+- **AI busy:** the server's HTTP 503 `{ error: 'ai_busy', retryAfter }` (server/ai-guard.ts) becomes an `AiBusyError`
+  (a `FetchError`, `retryAfter` seconds; `isAiBusyError(err)`) and a toast "Lots of people are using this right now.
+  Try again in N seconds." Pass `toastOnBusy: false` when the app shows its own message, and fall back to bundled
+  content where it has some. `fetchJson` never auto-retries an `ai_busy` answer.
+- The sheet: "Get Sparks" (not "You're out of Sparks") for a wallet that never had any; says plainly when free
+  starter Sparks are paused today or not available on this network (`starterPaused` / `starterLimited` from the
+  server); storage disclosures (Android: stored with the app on this device; web: tied to this browser, kept while
+  used at least once every 400 days); "Taxes (like VAT) are added at checkout and shown before you pay." on the web;
+  Privacy · Terms links.
 - `aiCreditsRuleSections()` — `[]` on the web, one "AI Credits" rules section in the app: `[...rules, ...aiCreditsRuleSections()]`.
 - Providers: payment goes through a `CreditsProvider` (`playCreditsProvider` in the app). `registerWebCreditsProvider()`
   is for a future web checkout; `activeCreditsProvider()` never returns it inside the Android app.
@@ -330,6 +369,18 @@ Use it only where a small model is good enough (creative text, short lists, clas
 text the user gave). Keep the same validation/sanitizing on the local result as the server applies, and keep
 fact-critical answer keys, prices, real places and health data on the server.
 
+Behaviour: the engine probe is **lazy** (first feature / setting / Sparks sheet; no probe on page load, Chrome's
+"Unable to create a text session" rejection is treated as unavailable), other states than `available` are
+cached for 45 s (re-checked sooner when the tab becomes visible again, ≤ every 30 s, or the setting is turned on). `localJson` tries again only when `validate` rejects the output; a
+timeout (`timeoutMs`, default 60 s) or any engine error (Android busy, battery quota, background, …) resolves
+`null` at once. **Pass `signal`** (also to `runLocalFirst({ signal })`): an aborted request rejects with an
+`AbortError` and never falls back to the paid server call (any other failure, even an engine's own AbortError
+while `signal` is not aborted, falls back to the server). Browser engine: `LanguageModel.create()` gives up after
+20 s, and a prompt that doesn't fit the session's context window (`measureContextUsage` / `contextWindow`, or
+`measureInputUsage` / `inputQuota` on older Chrome; plus `maxOutputTokens` when you pass it) goes straight to the
+server. Android: `timeoutMs` and `signal` go to the wrapper, which cancels the native call (`llmCancel`); images are
+passed as the Blob (the shim downsizes them).
+
 ### Adaptive AI (`adaptiveSkill`, `createSkillTracker`, `skillToError`, `skillToDelay`)
 AI opponents follow the humans: `adaptiveSkill({ humanScore, aiScore, scale, progress, humanAccuracy })` returns a 0..1
 skill that starts just under the humans' observed accuracy, eases off while the AI leads (more so late in the game)
@@ -344,7 +395,8 @@ Props: `value`, `size` (200), `ecc` `L|M|Q|H` ('M'), `margin` (2 modules), `colo
 
 ### Icons
 `HelpIcon`, `SettingsIcon`, `CloseIcon`, `DownloadIcon`, `ShareIcon`, `CopyIcon`, `CheckIcon`, `AlertIcon`, `InfoIcon`,
-`WifiOffIcon`, `VolumeOnIcon`, `VolumeOffIcon`, `RefreshIcon`, `FlagIcon`, `MoreIcon`, `CoinsIcon` — inline SVG, `size` prop (18), `currentColor`.
+`WifiOffIcon`, `VolumeOnIcon`, `VolumeOffIcon`, `RefreshIcon`, `FlagIcon`, `MoreIcon`, `CoinsIcon`, `SparklesIcon`,
+`PlusIcon`, `MinusIcon`, `QrCodeIcon`, `InstallIcon` — inline SVG, `size` prop (18), `currentColor`.
 Apps can keep lucide-react for everything else.
 
 ## 6. Hooks
@@ -386,6 +438,12 @@ Apps can keep lucide-react for everything else.
 - `isNativeApp()` — `true` inside Mohit's native wrappers (Capacitor apps that load the live site; their WebView user
   agent contains `MohitGoenkaApp/`, e.g. `MohitGoenkaApp/Android`). `nativePlatform()` → `'android' | 'ios' | null`.
   `goToHub({ newTab? })` navigates to the hub on the web and does nothing (returns `false`) in the app.
+- **TV:** `isTvDevice()` (Chromecast / AFT / Google TV / Android TV user agents, or the wrapper's `window.__mgTv`);
+  the kit sets `<html class="mg-tv">` on load (`applyTvClass()`), which scales the root font to 150% and widens
+  `--mg-content-max`. `installDpadNav()` (installed automatically on TVs, no-op elsewhere): Up/Down in a number /
+  date / time / range input or a select moves to the previous / next control instead of changing the value; Enter
+  starts editing (arrows then change the value) until Enter / Escape. With the wrapper's TV shim it only lets arrows
+  through to a field being edited (the shim keeps spatial navigation). Style for TV with `in-[.mg-tv]:…`.
   The kit already uses it: `AppHeader` and `ErrorBoundary` hide the "Apps and Games" hub link in the app.
   Apps should also use it to: hide their own hub links / title-click-to-hub, hide any "install this app" (PWA) hint,
   and hide web purchase / pricing / Stripe checkout CTAs (Play payments policy — the app must work on the free tier).
@@ -396,7 +454,7 @@ Apps can keep lucide-react for everything else.
 - `reportContent({ app, kind, content, reason, note? })` — the call behind `ReportContentButton`; resolves on success,
   throws `FetchError`. Sends only those fields plus `platform` (`'web'`/`'android'`), trimmed to `REPORT_LIMITS`
   (`content` 1200, `note` 300 chars) with control characters stripped. `REPORT_REASONS` lists the reasons.
-- `HUB_URL` (`https://mohitgoenka.com/apps/`), `HUB_LABEL`, `PRIVACY_URL`, `COPYRIGHT`, `cx(...)`,
+- `HUB_URL` (`https://mohitgoenka.com/apps/`), `HUB_LABEL`, `PRIVACY_URL`, `TERMS_URL` (mohitgoenka.com/terms), `COPYRIGHT`, `cx(...)`,
   `safeGet/safeSet/safeRemove/readJson` (storage that never throws), `getSettings/setSettings`.
 
 ### `sw-template.js` (reference service worker)
@@ -434,6 +492,11 @@ Use as Tailwind utilities (`bg-mg-surface`, `text-mg-gold`, `border-mg-border`, 
 | `mg-info` | `#0ea5e9` | `#0ea5e9`, sky-500 |
 | `--font-display` | Syne | `font-header`, `font-anton`, `font-['Syne']` → `font-display` |
 | `--font-sans` | DM Sans | default body font (no class needed) |
+| `--font-mono` | DM Sans + tabular figures | `font-mono` (scores, timers, codes) never falls back to Courier |
+| `text-mg-2xs` | 12px / 16px | the text floor: replace `text-[9px]`, `text-[10px]`, `text-[11px]` |
+| `max-w-mg-content` / `--mg-content-max` | 64rem; min(80rem, 92vw) at ≥ 1600px; min(90rem, 92vw) on TV | page content column |
+| root size | 100%; 125% at ≥ 1600px (big monitors, Chromebooks); 150% on `html.mg-tv` | rem-based sizes scale with it |
+| focus | gold outline on `:focus-visible`; inputs / selects / textareas also get a gold ring when they set `focus:outline-none` | |
 | radii | `rounded-mg-sm` .5rem · `rounded-mg` .75rem (= `rounded-xl`) · `rounded-mg-lg` 1rem (= `rounded-2xl`) · `rounded-mg-xl` 1.5rem | |
 | shadows | `shadow-mg-card`, `shadow-mg-modal`, `shadow-mg-glow` | |
 | animations | `animate-fade-in`, `animate-fade-in-up`, `animate-mg-pop`, `animate-mg-sheet-up` | |

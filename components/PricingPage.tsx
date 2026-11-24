@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Check, Sparkles, Loader2 } from 'lucide-react';
 import { EveLogo } from './EveLogo';
 import { useOpenRules, useOpenSettings } from './RulesContext';
-import { AppHeader, isNativeApp } from '../ui-kit';
+import { AppFooter, AppHeader, isNativeApp } from '../ui-kit';
 
 const RESTAURANT_FEATURES = [
   'Daily AI content pack — Instagram, Reel, menu card, email, SMS',
@@ -103,7 +103,7 @@ export function PricingPage({ onBack }: Props) {
       ) : (
       <main className="flex-1 max-w-5xl mx-auto w-full px-4 sm:px-6 py-8 sm:py-10 md:py-14">
         <div className="text-center mb-10 md:mb-14">
-          <p className="text-[12px] tracking-[0.4em] uppercase text-eve-gold/85 mb-3 font-header font-semibold">
+          <p className="text-mg-2xs tracking-[0.4em] uppercase text-eve-gold/85 mb-3 font-header font-semibold">
             Pricing
           </p>
           <h1 className="font-header text-4xl md:text-6xl leading-[1.05] mb-3 text-eve-cream">
@@ -123,7 +123,7 @@ export function PricingPage({ onBack }: Props) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-6">
           {/* Diner premium */}
           <article className="rounded-3xl border border-white/10 bg-white/[0.03] backdrop-blur p-6 md:p-8 flex flex-col">
-            <p className="text-[11px] tracking-[0.3em] uppercase text-eve-cream/60 font-header font-semibold mb-2">
+            <p className="text-xs tracking-[0.3em] uppercase text-eve-cream/60 font-header font-semibold mb-2">
               Diner Premium
             </p>
             <div className="flex items-baseline gap-1 mb-3">
@@ -135,7 +135,7 @@ export function PricingPage({ onBack }: Props) {
             </p>
             <ul className="space-y-2 mb-7 flex-1">
               {DINER_FEATURES.map((f) => (
-                <li key={f} className="flex items-start gap-2 text-[14px] text-eve-cream/85">
+                <li key={f} className="flex items-start gap-2 text-[0.875rem] text-eve-cream/85">
                   <Check size={14} className="mt-0.5 flex-shrink-0 text-eve-gold" />
                   <span>{f}</span>
                 </li>
@@ -162,10 +162,10 @@ export function PricingPage({ onBack }: Props) {
 
           {/* Restaurant SaaS */}
           <article className="relative rounded-3xl border border-eve-gold/40 bg-gradient-to-br from-eve-gold/[0.06] to-white/[0.02] backdrop-blur p-6 md:p-8 flex flex-col shadow-[0_0_60px_rgba(245,197,66,0.18)]">
-            <span className="absolute top-4 right-4 px-2.5 py-1 rounded-full bg-eve-gold/15 border border-eve-gold/40 text-eve-gold text-[10px] tracking-wide uppercase font-bold">
+            <span className="absolute top-4 right-4 px-2.5 py-1 rounded-full bg-eve-gold/15 border border-eve-gold/40 text-eve-gold text-xs tracking-wide uppercase font-bold">
               Most popular
             </span>
-            <p className="text-[11px] tracking-[0.3em] uppercase text-eve-gold font-header font-semibold mb-2">
+            <p className="text-xs tracking-[0.3em] uppercase text-eve-gold font-header font-semibold mb-2">
               Restaurant Pro
             </p>
             <div className="flex items-baseline gap-1 mb-3">
@@ -177,7 +177,7 @@ export function PricingPage({ onBack }: Props) {
             </p>
             <ul className="space-y-2 mb-7 flex-1">
               {RESTAURANT_FEATURES.map((f) => (
-                <li key={f} className="flex items-start gap-2 text-[14px] text-eve-cream/85">
+                <li key={f} className="flex items-start gap-2 text-[0.875rem] text-eve-cream/85">
                   <Check size={14} className="mt-0.5 flex-shrink-0 text-eve-gold" />
                   <span>{f}</span>
                 </li>
@@ -236,12 +236,13 @@ export function PricingPage({ onBack }: Props) {
       </main>
       )}
 
-      <footer className="text-center py-8 px-6 text-[11px] text-white/55 italic font-serif">
-        Yours, quietly. <span className="text-eve-cream/40 not-italic">·</span>{' '}
-        <a href="/" className="hover:text-eve-cream">Eve home</a>{' '}
-        <span className="text-eve-cream/40">·</span>{' '}
-        <a href="/restaurant" className="hover:text-eve-cream">For restaurants</a>
-      </footer>
+      <AppFooter className="py-8">
+        <p className="flex flex-wrap items-center justify-center text-xs text-white/55 italic font-serif">
+          <span className="px-2">Yours, quietly.</span>
+          <a href="/" className="inline-flex min-h-11 items-center px-2 hover:text-eve-cream">Eve home</a>
+          <a href="/restaurant" className="inline-flex min-h-11 items-center px-2 hover:text-eve-cream">For restaurants</a>
+        </p>
+      </AppFooter>
     </div>
   );
 }

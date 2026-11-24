@@ -42,7 +42,32 @@ export interface AccountState {
   created: boolean;
   /** Owner wallet (Mohit's own devices): AI is logged but never deducted or refused. */
   owner?: boolean;
+  /** The wallet has bought Sparks at least once. */
+  paid?: boolean;
+  /**
+   * Starter not granted yet: 'pending' (new account: granted on its next action), 'paused' (the global daily budget
+   * was used up: tried again once there is budget) or 'address_limit' (final). Absent once granted (or for accounts
+   * from before lazy starters, which got theirs at creation).
+   */
+  starterState?: StarterState;
 }
+
+export type StarterState = 'pending' | 'paused' | 'address_limit';
+/** @deprecated Older name of StarterState. */
+export type StarterMissed = StarterState;
+
+/** What claimStarterGrant checks, all in one transaction. */
+export interface StarterRule {
+  /** Salted hash of the client address (IPv6 /64), per wallet kind. */
+  addressKey: string;
+  perAddress: number;
+  windowMs: number;
+  /** UTC day "YYYY-MM-DD" of the global budget. */
+  day: string;
+  dailyCap: number;
+  shards: number;
+}
+export type StarterOutcome = 'granted' | 'already' | 'paused' | 'address_limit';
 
 /** Result of linking one web wallet into another. */
 export interface MergeResult {
@@ -65,6 +90,8 @@ export interface PurchaseRecord {
   createdAt: string;
   /** Credits taken back after a refund or dispute (cumulative). */
   reversedCredits?: number;
+  /** Reversals applied once each (Play voided purchase records), by id → credits. */
+  reversals?: Record<string, number>;
 }
 
 export interface CreditPurchaseInput {
@@ -89,7 +116,8 @@ export interface CreditPurchaseInput {
 export interface PromoCode {
   code: string;
   credits: number;
-  maxRedemptions: number;
+  /** null (or missing) = no limit: then the redemptions counter is not kept (no hot doc for big public codes). */
+  maxRedemptions: number | null;
   redemptions: number;
   /** ISO time; null = no expiry. */
   expiresAt: string | null;
@@ -102,13 +130,28 @@ export interface PromoCode {
 export type PromoError = 'promo_unknown' | 'promo_inactive' | 'promo_expired' | 'promo_used_up' | 'promo_already_redeemed';
 export type PromoResult = { ok: true; code: string; credits: number; balance: number } | { ok: false; error: PromoError };
 
+/** True when the code has a redemption limit (maxRedemptions is a number). */
+export function hasPromoLimit(p: PromoCode): p is PromoCode & { maxRedemptions: number } {
+  return typeof p.maxRedemptions === 'number' && Number.isFinite(p.maxRedemptions);
+}
+
+/** UTC day "YYYY-MM-DD" (starter budget doc id). */
+export const utcDay = (d: Date) => d.toISOString().slice(0, 10);
+
+/** Rolling-window claims of one address: timestamps still inside the window (legacy { count, windowStart } docs too). */
+export function liveClaims(doc: { claims?: unknown; count?: unknown; windowStart?: unknown } | null | undefined, windowMs: number, nowMs: number): number[] {
+  if (!doc) return [];
+  const raw = Array.isArray(doc.claims) ? doc.claims : Array.from({ length: Math.max(0, Math.min(1000, Number(doc.count) || 0)) }, () => Number(doc.windowStart) || 0);
+  return raw.filter((t): t is number => typeof t === 'number' && t > nowMs - windowMs && t <= nowMs + 60_000);
+}
+
 /** Shared validity check (both stores). */
 export function promoProblem(p: PromoCode | null, alreadyRedeemed: boolean, now: Date): PromoError | null {
   if (!p) return 'promo_unknown';
   if (!p.active) return 'promo_inactive';
   if (p.expiresAt && Date.parse(p.expiresAt) <= now.getTime()) return 'promo_expired';
   if (alreadyRedeemed) return 'promo_already_redeemed';
-  if (p.redemptions >= p.maxRedemptions) return 'promo_used_up';
+  if (hasPromoLimit(p) && (p.redemptions ?? 0) >= p.maxRedemptions) return 'promo_used_up';
   return null;
 }
 
@@ -124,6 +167,42 @@ export interface ChargeInput {
 export interface CreditStore {
   /** Create the account with the starter grant if it doesn't exist; return its state. */
   ensure(key: string, meta: AccountMeta, starter: number, now: Date): Promise<AccountState>;
+  /** The account's state without creating it (null: no such wallet yet). */
+  getAccount(key: string, now: Date): Promise<AccountState | null>;
+  /**
+   * The starter grant, in ONE transaction: for an account whose starterState is 'pending' or 'paused' (created
+   * 'pending' if missing), claim one address slot (rolling window) and one unit of today's sharded budget, add
+   * `credits` (ledger 'grant' "starter") and clear the state. Address full → state 'address_limit'; budget full →
+   * 'paused'; nothing is counted unless the grant happens. Already granted (or settled): 'already', no change.
+   * Concurrent first actions of one wallet: one grants, the others see 'already' after it.
+   */
+  claimStarterGrant(key: string, meta: AccountMeta, credits: number, rule: StarterRule, now: Date): Promise<{ outcome: StarterOutcome; balance: number }>;
+  /**
+   * Take one starter grant from today's global budget (`day` = UTC "YYYY-MM-DD"): `shards` counters, each
+   * allowed ceil(cap / shards). False when every shard is full (or cap is 0).
+   */
+  claimStarterBudget(day: string, cap: number, shards: number, now: Date): Promise<boolean>;
+  /** Starter grants taken from `day`'s budget so far. */
+  starterBudgetUsed(day: string): Promise<number>;
+  /**
+   * A background job may run now (no run within `minIntervalMs`, across instances): records the run and
+   * returns the last saved checkpoint. ok: false when another run is too recent.
+   */
+  claimSyncRun(name: string, minIntervalMs: number, now: Date): Promise<{ ok: boolean; checkpoint: number | null }>;
+  saveSyncCheckpoint(name: string, checkpoint: number, now: Date): Promise<void>;
+  /** Let the job run again from `at` (e.g. 10 min after a failed run instead of the full interval). */
+  deferSyncRun(name: string, at: Date): Promise<void>;
+  /**
+   * Take back `credits` of a purchase once per `reversalId` (e.g. one Play voided-purchase record), never more than
+   * the purchase still has. Repeating the same id reverses nothing more. Null: purchase unknown.
+   */
+  reversePurchaseOnce(
+    find: { purchaseKey?: string; secondaryKey?: string },
+    reversalId: string,
+    credits: number,
+    reason: string,
+    now: Date,
+  ): Promise<{ reversed: number; balance: number; account: string } | null>;
   /** Hold `credits` if available >= credits (and > 0). Creates the account first if needed. Owner wallets: ok, no hold. */
   reserve(key: string, meta: AccountMeta, starter: number, holdId: string, credits: number, ttlMs: number, now: Date): Promise<AccountState & { ok: boolean }>;
   /** Drop the hold and charge the actual cost (balance may go below zero by at most one action's overrun). */
@@ -137,10 +216,10 @@ export interface CreditStore {
   /** Add credits (owner top-ups, web starter grants). Creates the account (without a starter) if needed. */
   grant(key: string, meta: AccountMeta, credits: number, reason: string, now: Date): Promise<{ balance: number }>;
   /**
-   * Count one more starter grant for this address key; true while fewer than `limit` were claimed in the
-   * current window (the window restarts `windowMs` after its first claim).
+   * Count one more starter grant for this address key; true while fewer than `limit` were claimed in the last
+   * `windowMs` (rolling). `dryRun`: only check, count nothing.
    */
-  claimStarter(addressKey: string, limit: number, windowMs: number, now: Date): Promise<boolean>;
+  claimStarter(addressKey: string, limit: number, windowMs: number, now: Date, dryRun?: boolean): Promise<boolean>;
   /**
    * Take back credits of a refunded or disputed purchase so that, in total, round(credits × fraction) are
    * reversed (idempotent: repeating an event reverses nothing more). Finds the purchase by its key or a
@@ -178,6 +257,8 @@ export interface CreditStore {
 
 interface MemAccount {
   mergedInto?: string;
+  starterGrantedAt?: string;
+  starterState?: StarterState;
   meta: AccountMeta;
   balance: number;
   holds: Map<string, { credits: number; expiresAt: number }>;
@@ -197,7 +278,9 @@ export class MemoryCreditStore implements CreditStore {
   readonly accounts = new Map<string, MemAccount>();
   readonly purchases = new Map<string, PurchaseRecord>();
   readonly orders = new Map<string, string>();
-  readonly starterIps = new Map<string, { count: number; windowStart: number }>();
+  readonly starterIps = new Map<string, { claims: number[] }>();
+  readonly starterBudget = new Map<string, number[]>();
+  readonly syncs = new Map<string, { nextRunAt: number; checkpoint: number | null }>();
   /** The web switch for tests. */
   webSwitch = false;
   readonly promos = new Map<string, PromoCode>();
@@ -208,14 +291,111 @@ export class MemoryCreditStore implements CreditStore {
     const existing = this.accounts.get(key);
     if (existing) return { acc: existing, created: false };
     const acc: MemAccount = { meta, balance: starter, holds: new Map(), ledger: [], totals: { granted: starter, purchased: 0, spent: 0 } };
-    if (starter > 0) acc.ledger.push({ type: 'grant', credits: starter, balanceAfter: starter, at: now.toISOString(), reason: 'starter' });
+    if (starter > 0) {
+      acc.ledger.push({ type: 'grant', credits: starter, balanceAfter: starter, at: now.toISOString(), reason: 'starter' });
+      acc.starterGrantedAt = now.toISOString();
+    } else acc.starterState = 'pending'; // the starter comes on its first action (claimStarterGrant)
     this.accounts.set(key, acc);
     return { acc, created: true };
   }
 
   private state(acc: MemAccount, created: boolean, now: Date): AccountState {
     for (const [id, h] of acc.holds) if (h.expiresAt <= now.getTime()) acc.holds.delete(id);
-    return { balance: acc.balance, available: acc.balance - liveHeld(acc.holds.values(), now.getTime()), created, owner: acc.owner === true };
+    return {
+      balance: acc.balance,
+      available: acc.balance - liveHeld(acc.holds.values(), now.getTime()),
+      created,
+      owner: acc.owner === true,
+      ...(acc.totals.purchased > 0 ? { paid: true } : {}),
+      ...(acc.starterState && !acc.starterGrantedAt ? { starterState: acc.starterState } : {}),
+    };
+  }
+
+  async getAccount(key: string, now: Date): Promise<AccountState | null> {
+    const acc = this.accounts.get(key);
+    return acc ? this.state(acc, false, now) : null;
+  }
+
+  async claimStarterGrant(key: string, meta: AccountMeta, credits: number, rule: StarterRule, now: Date) {
+    const { acc } = this.ensureSync(key, meta, 0, now);
+    if (acc.starterGrantedAt || (acc.starterState !== 'pending' && acc.starterState !== 'paused')) return { outcome: 'already' as const, balance: acc.balance };
+    const t = now.getTime();
+    const claims = liveClaims(this.starterIps.get(rule.addressKey), rule.windowMs, t);
+    if (claims.length >= rule.perAddress) {
+      acc.starterState = 'address_limit';
+      return { outcome: 'address_limit' as const, balance: acc.balance };
+    }
+    const n = Math.max(1, Math.floor(rule.shards));
+    const per = Math.ceil(rule.dailyCap / n);
+    const counts = this.starterBudget.get(rule.day) ?? Array.from({ length: n }, () => 0);
+    const start = Math.floor(Math.random() * n);
+    const shard = per <= 0 ? -1 : Array.from({ length: n }, (_, k) => (start + k) % n).find((i) => (counts[i] ?? 0) < per) ?? -1;
+    if (shard < 0) {
+      acc.starterState = 'paused';
+      return { outcome: 'paused' as const, balance: acc.balance };
+    }
+    counts[shard] = (counts[shard] ?? 0) + 1;
+    this.starterBudget.set(rule.day, counts);
+    this.starterIps.set(rule.addressKey, { claims: [...claims, t] });
+    acc.balance += credits;
+    acc.totals.granted += credits;
+    acc.starterGrantedAt = now.toISOString();
+    delete acc.starterState;
+    acc.ledger.push({ type: 'grant', credits, balanceAfter: acc.balance, at: now.toISOString(), reason: 'starter' });
+    return { outcome: 'granted' as const, balance: acc.balance };
+  }
+
+  async claimStarterBudget(day: string, cap: number, shards: number) {
+    const n = Math.max(1, Math.floor(shards));
+    const per = Math.ceil(cap / n);
+    const counts = this.starterBudget.get(day) ?? Array.from({ length: n }, () => 0);
+    this.starterBudget.set(day, counts);
+    const order = Array.from({ length: n }, (_, i) => i).sort(() => Math.random() - 0.5);
+    for (const i of order) {
+      if ((counts[i] ?? 0) < per) {
+        counts[i] = (counts[i] ?? 0) + 1;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  async starterBudgetUsed(day: string) {
+    return (this.starterBudget.get(day) ?? []).reduce((a, b) => a + b, 0);
+  }
+
+  async claimSyncRun(name: string, minIntervalMs: number, now: Date) {
+    const cur = this.syncs.get(name);
+    if (cur && cur.nextRunAt > now.getTime()) return { ok: false, checkpoint: cur.checkpoint };
+    this.syncs.set(name, { nextRunAt: now.getTime() + minIntervalMs, checkpoint: cur?.checkpoint ?? null });
+    return { ok: true, checkpoint: cur?.checkpoint ?? null };
+  }
+
+  async saveSyncCheckpoint(name: string, checkpoint: number, now: Date) {
+    const cur = this.syncs.get(name);
+    this.syncs.set(name, { nextRunAt: cur?.nextRunAt ?? now.getTime(), checkpoint });
+  }
+
+  async deferSyncRun(name: string, at: Date) {
+    const cur = this.syncs.get(name);
+    this.syncs.set(name, { nextRunAt: at.getTime(), checkpoint: cur?.checkpoint ?? null });
+  }
+
+  async reversePurchaseOnce(find: { purchaseKey?: string; secondaryKey?: string }, reversalId: string, credits: number, reason: string, now: Date) {
+    const key = find.purchaseKey ?? (find.secondaryKey ? this.orders.get(find.secondaryKey) : undefined);
+    const rec = key ? this.purchases.get(key) : undefined;
+    if (!rec) return null;
+    const accountKey = await this.resolveAccount(rec.account);
+    const acc = this.accounts.get(accountKey);
+    if (!acc) return null;
+    if (rec.reversals?.[reversalId] !== undefined) return { reversed: 0, balance: acc.balance, account: accountKey };
+    const delta = Math.max(0, Math.min(Math.floor(credits), rec.credits - (rec.reversedCredits ?? 0)));
+    rec.reversals = { ...rec.reversals, [reversalId]: delta };
+    if (delta <= 0) return { reversed: 0, balance: acc.balance, account: accountKey };
+    rec.reversedCredits = (rec.reversedCredits ?? 0) + delta;
+    acc.balance -= delta;
+    acc.ledger.push({ type: 'reversal', credits: -delta, balanceAfter: acc.balance, at: now.toISOString(), reason, productId: rec.productId, provider: rec.provider, ...(rec.orderId ? { orderId: rec.orderId } : {}) });
+    return { reversed: delta, balance: acc.balance, account: accountKey };
   }
 
   async ensure(key: string, meta: AccountMeta, starter: number, now: Date): Promise<AccountState> {
@@ -306,13 +486,11 @@ export class MemoryCreditStore implements CreditStore {
     return { balance: acc.balance };
   }
 
-  async claimStarter(addressKey: string, limit: number, windowMs: number, now: Date) {
+  async claimStarter(addressKey: string, limit: number, windowMs: number, now: Date, dryRun = false) {
     const t = now.getTime();
-    const cur = this.starterIps.get(addressKey);
-    const fresh = !cur || cur.windowStart + windowMs <= t;
-    const count = fresh ? 0 : cur.count;
-    if (count >= limit) return false;
-    this.starterIps.set(addressKey, { count: count + 1, windowStart: fresh ? t : cur.windowStart });
+    const claims = liveClaims(this.starterIps.get(addressKey), windowMs, t);
+    if (claims.length >= limit) return false;
+    if (!dryRun) this.starterIps.set(addressKey, { claims: [...claims, t] });
     return true;
   }
 
@@ -352,7 +530,7 @@ export class MemoryCreditStore implements CreditStore {
     acc.balance += p.credits;
     acc.totals.granted += p.credits;
     acc.ledger.push({ type: 'grant', credits: p.credits, balanceAfter: acc.balance, at: now.toISOString(), reason: `promo ${code}` });
-    p.redemptions += 1;
+    if (hasPromoLimit(p)) p.redemptions += 1; // no limit: no counter (same as the Firestore store)
     used.add(key);
     this.promoRedemptions.set(code, used);
     return { ok: true, code, credits: p.credits, balance: acc.balance };

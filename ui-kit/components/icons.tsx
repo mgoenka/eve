@@ -1,7 +1,8 @@
 /* generated from app-platform/ui-kit — edit there and re-sync. */
 import type { SVGProps } from 'react';
 
-type P = SVGProps<SVGSVGElement> & { size?: number };
+/** `size`: px number, or any CSS length such as '1.125rem' (scales with the root font, e.g. on TVs). */
+type P = SVGProps<SVGSVGElement> & { size?: number | string };
 
 function Svg({ size = 18, children, ...rest }: P) {
   return (
@@ -28,3 +29,7 @@ export const FlagIcon = (p: P) => (<Svg {...p}><path d="M4 22V4a1 1 0 0 1 .4-.8A
 export const MoreIcon = (p: P) => (<Svg {...p}><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /><circle cx="5" cy="12" r="1" /></Svg>);
 export const SparklesIcon = (p: P) => (<Svg {...p}><path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.13-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.14a.5.5 0 0 1 .96 0l1.58 6.14a2 2 0 0 0 1.44 1.44l6.14 1.58a.5.5 0 0 1 0 .96l-6.14 1.58a2 2 0 0 0-1.44 1.44l-1.58 6.13a.5.5 0 0 1-.96 0z" /><path d="M20 3v4" /><path d="M22 5h-4" /><path d="M4 17v2" /><path d="M5 18H3" /></Svg>);
 export const CoinsIcon = (p: P) => (<Svg {...p}><circle cx="8" cy="8" r="6" /><path d="M18.09 10.37A6 6 0 1 1 10.34 18" /><path d="M7 6h1v4" /><path d="m16.71 13.88.7.71-2.82 2.82" /></Svg>);
+export const PlusIcon = (p: P) => (<Svg {...p}><path d="M5 12h14" /><path d="M12 5v14" /></Svg>);
+export const MinusIcon = (p: P) => (<Svg {...p}><path d="M5 12h14" /></Svg>);
+export const QrCodeIcon = (p: P) => (<Svg {...p}><rect width="5" height="5" x="3" y="3" rx="1" /><rect width="5" height="5" x="16" y="3" rx="1" /><rect width="5" height="5" x="3" y="16" rx="1" /><path d="M21 16h-3a2 2 0 0 0-2 2v3" /><path d="M21 21v.01" /><path d="M12 7v3a2 2 0 0 1-2 2H7" /><path d="M3 12h.01" /><path d="M12 3h.01" /><path d="M12 16v.01" /><path d="M16 12h1" /><path d="M21 12v.01" /><path d="M12 21v-1" /></Svg>);
+export const InstallIcon = (p: P) => (<Svg {...p}><rect width="14" height="20" x="5" y="2" rx="2" /><path d="M12 7v7" /><path d="m9 11 3 3 3-3" /><path d="M10 18h4" /></Svg>);

@@ -64,7 +64,7 @@ import type { SavedEvening } from '../services/savedEvenings';
 import { StopCard } from './StopCard';
 import { EveLogo } from './EveLogo';
 import { useOpenRules, useOpenSettings } from './RulesContext';
-import { AppHeader, CreditsChip, IconButton, ReportContentButton, isNativeApp, shareOrCopy, useToast } from '../ui-kit';
+import { AppFooter, AppHeader, CreditsChip, IconButton, ReportContentButton, isNativeApp, shareOrCopy, speculativeAiAllowed, useToast } from '../ui-kit';
 
 interface Props {
   onSwitchToRestaurant: () => void;
@@ -240,6 +240,13 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   const [planTitle, setPlanTitle] = useState('');
   const [stops, setStops] = useState<ExperienceStop[]>([]);
   const [story, setStory] = useState<EveStory | null>(null);
+  // While Eve writes the story, a placeholder holds its place above the stops
+  // (so the cards don't jump down when the text lands).
+  const [storyPending, setStoryPending] = useState(false);
+  const loadStory = useCallback((input: Parameters<typeof eveStory>[0]) => {
+    setStoryPending(true);
+    return eveStory(input).finally(() => setStoryPending(false));
+  }, []);
   const [narrationAudio, setNarrationAudio] = useState<string | null>(null);
   const [narrationMime, setNarrationMime] = useState<string>('audio/mpeg');
   const [narrationText_, setNarrationText] = useState<string>('');
@@ -567,7 +574,8 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
       stopAllAudio();
       setEveSpeaking(true);
       try {
-        const audio = await synthesize(text, 'eve');
+        // Eve's voice is on only after the user tapped Activate: their choice, so not gated as speculative.
+        const audio = await synthesize(text, 'eve', { userAsked: true });
         const a = eveAudioRef.current;
         if (!a) return;
         a.src = `data:${audio.audioMime || 'audio/mpeg'};base64,${audio.audioData}`;
@@ -592,7 +600,8 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
       stopAllAudio();
       setEveSpeaking(true);
       try {
-        const audio = await synthesize(text, 'eve');
+        // Eve's voice is on only after the user tapped Activate: their choice, so not gated as speculative.
+        const audio = await synthesize(text, 'eve', { userAsked: true });
         const a = eveAudioRef.current;
         if (!a) return;
         a.src = `data:${audio.audioMime || 'audio/mpeg'};base64,${audio.audioData}`;
@@ -667,6 +676,56 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
     a.addEventListener('ended', onEnd);
     return () => a.removeEventListener('ended', onEnd);
   }, []);
+
+  // Paint (or repaint) one stop card. Identical cards come back from the
+  // server cache for free; fresh ones draw from the hourly picture budget
+  // (and cost Sparks in the app). `background` (the automatic first picture)
+  // never opens the "Get Sparks" sheet: the card shows an inline link instead.
+  const paintStop = useCallback(
+    async (stop: ExperienceStop, i: number, useCity: string, useVibe: Vibe, opts: { background?: boolean } = {}) => {
+      const same = (st: ExperienceStop, idx: number) => idx === i && st.name === stop.name;
+      setStops((prev) =>
+        prev.map((st, idx) => (same(st, idx) ? { ...st, status: 'generating', error: undefined, errorCode: undefined } : st))
+      );
+      try {
+        const img = await stopImage(
+          {
+            name: stop.name,
+            kind: stop.kind,
+            oneLineVibe: stop.oneLineVibe,
+            city: useCity,
+            vibe: useVibe,
+          },
+          { background: opts.background }
+        );
+        setStops((prev) =>
+          prev.map((st, idx) =>
+            same(st, idx) ? { ...st, imageData: img.imageData, imageMime: img.imageMime, status: 'ready' } : st
+          )
+        );
+      } catch (err: any) {
+        setStops((prev) =>
+          prev.map((st, idx) =>
+            same(st, idx) ? { ...st, status: 'error', error: err?.message || 'Image failed', errorCode: err?.code } : st
+          )
+        );
+      }
+    },
+    []
+  );
+
+  // A new (or reopened) plan paints only the first stop's picture on its own;
+  // the others wait for "Show picture" on their card, so one plan doesn't spend
+  // a whole Sparks balance on pictures nobody asked for.
+  const paintFirstStop = useCallback(
+    (list: ExperienceStop[], useCity: string, useVibe: Vibe) => {
+      setStops((prev) => prev.map((st, idx) => (idx === 0 ? st : { ...st, status: st.imageData ? st.status : 'pending' })));
+      // Speculative: only when it can't spend Sparks the user didn't choose to spend (else "Show picture" stays).
+      if (list[0] && speculativeAiAllowed()) return paintStop(list[0], 0, useCity, useVibe, { background: true });
+      return Promise.resolve();
+    },
+    [paintStop]
+  );
 
   const buildPlan = useCallback(
     async (
@@ -830,7 +889,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
       setPhase('ready');
 
       // Story (parallel with images)
-      eveStory({
+      loadStory({
         title: skeleton.title,
         stops: initialStops.map((s) => ({
           name: s.name,
@@ -847,36 +906,8 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
         })
         .catch(() => {});
 
-      // Mark all stops as generating, then fan out images in parallel
-      setStops((prev) => prev.map((st) => ({ ...st, status: 'generating' })));
-      await Promise.all(
-        initialStops.map(async (stop, i) => {
-          if (cancelRef.current) return;
-          try {
-            const img = await stopImage({
-              name: stop.name,
-              kind: stop.kind,
-              oneLineVibe: stop.oneLineVibe,
-              city: useCity,
-              vibe: useVibe,
-            });
-            if (cancelRef.current) return;
-            setStops((prev) =>
-              prev.map((st, idx) =>
-                idx === i
-                  ? { ...st, imageData: img.imageData, imageMime: img.imageMime, status: 'ready' }
-                  : st
-              )
-            );
-          } catch (err: any) {
-            setStops((prev) =>
-              prev.map((st, idx) =>
-                idx === i ? { ...st, status: 'error', error: err?.message || 'Image failed', errorCode: err?.code } : st
-              )
-            );
-          }
-        })
-      );
+      // Only the first picture is painted automatically (the rest on tap).
+      await paintFirstStop(initialStops, useCity, useVibe);
 
       if (cancelRef.current) return;
 
@@ -908,37 +939,9 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
         setEveOutroText(o.outro || '');
       } catch {}
     },
-    [city, vibe, party, dietary, budgetPerPerson, freeText, cuisinePref, whenISO, startTime, durationHours, speakAsEve]
+    [city, vibe, party, dietary, budgetPerPerson, freeText, cuisinePref, whenISO, startTime, durationHours, speakAsEve, paintFirstStop]
   );
 
-  // Paint (or repaint) one stop card. Identical cards come back from the
-  // server cache for free; fresh ones draw from the hourly picture budget.
-  const paintStop = useCallback(async (stop: ExperienceStop, i: number, useCity: string, useVibe: Vibe) => {
-    const same = (st: ExperienceStop, idx: number) => idx === i && st.name === stop.name;
-    setStops((prev) =>
-      prev.map((st, idx) => (same(st, idx) ? { ...st, status: 'generating', error: undefined, errorCode: undefined } : st))
-    );
-    try {
-      const img = await stopImage({
-        name: stop.name,
-        kind: stop.kind,
-        oneLineVibe: stop.oneLineVibe,
-        city: useCity,
-        vibe: useVibe,
-      });
-      setStops((prev) =>
-        prev.map((st, idx) =>
-          same(st, idx) ? { ...st, imageData: img.imageData, imageMime: img.imageMime, status: 'ready' } : st
-        )
-      );
-    } catch (err: any) {
-      setStops((prev) =>
-        prev.map((st, idx) =>
-          same(st, idx) ? { ...st, status: 'error', error: err?.message || 'Image failed', errorCode: err?.code } : st
-        )
-      );
-    }
-  }, []);
 
   // Reopen a saved or shared evening without planning it again.
   const restoreEvening = useCallback(
@@ -963,13 +966,13 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
       setEveOutroText('');
       setChatHistory([]);
       autoWalkedRef.current = false;
-      const restored: ExperienceStop[] = e.stops.map((st) => ({ ...st, status: 'generating' }));
+      const restored: ExperienceStop[] = e.stops.map((st) => ({ ...st, status: 'pending' }));
       setStops(restored);
       setStory(e.story || null);
       setPhase('ready');
       if (typeof window !== 'undefined') window.scrollTo({ top: 0 });
       if (!e.story) {
-        eveStory({
+        loadStory({
           title: e.title,
           stops: restored.map((st) => ({ name: st.name, kind: st.kind, oneLineVibe: st.oneLineVibe, signatureItem: st.signatureItem })),
           vibe: e.vibe,
@@ -981,9 +984,9 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           })
           .catch(() => {});
       }
-      restored.forEach((stop, i) => paintStop(stop, i, e.city, e.vibe));
+      void paintFirstStop(restored, e.city, e.vibe);
     },
-    [paintStop]
+    [paintFirstStop]
   );
 
   // Opening a shared link that carries a finished plan shows it directly.
@@ -1091,31 +1094,15 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
             // Reset auto-walk so the refreshed plan auto-narrates.
             autoWalkedRef.current = false;
             // Refresh story for the new plan
-            eveStory({
+            loadStory({
               title: result.title || planTitle,
               stops: newStops.map((s) => ({ name: s.name, kind: s.kind, oneLineVibe: s.oneLineVibe, signatureItem: s.signatureItem })),
               vibe,
               city,
               party,
             }).then(setStory).catch(() => {});
-            // Regenerate stop images in parallel
-            setStops((prev) => prev.map((st) => ({ ...st, status: 'generating' })));
-            await Promise.all(
-              newStops.map(async (stop, i) => {
-                try {
-                  const img = await stopImage({
-                    name: stop.name,
-                    kind: stop.kind,
-                    oneLineVibe: stop.oneLineVibe,
-                    city,
-                    vibe,
-                  });
-                  setStops((prev) => prev.map((st, idx) => idx === i ? { ...st, imageData: img.imageData, imageMime: img.imageMime, status: 'ready' } : st));
-                } catch (err: any) {
-                  setStops((prev) => prev.map((st, idx) => idx === i ? { ...st, status: 'error', error: err?.message || 'Image failed', errorCode: err?.code } : st));
-                }
-              })
-            );
+            // First stop's picture automatically, the rest on tap.
+            await paintFirstStop(newStops, city, vibe);
           }
         } catch (err: any) {
           console.error('refine-by-voice failed:', err);
@@ -1529,7 +1516,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
         setStops(newStops);
 
         // refresh story
-        eveStory({
+        loadStory({
           title: result.title || planTitle,
           stops: newStops.map((s) => ({
             name: s.name,
@@ -1544,33 +1531,8 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           .then(setStory)
           .catch(() => {});
 
-        setStops((prev) => prev.map((st) => ({ ...st, status: 'generating' })));
-        await Promise.all(
-          newStops.map(async (stop, i) => {
-            try {
-              const img = await stopImage({
-                name: stop.name,
-                kind: stop.kind,
-                oneLineVibe: stop.oneLineVibe,
-                city,
-                vibe,
-              });
-              setStops((prev) =>
-                prev.map((st, idx) =>
-                  idx === i
-                    ? { ...st, imageData: img.imageData, imageMime: img.imageMime, status: 'ready' }
-                    : st
-                )
-              );
-            } catch (err: any) {
-              setStops((prev) =>
-                prev.map((st, idx) =>
-                  idx === i ? { ...st, status: 'error', error: err?.message || 'Image failed', errorCode: err?.code } : st
-                )
-              );
-            }
-          })
-        );
+        // First stop's picture automatically, the rest on tap.
+        await paintFirstStop(newStops, city, vibe);
       }
     } catch (err: any) {
       setChatHistory((h) => [
@@ -1639,7 +1601,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
     if (muted) return;
     if (!story) return;
     if (stops.length < 2) return;
-    if (!stops.every((s) => s.status === 'ready' || s.status === 'error')) return;
+    if (!stops.every((s) => s.status !== 'generating')) return;
     autoWalkedRef.current = true;
     console.log('[Eve] auto-walk: scheduling startWalkthrough in 900ms');
     const t = setTimeout(() => {
@@ -1825,7 +1787,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                     />
                   </div>
                   {eveSpeaking && (
-                    <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 px-2.5 py-0.5 rounded-full bg-eve-rose/90 text-eve-ink text-[10px] font-bold tracking-wide font-serif italic inline-flex items-center gap-1 shadow-md">
+                    <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 px-2.5 py-0.5 rounded-full bg-eve-rose/90 text-eve-ink text-xs font-bold tracking-wide font-serif italic inline-flex items-center gap-1 shadow-md">
                       <span className="w-1 h-1 rounded-full bg-eve-ink animate-pulse" />
                       speaking
                     </span>
@@ -1836,7 +1798,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                 </div>
               </div>
             )}
-            <p className="text-[12px] tracking-wider text-eve-gold/85 mb-3 italic font-serif">
+            <p className="text-mg-2xs tracking-wider text-eve-gold/85 mb-3 italic font-serif">
               Hi, I'm <span className="text-shimmer not-italic font-semibold">Eve</span>.
             </p>
             <h1 className="font-serif text-5xl md:text-7xl leading-[1.0]">
@@ -1848,7 +1810,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
               Or hit <em className="not-italic font-semibold text-eve-gold">Surprise Me</em>,
               I'll find you somewhere good.
             </p>
-            <p className="mt-2 text-[12px] tracking-wider text-eve-rose/80 italic font-serif">
+            <p className="mt-2 text-mg-2xs tracking-wider text-eve-rose/80 italic font-serif">
               Yours, quietly.
             </p>
           </div>
@@ -1888,7 +1850,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
             )}
             <button
               onClick={surpriseMe}
-              className="group inline-flex items-center gap-2 px-7 py-3.5 rounded-xl font-bold text-base transition-all border outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink hover:scale-[1.02] active:scale-[0.98] bg-eve-ink-soft text-eve-gold border-eve-gold/25 hover:bg-mg-surface-2 hover:border-eve-gold/45 shadow-lg shadow-eve-gold/10"
+              className="group inline-flex items-center gap-2 px-7 py-3.5 rounded-xl font-bold text-base transition-all border outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink hover:scale-[1.02] active:scale-[0.98] bg-eve-gold text-eve-ink border-eve-gold hover:bg-amber-200 hover:border-amber-200 shadow-lg shadow-eve-gold/20"
             >
               <Shuffle size={18} />
               Surprise me
@@ -1897,7 +1859,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
 
           {(voiceListening || parsing) && (
             <div className="max-w-xl mx-auto mb-5 px-4 py-3 rounded-2xl border border-eve-rose/35 bg-eve-rose/5 text-center animate-fade-in">
-              <p className="text-[11px] tracking-wide text-eve-rose/85 mb-1 italic font-serif inline-flex items-center gap-1.5">
+              <p className="text-xs tracking-wide text-eve-rose/85 mb-1 italic font-serif inline-flex items-center gap-1.5">
                 {parsing ? (
                   <>
                     <Loader2 size={10} className="animate-spin" />
@@ -1923,7 +1885,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
               <div className="absolute top-1 right-1">
                 <ReportContentButton app="eve" kind="chat" label="Report what Eve said" content={`Eve says: "${eveIntroText}"`} />
               </div>
-              <p className="text-[11px] tracking-wide text-eve-gold/80 mb-1 italic font-serif inline-flex items-center gap-1.5">
+              <p className="text-xs tracking-wide text-eve-gold/80 mb-1 italic font-serif inline-flex items-center gap-1.5">
                 {eveSpeaking && (
                   <span className="w-1.5 h-1.5 rounded-full bg-eve-gold animate-pulse" />
                 )}
@@ -1935,7 +1897,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
 
           {recentEvenings.length > 0 && (
             <section aria-labelledby="recent-evenings" className="max-w-2xl mx-auto mb-7">
-              <h2 id="recent-evenings" className="text-center text-[12px] tracking-wide text-eve-gold/80 mb-2 italic font-serif inline-flex w-full items-center justify-center gap-1.5">
+              <h2 id="recent-evenings" className="text-center text-mg-2xs tracking-wide text-eve-gold/80 mb-2 italic font-serif inline-flex w-full items-center justify-center gap-1.5">
                 <History size={12} aria-hidden="true" />
                 Your recent evenings
               </h2>
@@ -1947,8 +1909,8 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                       className="min-w-0 pl-3.5 pr-2 py-1.5 text-left rounded-l-full outline-none focus-visible:ring-2 focus-visible:ring-eve-gold"
                       title={`Reopen "${e.title}"`}
                     >
-                      <span className="block truncate max-w-[16rem] text-[13px] font-serif italic text-eve-cream/90">{e.title}</span>
-                      <span className="block truncate max-w-[16rem] text-[11px] text-eve-cream/55">
+                      <span className="block truncate max-w-[16rem] text-[0.8125rem] font-serif italic text-eve-cream/90">{e.title}</span>
+                      <span className="block truncate max-w-[16rem] text-xs text-eve-cream/55">
                         {(e.city || '').split(',')[0]} · {e.stops.length} {e.stops.length === 1 ? 'stop' : 'stops'} · {timeAgo(e.savedAt)}
                       </span>
                     </button>
@@ -1969,16 +1931,17 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           <div className="text-center mb-5">
             <button
               onClick={() => setFormExpanded((v) => !v)}
-              className="inline-flex items-center gap-1.5 text-[12px] tracking-wider text-eve-cream/50 hover:text-eve-cream italic font-serif transition-colors"
+              aria-expanded={formExpanded}
+              className="inline-flex items-center gap-1.5 min-h-11 px-4 rounded-full text-sm tracking-wide text-eve-cream/60 hover:text-eve-cream italic font-serif transition-colors outline-none focus-visible:ring-2 focus-visible:ring-eve-gold"
             >
-              <ChevronDown size={11} className={`transition-transform ${formExpanded ? 'rotate-180' : ''}`} />
+              <ChevronDown size={14} className={`transition-transform ${formExpanded ? 'rotate-180' : ''}`} />
               {formExpanded ? 'Hide details, just talk to Eve' : 'Show all the details'}
             </button>
           </div>
 
           <div className={`space-y-5 ${formExpanded ? '' : 'hidden'}`}>
             <div>
-              <label className="block text-[12px] tracking-wide text-eve-gold/80 mb-2 font-medium">
+              <label className="block text-mg-2xs tracking-wide text-eve-gold/80 mb-2 font-medium">
                 The vibe
               </label>
               <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
@@ -2008,14 +1971,14 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                   );
                 })}
               </div>
-              <p className="mt-2 text-[12px] text-eve-cream/60 italic">
+              <p className="mt-2 text-mg-2xs text-eve-cream/60 italic">
                 {VIBES.find((v) => v.id === vibe)?.hint}
               </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="md:col-span-2">
-                <label className="block text-[12px] tracking-wide text-eve-gold/80 mb-2 font-medium">
+                <label className="block text-mg-2xs tracking-wide text-eve-gold/80 mb-2 font-medium">
                   Location
                 </label>
                 <div className="relative">
@@ -2037,14 +2000,14 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                     disabled={locating}
                     title="Use my location"
                     aria-label="Use my location"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-xl bg-eve-gold/15 hover:bg-eve-gold/25 text-eve-gold disabled:opacity-50 transition-colors"
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 w-11 h-11 inline-flex items-center justify-center rounded-xl bg-eve-gold/15 hover:bg-eve-gold/25 text-eve-gold disabled:opacity-50 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-eve-gold"
                   >
-                    {locating ? <Loader2 size={16} className="animate-spin" /> : <MapPin size={16} />}
+                    {locating ? <Loader2 size={18} className="animate-spin" /> : <MapPin size={18} />}
                   </button>
                 </div>
               </div>
               <div>
-                <label className="block text-[12px] tracking-wide text-eve-gold/80 mb-2 font-medium">
+                <label className="block text-mg-2xs tracking-wide text-eve-gold/80 mb-2 font-medium">
                   When
                 </label>
                 <div className="relative">
@@ -2057,10 +2020,10 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                     value={whenISO}
                     min={todayISO()}
                     onChange={(e) => setWhenISO(e.target.value)}
-                    className="w-full pl-12 pr-4 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-base text-eve-cream"
+                    className="w-full min-h-[52px] pl-14 pr-4 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none focus-visible:ring-2 focus-visible:ring-eve-gold/50 transition-colors text-base text-eve-cream font-sans [color-scheme:dark] appearance-none [&::-webkit-calendar-picker-indicator]:opacity-70 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-date-and-time-value]:text-left"
                   />
                 </div>
-                <p className="mt-1 text-[11px] text-eve-cream/55 italic font-serif">
+                <p className="mt-1 text-xs text-eve-cream/55 italic font-serif">
                   {formatDate(whenISO)}
                 </p>
               </div>
@@ -2068,7 +2031,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-[12px] tracking-wide text-eve-gold/80 mb-2 font-medium">
+                <label className="block text-mg-2xs tracking-wide text-eve-gold/80 mb-2 font-medium">
                   Start time
                 </label>
                 <div className="relative">
@@ -2080,12 +2043,12 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                     aria-label="Start time"
                     value={startTime}
                     onChange={(e) => setStartTime(e.target.value)}
-                    className="w-full pl-12 pr-4 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-base text-eve-cream"
+                    className="w-full min-h-[52px] pl-14 pr-4 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none focus-visible:ring-2 focus-visible:ring-eve-gold/50 transition-colors text-base text-eve-cream font-sans [color-scheme:dark] appearance-none [&::-webkit-calendar-picker-indicator]:opacity-70 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-date-and-time-value]:text-left"
                   />
                 </div>
               </div>
               <div>
-                <label className="block text-[12px] tracking-wide text-eve-gold/80 mb-2 font-medium">
+                <label className="block text-mg-2xs tracking-wide text-eve-gold/80 mb-2 font-medium">
                   Duration · {durationHours}h
                 </label>
                 <div className="relative">
@@ -2099,7 +2062,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                     onChange={(e) => setDurationHours(parseFloat(e.target.value))}
                     className="w-full mt-3 accent-eve-gold"
                   />
-                  <div className="flex justify-between text-[11px] text-eve-cream/55 italic font-serif mt-1">
+                  <div className="flex justify-between text-xs text-eve-cream/55 italic font-serif mt-1">
                     <span>1.5h</span>
                     <span>4h</span>
                     <span>8h</span>
@@ -2110,7 +2073,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <label className="block text-[12px] tracking-wide text-eve-gold/80 mb-2 font-medium">
+                <label className="block text-mg-2xs tracking-wide text-eve-gold/80 mb-2 font-medium">
                   Party
                 </label>
                 <input
@@ -2124,7 +2087,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                 />
               </div>
               <div>
-                <label className="block text-[12px] tracking-wide text-eve-gold/80 mb-2 font-medium">
+                <label className="block text-mg-2xs tracking-wide text-eve-gold/80 mb-2 font-medium">
                   Cuisine
                 </label>
                 <input
@@ -2143,7 +2106,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                 </datalist>
               </div>
               <div>
-                <label className="block text-[12px] tracking-wide text-eve-gold/80 mb-2 font-medium">
+                <label className="block text-mg-2xs tracking-wide text-eve-gold/80 mb-2 font-medium">
                   Budget per person
                 </label>
                 <div className="relative">
@@ -2158,14 +2121,14 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                     className="w-full pl-8 pr-5 py-3.5 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-base"
                   />
                 </div>
-                <p className="mt-1 text-[11px] text-eve-cream/60 italic font-serif">
+                <p className="mt-1 text-xs text-eve-cream/60 italic font-serif">
                   ~${budgetPerPerson * party} for {party}
                 </p>
               </div>
             </div>
 
             <div>
-              <label className="block text-[12px] tracking-wide text-eve-gold/80 mb-2 font-medium">
+              <label className="block text-mg-2xs tracking-wide text-eve-gold/80 mb-2 font-medium">
                 Dietary
               </label>
               <div className="flex flex-wrap gap-2">
@@ -2191,13 +2154,13 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
 
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="block text-[12px] tracking-wide text-eve-gold/80 font-medium">
+                <label className="block text-mg-2xs tracking-wide text-eve-gold/80 font-medium">
                   Tell Eve more (optional)
                 </label>
                 {!voiceUnsupported && (
                   <button
                     onClick={toggleVoiceListening}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium transition-all ${
+                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all ${
                       voiceListening
                         ? 'bg-eve-rose/20 text-eve-rose border border-eve-rose/50'
                         : 'bg-white/[0.04] text-eve-cream/70 border border-white/10 hover:border-eve-rose/40'
@@ -2214,7 +2177,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                 onChange={(e) => setFreeText(e.target.value)}
                 placeholder="Indian or Italian dinner, dessert nearby, then a quiet garden walk under stringlights..."
                 rows={3}
-                className="w-full px-5 py-4 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-[15px] leading-relaxed resize-none placeholder:text-eve-cream/45 placeholder:italic placeholder:font-serif"
+                className="w-full px-5 py-4 rounded-2xl bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-[0.9375rem] leading-relaxed resize-none placeholder:text-eve-cream/45 placeholder:italic placeholder:font-serif"
               />
               <div className="mt-2 flex flex-wrap gap-2">
                 {SAMPLE_QUERIES.map((s) => (
@@ -2249,15 +2212,15 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
               <button
                 onClick={() => buildPlan()}
                 disabled={!city.trim()}
-                className="w-full group inline-flex items-center justify-center gap-3 px-8 py-4 rounded-xl font-bold text-lg transition-all border outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink hover:scale-[1.01] active:scale-[0.99] bg-eve-ink-soft text-eve-gold border-eve-gold/25 hover:bg-mg-surface-2 hover:border-eve-gold/45 disabled:bg-eve-ink disabled:text-eve-cream/35 disabled:border-white/10 disabled:cursor-not-allowed shadow-lg shadow-eve-gold/15"
+                className="w-full group inline-flex items-center justify-center gap-3 px-8 py-4 rounded-xl font-bold text-lg transition-all border outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink hover:scale-[1.01] active:scale-[0.99] bg-eve-gold text-eve-ink border-eve-gold hover:bg-amber-200 hover:border-amber-200 disabled:bg-eve-ink disabled:text-eve-cream/35 disabled:border-white/10 disabled:cursor-not-allowed shadow-lg shadow-eve-gold/15"
               >
                 <Wand2 size={20} />
                 Plan my evening
               </button>
               {imageLimit && (
-                <p className="mt-2 text-center text-[12px] text-eve-cream/60 italic font-serif" aria-live="polite">
+                <p className="mt-2 text-center text-mg-2xs text-eve-cream/60 italic font-serif" aria-live="polite">
                   {imageLimit.remaining > 0
-                    ? `Eve paints every stop card. ${imageLimit.remaining} of ${imageLimit.limit} paintings left this hour; repeat cards are free.`
+                    ? `Eve paints the first stop card; tap Show picture for the others. ${imageLimit.remaining} of ${imageLimit.limit} paintings left this hour; repeat cards are free.`
                     : `Eve has painted her ${imageLimit.limit} cards for this hour. Plans still work, with photos, until she rests (about ${Math.max(1, Math.ceil(imageLimit.resetInSec / 60))} min).`}
                 </p>
               )}
@@ -2265,9 +2228,9 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           </div>
         </main>
 
-        <footer className="text-center py-6 text-[11px] text-white/55 italic font-serif">
-          Eve · Yours, quietly
-        </footer>
+        <AppFooter className="py-6">
+          <p className="text-xs text-white/55 italic font-serif">Eve · Yours, quietly</p>
+        </AppFooter>
       </div>
     );
   }
@@ -2341,7 +2304,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
 
       <main className="flex-1 max-w-5xl mx-auto w-full px-4 md:px-8 py-8">
         <div className="text-center mb-6">
-          <p className="text-[12px] tracking-wide text-eve-gold/75 mb-2 italic font-serif">
+          <p className="text-mg-2xs tracking-wide text-eve-gold/75 mb-2 italic font-serif">
             {phase === 'forging' ? (
               <><span className="text-shimmer not-italic font-semibold">Eve</span> is planning</>
             ) : (
@@ -2374,15 +2337,15 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
               </span>
             </div>
           )}
-          <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+          <div className={`mt-3 flex flex-wrap items-center justify-center gap-2 ${phase === 'ready' && (storyPending || story) ? 'min-h-6' : ''}`}>
             {story?.moodArc && (
-              <span className="text-[10px] tracking-wide text-eve-gold/85 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-eve-gold/10 border border-eve-gold/30 italic font-serif">
+              <span className="text-xs tracking-wide text-eve-gold/85 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-eve-gold/10 border border-eve-gold/30 italic font-serif">
                 <Heart size={10} />
                 {story.moodArc}
               </span>
             )}
             {story?.weatherCue && (
-              <span className="text-[10px] tracking-wide text-eve-cream/65 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-white/5 border border-white/10 italic font-serif">
+              <span className="text-xs tracking-wide text-eve-cream/65 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-white/5 border border-white/10 italic font-serif">
                 <Wind size={10} />
                 {story.weatherCue}
               </span>
@@ -2401,21 +2364,25 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
               />
             </div>
             <div className="flex items-start gap-4">
-              {eveAvatarUrl && (
-                <div
-                  className={`flex-shrink-0 w-16 h-16 md:w-20 md:h-20 rounded-full overflow-hidden ring-2 transition-all bg-gradient-to-br from-eve-plum/55 via-eve-rose/35 to-eve-gold/30 ${
-                    eveSpeaking ? 'ring-eve-rose/80 animate-glow-pulse' : 'ring-eve-gold/45'
-                  }`}
-                >
+              {/* The circle is always there (gradient until the portrait arrives), so the
+                  text beside it doesn't jump when the picture loads. */}
+              <div
+                className={`flex-shrink-0 w-16 h-16 md:w-20 md:h-20 rounded-full overflow-hidden ring-2 transition-all bg-gradient-to-br from-eve-plum/55 via-eve-rose/35 to-eve-gold/30 ${
+                  eveSpeaking ? 'ring-eve-rose/80 animate-glow-pulse' : 'ring-eve-gold/45'
+                }`}
+              >
+                {eveAvatarUrl && (
                   <img
                     src={eveAvatarUrl}
                     alt="Eve"
-                    className="w-full h-full object-cover scale-110"
+                    width={512}
+                    height={512}
+                    className="w-full h-full object-cover scale-110 animate-fade-in"
                   />
-                </div>
-              )}
+                )}
+              </div>
               <div className="flex-1 text-center md:text-left">
-                <p className="text-[11px] tracking-wide text-eve-gold/80 mb-1.5 inline-flex items-center gap-1.5 italic font-serif">
+                <p className="text-xs tracking-wide text-eve-gold/80 mb-1.5 inline-flex items-center gap-1.5 italic font-serif">
                   {eveSpeaking ? (
                     <>
                       <span className="w-1.5 h-1.5 rounded-full bg-eve-rose animate-pulse" />
@@ -2435,6 +2402,12 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
 
         {/* STORY-DRIVEN VERTICAL FLOW */}
         <div className="max-w-3xl mx-auto space-y-6">
+          {!story?.opening && storyPending && phase === 'ready' && (
+            <div className="px-4 space-y-2 min-h-[3.5rem] md:min-h-[4rem]" aria-hidden="true">
+              <div className="h-5 w-5/6 mx-auto rounded-lg bg-white/[0.06] animate-pulse" />
+              <div className="h-5 w-2/3 mx-auto rounded-lg bg-white/[0.05] animate-pulse" />
+            </div>
+          )}
           {story?.opening && (
             <div className="text-center px-4 animate-fade-in-up">
               <p className="font-serif italic text-lg md:text-xl text-eve-cream/85 leading-relaxed">
@@ -2502,6 +2475,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                   highlighted={highlightedStopIdx === i}
                   dimmed={walkingIdx >= 0 && highlightedStopIdx >= 0 && highlightedStopIdx !== i}
                   onRetryImage={() => paintStop(stop, i, city, vibe)}
+                  onShowImage={() => paintStop(stop, i, city, vibe)}
                 />
                 {sceneText && (
                   <div
@@ -2531,7 +2505,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           )}
         </div>
 
-        {stops.length >= 2 && stops.every((s) => s.status === 'ready' || s.status === 'error') && story && (
+        {stops.length >= 2 && stops.every((s) => s.status !== 'generating') && story && (
           <div className="mt-8 flex justify-center">
             {walkingIdx < 0 ? (
               <button
@@ -2555,7 +2529,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           </div>
         )}
 
-        {stops.length >= 2 && stops.every((s) => s.status === 'ready' || s.status === 'error') && (
+        {stops.length >= 2 && stops.every((s) => s.status !== 'generating') && (
           <div className="mt-5 flex justify-center gap-3 flex-wrap">
             <a
               href={`https://www.google.com/maps/dir/${stops
@@ -2582,7 +2556,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
         )}
 
         <div className="mt-10 flex flex-wrap items-center justify-center gap-2">
-          <span className="text-[12px] text-eve-cream/60 italic font-serif mr-1">
+          <span className="text-mg-2xs text-eve-cream/60 italic font-serif mr-1">
             Tweak the evening
           </span>
           {[
@@ -2621,10 +2595,10 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                 {playing ? <Pause size={18} /> : <Play size={18} className="ml-0.5" />}
               </button>
               <div className="flex-1 min-w-0">
-                <p className="text-[11px] text-eve-gold/80 mb-0.5 italic font-serif">
+                <p className="text-xs text-eve-gold/80 mb-0.5 italic font-serif">
                   Eve narrates your evening
                 </p>
-                <p className="text-[14px] text-eve-cream/85 italic font-serif leading-snug line-clamp-2">
+                <p className="text-[0.875rem] text-eve-cream/85 italic font-serif leading-snug line-clamp-2">
                   {narrationText_}
                 </p>
               </div>
@@ -2636,7 +2610,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
         )}
 
         <div className="mt-8 max-w-2xl mx-auto">
-          <p className="text-center text-[12px] text-eve-gold/75 mb-3 italic font-serif">
+          <p className="text-center text-mg-2xs text-eve-gold/75 mb-3 italic font-serif">
             Ask Eve anything about your evening
           </p>
           {chatHistory.length > 0 && (
@@ -2644,7 +2618,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
               {chatHistory.map((m, i) =>
                 m.role === 'eve' && m.ai ? (
                   <div key={i} className="flex items-start gap-1">
-                    <div className="flex-1 min-w-0 px-4 py-3 rounded-2xl text-[14px] leading-relaxed bg-eve-rose/10 border border-eve-rose/20 text-eve-cream/95 italic font-serif">
+                    <div className="flex-1 min-w-0 px-4 py-3 rounded-2xl text-[0.875rem] leading-relaxed bg-eve-rose/10 border border-eve-rose/20 text-eve-cream/95 italic font-serif">
                       {m.text}
                     </div>
                     <ReportContentButton app="eve" kind="chat" label="Report Eve’s reply" content={`Eve replied: "${m.text}"`} className="mt-1.5" />
@@ -2652,7 +2626,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                 ) : (
                   <div
                     key={i}
-                    className={`px-4 py-3 rounded-2xl text-[14px] leading-relaxed ${
+                    className={`px-4 py-3 rounded-2xl text-[0.875rem] leading-relaxed ${
                       m.role === 'user'
                         ? 'bg-white/[0.06] text-eve-cream ml-8 text-right'
                         : 'bg-eve-rose/10 border border-eve-rose/20 text-eve-cream/95 mr-8 italic font-serif'
@@ -2673,7 +2647,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
               placeholder='e.g. "swap dessert for live music" or "make it walking only"'
               aria-label="Ask Eve to change the evening"
               disabled={refining}
-              className="flex-1 px-5 py-3.5 rounded-full bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-[15px] disabled:opacity-50"
+              className="flex-1 px-5 py-3.5 rounded-full bg-white/5 border border-white/10 focus:border-eve-gold focus:outline-none transition-colors text-[0.9375rem] disabled:opacity-50"
             />
             <button
               onClick={sendChat}
@@ -2687,9 +2661,9 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
         </div>
       </main>
 
-      <footer className="text-center py-6 text-[11px] text-white/55 italic font-serif">
-        Eve · Yours, quietly
-      </footer>
+      <AppFooter className="py-6">
+        <p className="text-xs text-white/55 italic font-serif">Eve · Yours, quietly</p>
+      </AppFooter>
     </div>
   );
 }

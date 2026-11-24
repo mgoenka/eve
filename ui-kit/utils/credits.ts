@@ -106,6 +106,16 @@ export interface CreditsState {
   owner: boolean;
   /** A payment is pending at the provider. */
   pending: boolean;
+  /** The balance answer arrived at least once (enabled or not). */
+  loaded: boolean;
+  /** The wallet has bought Sparks before. */
+  paid: boolean;
+  /** New wallet: the starter Sparks (in `balance`) are granted on its first AI action. */
+  starterPending: boolean;
+  /** Free starter Sparks are paused for today (global daily allowance used up). */
+  starterPaused: boolean;
+  /** This network (IP address) already used its free starter Sparks. */
+  starterLimited: boolean;
 }
 
 let state: CreditsState = {
@@ -122,6 +132,11 @@ let state: CreditsState = {
   checkout: true,
   provider: null,
   owner: false,
+  loaded: false,
+  paid: false,
+  starterPending: false,
+  starterPaused: false,
+  starterLimited: false,
 };
 const listeners = new Set<() => void>();
 function setState(patch: Partial<CreditsState>) {
@@ -141,11 +156,30 @@ function readBalanceHeader(res: Response) {
   if (v !== null && /^-?\d+$/.test(v)) setState({ balance: Number(v) });
 }
 
-/** Re-read the balance (and pack list) from the server. No-op when credits are off. */
-export async function refreshCredits(): Promise<void> {
-  if (!creditsEnabled()) return;
+let refreshing: Promise<void> | null = null;
+/** Re-read the balance (and pack list) from the server. No-op when credits are off. Concurrent calls share one request. */
+export function refreshCredits(): Promise<void> {
+  if (!creditsEnabled()) return Promise.resolve();
+  refreshing ??= loadBalance().finally(() => {
+    refreshing = null;
+  });
+  return refreshing;
+}
+
+async function loadBalance(): Promise<void> {
   try {
-    const r = await fetchJson<{ enforced?: boolean; balance?: number; packs?: CreditsState['packs']; checkout?: boolean; provider?: string; owner?: boolean }>(CREDITS_BALANCE_URL, {
+    const r = await fetchJson<{
+      enforced?: boolean;
+      balance?: number;
+      packs?: CreditsState['packs'];
+      checkout?: boolean;
+      provider?: string;
+      owner?: boolean;
+      paid?: boolean;
+      starterPending?: boolean;
+      starterPaused?: boolean;
+      starterLimited?: boolean;
+    }>(CREDITS_BALANCE_URL, {
       headers: creditsHeaders(),
       timeoutMs: 10000,
       retries: 1,
@@ -158,9 +192,14 @@ export async function refreshCredits(): Promise<void> {
         ...(typeof r.checkout === 'boolean' ? { checkout: r.checkout } : {}),
         ...(r.provider === 'play' || r.provider === 'stripe' ? { provider: r.provider } : {}),
         owner: r.owner === true,
+        loaded: true,
+        paid: r.paid === true,
+        starterPending: r.starterPending === true,
+        starterPaused: r.starterPaused === true,
+        starterLimited: r.starterLimited === true,
       });
-    } else if (r && r.enforced === false && state.enabled) {
-      setState({ enabled: false, sheetOpen: false }); // web switch turned off
+    } else if (r && r.enforced === false) {
+      setState({ loaded: true, ...(state.enabled ? { enabled: false, sheetOpen: false } : {}) }); // web switch off
     }
   } catch {
     /* keep the last known balance */
@@ -206,8 +245,90 @@ export function isInsufficientCredits(err: unknown): boolean {
 }
 
 export interface AiFetchJsonOptions extends FetchJsonOptions {
-  /** Open the "Get Sparks" sheet on 402 (default true). Pass false for background calls (auto-naming…). */
+  /**
+   * 'action' (default): the user asked for this (a tap) — a 402 opens the "Get Sparks" sheet, ai_busy shows a toast.
+   * 'background': speculative / automatic calls (loading tips, prefetch, auto-naming) — never opens the sheet,
+   * never toasts; the caller falls back quietly. Gate them with speculativeAiAllowed().
+   */
+  ai?: 'action' | 'background';
+  /** Open the "Get Sparks" sheet on 402 (default: true for ai 'action', false for 'background'). */
   creditsSheet?: boolean;
+  /** Toast "Lots of people are using this right now…" on HTTP 503 ai_busy (default: as creditsSheet). Pass false when the app shows its own message. */
+  toastOnBusy?: boolean;
+}
+
+/** JSON `error` code of the server's HTTP 503 when Gemini is overloaded (server/ai-guard.ts sendAiBusy). */
+export const AI_BUSY = 'ai_busy';
+
+/** Thrown by aiFetchJson on HTTP 503 ai_busy (still a FetchError: status 503, body from the server). */
+export class AiBusyError extends FetchError {
+  /** Seconds the server asked to wait (Retry-After), at least 1. */
+  readonly retryAfter: number;
+  constructor(err: FetchError, retryAfter: number) {
+    super('http', busyMessage(retryAfter), { status: err.status, url: err.url, body: err.body, attempts: err.attempts });
+    this.name = 'AiBusyError';
+    this.retryAfter = retryAfter;
+  }
+}
+
+/** True for an AI call refused because the AI is overloaded right now (fall back to bundled content, or retry later). */
+export function isAiBusyError(err: unknown): err is AiBusyError {
+  return err instanceof AiBusyError || (err instanceof FetchError && err.status === 503 && (err.body as { error?: unknown } | null)?.error === AI_BUSY);
+}
+
+const busyMessage = (s: number) => `Lots of people are using this right now. Try again in ${s} second${s === 1 ? '' : 's'}.`;
+
+function toBusyError(err: unknown, retryHeader: string | null): AiBusyError | null {
+  if (!(err instanceof FetchError) || err.status !== 503 || (err.body as { error?: unknown } | null)?.error !== AI_BUSY) return null;
+  const fromBody = Number((err.body as { retryAfter?: unknown }).retryAfter);
+  const fromHeader = Number(retryHeader);
+  const s = Number.isFinite(fromBody) && fromBody > 0 ? fromBody : Number.isFinite(fromHeader) && fromHeader > 0 ? fromHeader : 10;
+  return new AiBusyError(err, Math.max(1, Math.min(600, Math.round(s))));
+}
+
+/**
+ * May the app make an AI call the user didn't ask for (loading tips, prefetching the next round)? Such calls spend
+ * Sparks, so: on the website only while the web is free (switch off) or the balance is above 0; in the Android app
+ * only for owners, paying users, or with at least 50 Sparks. Unknown balance (not loaded yet): false.
+ */
+/**
+ * Resolves once the balance answer has arrived (so speculativeAiAllowed() knows), at once on pages without credits,
+ * and after `timeoutMs` (default 8 s) at the latest — it never rejects. Starts the balance request if none is running.
+ */
+export function whenCreditsLoaded(timeoutMs = 8000): Promise<void> {
+  if (state.loaded || !creditsEnabled()) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const done = () => {
+      clearTimeout(t);
+      unsub();
+      resolve();
+    };
+    const t = setTimeout(done, timeoutMs);
+    const unsub = subscribeCredits(() => {
+      if (state.loaded) done();
+    });
+    void refreshCredits().then(() => {
+      if (state.loaded) done();
+    });
+  });
+}
+
+/** speculativeAiAllowed() after waiting for the balance (whenCreditsLoaded): `if (await speculativeAiAllowedAsync()) loadTips();` */
+export async function speculativeAiAllowedAsync(timeoutMs?: number): Promise<boolean> {
+  await whenCreditsLoaded(timeoutMs);
+  return speculativeAiAllowed();
+}
+
+export function speculativeAiAllowed(): boolean {
+  const s = state;
+  if (isNativeApp()) {
+    if (!creditsEnabled() || !s.loaded) return false;
+    return s.owner || s.paid || (s.balance ?? 0) >= 50;
+  }
+  if (!creditsEnabled()) return true; // not a metered page: AI is free here
+  if (!s.loaded) return false;
+  if (!s.enabled) return true; // web switch off: the website is free
+  return s.owner || (s.balance ?? 0) > 0;
 }
 
 /**
@@ -216,27 +337,19 @@ export interface AiFetchJsonOptions extends FetchJsonOptions {
  * When credits are off (the website today) it is exactly fetchJson.
  */
 export async function aiFetchJson<T = unknown>(url: string, options: AiFetchJsonOptions = {}): Promise<T> {
-  const { creditsSheet = true, ...fetchOptions } = options;
-  if (!creditsEnabled()) {
-    try {
-      return await fetchJson<T>(url, fetchOptions);
-    } catch (err) {
-      // An Android build from before AI credits (no app user id): the server answers 426.
-      if (err instanceof FetchError && err.status === 426) {
-        showToast({ message: 'Update the app from Google Play to use this feature.', tone: 'info' });
-      }
-      throw err;
-    }
-  }
-  const headers = new Headers(fetchOptions.headers);
-  for (const [k, v] of Object.entries(creditsHeaders())) headers.set(k, v);
+  const { ai = 'action', creditsSheet = ai !== 'background', toastOnBusy = creditsSheet && ai !== 'background', ...fetchOptions } = options;
+  let retryHeader: string | null = null;
   const userHook = fetchOptions.onResponse;
+  const metered = creditsEnabled();
+  const headers = new Headers(fetchOptions.headers);
+  if (metered) for (const [k, v] of Object.entries(creditsHeaders())) headers.set(k, v);
   const call = () =>
     fetchJson<T>(url, {
       ...fetchOptions,
       headers,
       onResponse: (res) => {
-        readBalanceHeader(res);
+        retryHeader = res.headers.get('Retry-After');
+        if (metered) readBalanceHeader(res);
         userHook?.(res);
       },
     });
@@ -244,12 +357,21 @@ export async function aiFetchJson<T = unknown>(url: string, options: AiFetchJson
     try {
       return await call();
     } catch (err) {
-      if (!isWalletRequired(err)) throw err;
+      if (!metered || !isWalletRequired(err)) throw err;
       await refreshCredits(); // sets the wallet cookie (and shows the chip), then try once more
       return await call();
     }
   } catch (err) {
-    if (isInsufficientCredits(err)) {
+    const busy = toBusyError(err, retryHeader);
+    if (busy) {
+      if (toastOnBusy) showToast({ id: 'mg-ai-busy', tone: 'info', message: busy.message });
+      throw busy;
+    }
+    // An Android build from before AI credits (no app user id): the server answers 426.
+    if (!metered && err instanceof FetchError && err.status === 426) {
+      showToast({ message: 'Update the app from Google Play to use this feature.', tone: 'info' });
+    }
+    if (metered && isInsufficientCredits(err)) {
       const body = (err as FetchError).body as { balance?: unknown; needed?: unknown };
       if (typeof body.balance === 'number') setState({ balance: body.balance });
       if (creditsSheet) openCreditsSheet('insufficient', typeof body.needed === 'number' ? body.needed : null);
@@ -377,7 +499,7 @@ export function initCredits(): void {
   started = true;
   provider.start({
     credited: ({ credited, balance }) => {
-      setState({ pending: false, buying: null, ...(typeof balance === 'number' ? { balance } : {}) });
+      setState({ pending: false, buying: null, ...(typeof balance === 'number' ? { balance } : {}), ...(credited > 0 ? { paid: true } : {}) });
       if (credited > 0) {
         showToast({ id: 'mg-credits-added', tone: 'success', message: `+${credited.toLocaleString()} Sparks added. Thank you!` });
         if (state.sheetReason === 'insufficient') closeCreditsSheet();

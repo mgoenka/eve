@@ -51,7 +51,9 @@ let info: LocalAiInfo = { state: 'unsupported', engine: null, image: false, maxO
 let probing: Promise<LocalAiInfo> | null = null;
 
 function set(patch: Partial<LocalAiInfo>) {
-  info = { ...info, ...patch };
+  const next = { ...info, ...patch };
+  if ((Object.keys(next) as Array<keyof LocalAiInfo>).every((k) => next[k] === info[k])) return;
+  info = next;
   listeners.forEach((l) => l());
 }
 
@@ -64,6 +66,20 @@ export function subscribeLocalAi(l: Listener): () => void {
     listeners.delete(l);
   };
 }
+let settingWanted = false;
+/**
+ * The app has AI features: SettingsSheet then shows the "Use this device's AI" switch. Called by AiCreditsHost
+ * (every app with Sparks) and by the local-AI helpers when a feature uses them; call it yourself to show the switch
+ * in an app with neither.
+ */
+export function enableLocalAiSetting(): void {
+  settingWanted = true;
+}
+/** True once enableLocalAiSetting() ran (see there). */
+export function localAiSettingEnabled(): boolean {
+  return settingWanted;
+}
+
 /** The user setting (Settings → "Use this device's AI"). Default on. */
 export function localAiEnabled(): boolean {
   return getSettings().onDeviceAi !== false;
@@ -73,6 +89,14 @@ export function localAiEnabled(): boolean {
 interface LmSession {
   prompt(input: unknown, opts?: { responseConstraint?: unknown; signal?: AbortSignal }): Promise<string>;
   destroy(): void;
+  /** Chrome 142+: tokens the session can hold, tokens used so far (system prompt), and a dry-run count. */
+  contextWindow?: number;
+  contextUsage?: number;
+  measureContextUsage?(input: unknown, opts?: { responseConstraint?: unknown; signal?: AbortSignal }): Promise<number> | number;
+  /** Older Chrome names for the same thing. */
+  inputQuota?: number;
+  inputUsage?: number;
+  measureInputUsage?(input: unknown, opts?: { responseConstraint?: unknown; signal?: AbortSignal }): Promise<number> | number;
 }
 interface LmStatic {
   availability(opts?: unknown): Promise<'unavailable' | 'downloadable' | 'downloading' | 'available'>;
@@ -82,25 +106,81 @@ const lm = (): LmStatic | null => {
   const g = globalThis as unknown as { LanguageModel?: LmStatic };
   return g.LanguageModel && typeof g.LanguageModel.availability === 'function' ? g.LanguageModel : null;
 };
+/** Output the browser engine is assumed to manage in one call (Gemini Nano / Phi); the Prompt API has no output cap. */
+const BROWSER_MAX_OUTPUT = 4000;
+/** LanguageModel.create() can hang while the model loads; give up after this and use the server. */
+const CREATE_TIMEOUT_MS = 20_000;
 const TEXT_IO = { expectedInputs: [{ type: 'text', languages: ['en'] }], expectedOutputs: [{ type: 'text', languages: ['en'] }] };
 const IMAGE_IO = { expectedInputs: [{ type: 'text', languages: ['en'] }, { type: 'image' }], expectedOutputs: [{ type: 'text', languages: ['en'] }] };
 
 // ---- android engine (wrapper bridge) ---------------------------------------------------------------------
+interface AndroidLlmRequest {
+  system?: string | undefined;
+  prompt: string;
+  /** Data URL or Blob; the shim downsizes it to a ≤1024 px JPEG (wrapper builds whose status reports image: true). */
+  image?: Blob | string | undefined;
+  temperature?: number | undefined;
+  maxOutputTokens?: number | undefined;
+  /** Native deadline (the wrapper clamps it to 5-120 s and replies error 'timeout'). Older wrappers ignore it. */
+  timeoutMs?: number | undefined;
+  /** Aborting it cancels the native call (MGNativeAndroid.llmCancel) and the reply is error 'aborted'. */
+  signal?: AbortSignal | undefined;
+}
+type AndroidLlmReply = { ok: boolean; text?: string; error?: string };
 interface AndroidLlm {
   status(): Promise<{ status: number; image?: boolean; maxOutputTokens?: number }>;
   download(onProgress?: (p: number | null) => void): Promise<boolean>;
-  generate(req: { system?: string; prompt: string; image?: string; temperature?: number; maxOutputTokens?: number }): Promise<{ ok: boolean; text?: string; error?: string }>;
+  generate(req: AndroidLlmRequest): Promise<AndroidLlmReply>;
 }
 const android = (): AndroidLlm | null => {
   const g = globalThis as unknown as { MGLocalAI?: AndroidLlm };
   return g.MGLocalAI && typeof g.MGLocalAI.status === 'function' ? g.MGLocalAI : null;
 };
+
 const ANDROID_STATES: LocalAiState[] = ['unavailable', 'downloadable', 'downloading', 'available'];
 
-/** Detects the engine and its state. Cheap; cached until refresh is forced. */
+const abortError = () => new DOMException('Aborted', 'AbortError');
+const isAbort = (e: unknown) => (e as { name?: string } | null)?.name === 'AbortError';
+
+/**
+ * One Android generation through the wrapper's shim. Our own controller (caller's signal + the timeout) goes to
+ * the shim, which cancels the native call when it fires (wrapper builds with llmCancel); for older wrappers the
+ * JS timer alone gives up. Rejects local_ai_timeout or AbortError; resolves the reply otherwise.
+ */
+async function androidGenerate(req: AndroidLlmRequest, ms: number, signal?: AbortSignal): Promise<AndroidLlmReply> {
+  if (signal?.aborted) throw abortError();
+  const ctl = new AbortController();
+  const onAbort = () => ctl.abort();
+  signal?.addEventListener('abort', onAbort, { once: true });
+  try {
+    // The wrapper enforces `timeoutMs` natively (reply 'timeout'); the JS timer is the backstop for older wrappers.
+    const r = await withTimeout(android()!.generate({ ...req, timeoutMs: ms, signal: ctl.signal }), ms + 2000, ctl);
+    if (signal?.aborted) throw abortError();
+    if (!r.ok && (r.error === 'timeout' || r.error === 'aborted' || r.error === 'cancelled')) throw new Error('local_ai_timeout');
+    return r;
+  } catch (e) {
+    throw signal?.aborted ? abortError() : e;
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
+  }
+}
+
+let probed = false;
+let probeDone = false;
+let probedAt = 0;
+/** Other states than 'available' are re-checked after this (phones without AICore must not pay a probe per call). */
+const RECHECK_MS = 45_000;
+/**
+ * Detects the engine and its state. Cheap. Lazy: nothing is probed until a feature, the setting or the Sparks
+ * sheet asks. 'available' is cached for the session; any other state for 45 s (a download may finish), and
+ * again when the page becomes visible or the setting is turned on. `force` always probes again.
+ */
 export function refreshLocalAi(force = false): Promise<LocalAiInfo> {
-  if (probing && !force) return probing;
-  probing = (async () => {
+  if (probing && !force && (!probeDone || info.state === 'available' || Date.now() - probedAt < RECHECK_MS)) return probing;
+  probed = true;
+  probeDone = false;
+  probedAt = Date.now();
+  const p: Promise<LocalAiInfo> = (async () => {
     try {
       const a = android();
       if (a) {
@@ -111,10 +191,11 @@ export function refreshLocalAi(force = false): Promise<LocalAiInfo> {
       }
       const L = lm();
       if (L) {
-        const state = await L.availability(TEXT_IO);
+        // Chrome may reject (and log) when it can't create a text session on this device: that just means "unavailable".
+        const state = await L.availability(TEXT_IO).catch(() => 'unavailable' as const);
         let image = false;
         if (state === 'available') image = (await L.availability(IMAGE_IO).catch(() => 'unavailable')) === 'available';
-        set({ state, engine: state === 'unavailable' ? null : 'browser', image, maxOutputTokens: 4000 });
+        set({ state, engine: state === 'unavailable' ? null : 'browser', image, maxOutputTokens: BROWSER_MAX_OUTPUT });
         return info;
       }
       set({ state: 'unsupported', engine: null });
@@ -122,8 +203,14 @@ export function refreshLocalAi(force = false): Promise<LocalAiInfo> {
       set({ state: 'unavailable', engine: null });
     }
     return info;
-  })();
-  return probing;
+  })().finally(() => {
+    if (probing === p) {
+      probeDone = true;
+      probedAt = Date.now();
+    }
+  });
+  probing = p;
+  return p;
 }
 
 /**
@@ -176,48 +263,88 @@ function withTimeout<T>(p: Promise<T>, ms: number, ctl?: AbortController): Promi
   });
 }
 
-const blobToDataUrl = (b: Blob) =>
-  new Promise<string>((resolve, reject) => {
-    const fr = new FileReader();
-    fr.onload = () => resolve(String(fr.result));
-    fr.onerror = () => reject(new Error('read failed'));
-    fr.readAsDataURL(b);
-  });
-
-/** One prompt on the device's model. Throws when no engine is ready or the engine fails. */
+/**
+ * One prompt on the device's model. Throws when no engine is ready, the input doesn't fit, the engine fails or
+ * it takes longer than `timeoutMs` (`local_ai_timeout`). An aborted `signal` rejects with an AbortError.
+ */
 export async function localPrompt(o: LocalPromptOptions): Promise<string> {
+  settingWanted = true;
+  if (o.signal?.aborted) throw abortError();
   const cur = await refreshLocalAi();
   if (cur.state !== 'available' || !cur.engine) throw new Error('local_ai_unavailable');
   if (o.image && !cur.image) throw new Error('local_ai_no_image');
   const ms = o.timeoutMs ?? 60_000;
   if (cur.engine === 'android') {
     const schemaHint = o.schema ? '\n\nReply with ONLY JSON (no code fences) matching this JSON Schema:\n' + JSON.stringify(o.schema) : '';
-    const r = await withTimeout(
-      android()!.generate({
+    const r = await androidGenerate(
+      {
         system: o.system,
         prompt: o.prompt + schemaHint,
-        image: o.image ? await blobToDataUrl(o.image) : undefined,
+        image: o.image ?? undefined,
         temperature: o.temperature,
         maxOutputTokens: Math.min(o.maxOutputTokens ?? cur.maxOutputTokens, cur.maxOutputTokens),
-      }),
+        timeoutMs: ms,
+      },
       ms,
+      o.signal,
     );
     if (!r.ok || typeof r.text !== 'string') throw new Error(r.error || 'local_ai_failed');
     return r.text;
   }
   const L = lm()!;
   const ctl = new AbortController();
-  if (o.signal) o.signal.addEventListener('abort', () => ctl.abort(), { once: true });
-  const session = await L.create({
-    ...(o.image ? IMAGE_IO : TEXT_IO),
-    initialPrompts: o.system ? [{ role: 'system', content: o.system }] : undefined,
-    signal: ctl.signal,
-  });
+  const onAbort = () => ctl.abort();
+  if (o.signal?.aborted) ctl.abort();
+  else o.signal?.addEventListener('abort', onAbort, { once: true });
   try {
-    const input = o.image ? [{ role: 'user', content: [{ type: 'text', value: o.prompt }, { type: 'image', value: o.image }] }] : o.prompt;
-    return await withTimeout(session.prompt(input, { responseConstraint: o.schema, signal: ctl.signal }), ms, ctl);
+    const created = L.create({
+      ...(o.image ? IMAGE_IO : TEXT_IO),
+      initialPrompts: o.system ? [{ role: 'system', content: o.system }] : undefined,
+      signal: ctl.signal,
+    });
+    let session: LmSession;
+    try {
+      session = await withTimeout(created, Math.min(CREATE_TIMEOUT_MS, ms), ctl);
+    } catch (e) {
+      void created.then((s) => s.destroy(), () => {});
+      throw o.signal?.aborted ? abortError() : e;
+    }
+    try {
+      const input = o.image ? [{ role: 'user', content: [{ type: 'text', value: o.prompt }, { type: 'image', value: o.image }] }] : o.prompt;
+      if (!(await fitsContext(session, input, o))) throw new Error('local_ai_too_long');
+      return await withTimeout(session.prompt(input, { responseConstraint: o.schema, signal: ctl.signal }), ms, ctl);
+    } finally {
+      session.destroy();
+    }
   } finally {
-    session.destroy();
+    o.signal?.removeEventListener('abort', onAbort);
+  }
+}
+
+/**
+ * Will the prompt (plus the caller's maxOutputTokens, when given) fit in the session's context window?
+ * Chrome 142+: measureContextUsage / contextWindow / contextUsage; older: measureInputUsage / inputQuota / inputUsage.
+ * Unknown (API missing or measuring fails): assume it fits and let the engine decide.
+ */
+async function fitsContext(session: LmSession, input: unknown, o: LocalPromptOptions): Promise<boolean> {
+  try {
+    const opts = o.schema ? { responseConstraint: o.schema } : undefined;
+    let used = 0;
+    let size: number | undefined;
+    let window: number | undefined;
+    if (typeof session.measureContextUsage === 'function' && typeof session.contextWindow === 'number') {
+      size = await session.measureContextUsage(input, opts);
+      window = session.contextWindow;
+      used = session.contextUsage ?? 0;
+    } else if (typeof session.measureInputUsage === 'function' && typeof session.inputQuota === 'number') {
+      size = await session.measureInputUsage(input, opts);
+      window = session.inputQuota;
+      used = session.inputUsage ?? 0;
+    }
+    if (typeof size !== 'number' || typeof window !== 'number' || !Number.isFinite(window)) return true;
+    return used + size + (o.maxOutputTokens ?? 0) <= window;
+  } catch {
+    return true;
   }
 }
 
@@ -244,20 +371,23 @@ export function parseLooseJson(text: string): unknown {
 }
 
 /**
- * JSON from the device's model, checked by `validate` (return null to reject). Retries once on bad output.
- * Resolves null instead of throwing, so callers can fall back to the server.
+ * JSON from the device's model, checked by `validate` (return null to reject). Tries again only when the output
+ * fails validation (`attempts`, default 2); a timeout or an engine error (busy, battery quota, app in the
+ * background…) resolves null at once, so callers fall back to the server without waiting twice.
+ * An aborted `signal` rejects with an AbortError (never null: an aborted request must not go to the server).
  */
 export async function localJson<T>(o: LocalPromptOptions & { validate: (v: unknown) => T | null; attempts?: number }): Promise<T | null> {
   const attempts = o.attempts ?? 2;
   for (let i = 0; i < attempts; i++) {
+    let text: string;
     try {
-      const text = await localPrompt(o);
-      const v = o.validate(parseLooseJson(text));
-      if (v != null) return v;
+      text = await localPrompt(o);
     } catch (e) {
-      const msg = (e as Error)?.message || '';
-      if (msg === 'local_ai_unavailable' || msg === 'local_ai_no_image' || (e as Error)?.name === 'AbortError') return null;
+      if (o.signal?.aborted) throw isAbort(e) ? e : abortError();
+      return null;
     }
+    const v = o.validate(parseLooseJson(text));
+    if (v != null) return v;
   }
   return null;
 }
@@ -271,10 +401,13 @@ export interface RunLocalFirstOptions<T> {
   minOutputTokens?: number;
   /** The feature sends an image. */
   needsImage?: boolean;
+  /** The caller's AbortSignal: once aborted, neither path runs any more and the AbortError is rethrown. */
+  signal?: AbortSignal;
 }
 
 /** Can this feature run on the device right now? (Setting on, engine ready, big enough.) */
 export async function canRunLocally(o: { minOutputTokens?: number; needsImage?: boolean } = {}): Promise<boolean> {
+  settingWanted = true;
   if (!localAiEnabled()) return false;
   const cur = await refreshLocalAi();
   if (cur.state !== 'available') return false;
@@ -285,6 +418,7 @@ export async function canRunLocally(o: { minOutputTokens?: number; needsImage?: 
 
 /** Runs a feature on the device when possible (free), otherwise on the server (Sparks). */
 export async function runLocalFirst<T>(o: RunLocalFirstOptions<T>): Promise<T> {
+  if (o.signal?.aborted) throw abortError();
   if (await canRunLocally(o)) {
     try {
       const v = await o.local();
@@ -292,17 +426,27 @@ export async function runLocalFirst<T>(o: RunLocalFirstOptions<T>): Promise<T> {
         set({ freeRuns: info.freeRuns + 1 });
         return v;
       }
-    } catch {
-      /* fall back to the server */
+    } catch (e) {
+      // An aborted request never falls back to the paid server call. Any other failure (even an AbortError the
+      // engine raised by itself) falls back to the server.
+      if (o.signal?.aborted) throw isAbort(e) ? e : abortError();
     }
   }
+  if (o.signal?.aborted) throw abortError();
   return o.server();
 }
 
 if (typeof window !== 'undefined') {
-  // Probe once the page is idle, and again if the setting is turned back on.
-  setTimeout(() => void refreshLocalAi(), 1500);
+  // No probe on load (it is lazy). Once something has asked: check again when the setting is turned back on,
+  // and when the page becomes visible again (a download may have finished meanwhile), at most every 30 s.
   subscribeSettings(() => {
-    if (localAiEnabled()) void refreshLocalAi(true);
+    if (probed && localAiEnabled()) void refreshLocalAi(true);
+  });
+  let lastVisible = Date.now();
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible' || !probed || !localAiEnabled()) return;
+    if (Date.now() - lastVisible < 30_000) return;
+    lastVisible = Date.now();
+    void refreshLocalAi(true);
   });
 }

@@ -30,6 +30,7 @@ import {
 import { createCredits, costOfCall } from './server/credits/index.ts';
 import type { Meter } from './server/credits/index.ts';
 import { cloudTtsUsage, recordCloudTts, recordGemini, withMeter } from './server/aiMeter.ts';
+import { guardedCall, isAiBusy, sendAiBusy } from './server/ai-guard.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -108,6 +109,12 @@ function jsonError(res: express.Response, code: number, message: string) {
     message = 'Eve couldn\u2019t finish that just now. Please try again.';
   }
   res.status(code).json({ error: message });
+}
+
+/** Error answer for an AI route: Gemini busy / out of quota is a 503 + Retry-After, the rest a generic 500. */
+function aiFailed(res: express.Response, err: any, label: string) {
+  if (isAiBusy(err)) return sendAiBusy(res, err);
+  jsonError(res, 500, `${label}: ${err?.message || 'unknown'}`);
 }
 
 // ---------- Input validation ----------
@@ -225,14 +232,17 @@ function imagePart(mimeType: string, data: string) {
 
 // ---------- Gemini call helpers (cost + speed guards) ----------
 //
-// Every text call gets a hard timeout, bounded SDK retries, a maxOutputTokens
-// ceiling and the lowest thinking level. Thinking tokens count toward
+// Every text call gets a hard timeout, at most one SDK retry (transient 5xx /
+// network only), a maxOutputTokens ceiling and the lowest thinking level.
+// Each call goes through ai-guard (per-instance concurrency cap + circuit
+// breaker): 429 / 503 / RESOURCE_EXHAUSTED is never retried, it throws
+// AiBusyError and the route answers 503 + Retry-After. Thinking tokens count toward
 // maxOutputTokens, so the ceilings are generous enough that JSON never gets
 // cut off mid-object.
 const TEXT_TIMEOUT_MS = 25_000;
 const GROUNDED_TIMEOUT_MS = 40_000;
 const IMAGE_TIMEOUT_MS = 55_000;
-const RETRY = { attempts: 2 };
+const RETRY = { attempts: 2, httpStatusCodes: [500, 502, 504] };
 
 // If the model behind gemini-flash-latest ever rejects thinkingLevel, stop
 // sending it instead of failing every request.
@@ -257,11 +267,13 @@ async function generateText(opts: {
   }
   if (thinkingLevelSupported) {
     try {
-      const response = await ai.models.generateContent({
-        model: TEXT_MODEL,
-        contents: opts.contents,
-        config: { ...config, thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } },
-      });
+      const response = await guardedCall(() =>
+        ai.models.generateContent({
+          model: TEXT_MODEL,
+          contents: opts.contents,
+          config: { ...config, thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } },
+        })
+      );
       recordGemini(response, TEXT_MODEL); // AI credits: no-op unless a paying app request
       return response;
     } catch (err: any) {
@@ -270,7 +282,7 @@ async function generateText(opts: {
       console.warn(`thinkingLevel rejected by ${TEXT_MODEL}; continuing without it`);
     }
   }
-  const response = await ai.models.generateContent({ model: TEXT_MODEL, contents: opts.contents, config });
+  const response = await guardedCall(() => ai.models.generateContent({ model: TEXT_MODEL, contents: opts.contents, config }));
   recordGemini(response, TEXT_MODEL);
   return response;
 }
@@ -292,14 +304,16 @@ interface GeneratedImage {
 
 async function generateImage(prompt: string): Promise<GeneratedImage | null> {
   if (!ai) throw new Error('GEMINI_API_KEY not configured');
-  const response = await ai.models.generateContent({
-    model: IMAGE_MODEL,
-    contents: prompt,
-    config: {
-      responseModalities: ['TEXT', 'IMAGE'],
-      httpOptions: { timeout: IMAGE_TIMEOUT_MS, retryOptions: RETRY },
-    },
-  });
+  const response = await guardedCall(() =>
+    ai.models.generateContent({
+      model: IMAGE_MODEL,
+      contents: prompt,
+      config: {
+        responseModalities: ['TEXT', 'IMAGE'],
+        httpOptions: { timeout: IMAGE_TIMEOUT_MS, retryOptions: RETRY },
+      },
+    })
+  );
   recordGemini(response, IMAGE_MODEL);
   const parts = response.candidates?.[0]?.content?.parts || [];
   for (const p of parts as Array<any>) {
@@ -310,8 +324,36 @@ async function generateImage(prompt: string): Promise<GeneratedImage | null> {
   return null;
 }
 
+// Stop cards and Eve's avatar are shown at ~88px (at most a few hundred px on a TV), but the
+// model returns ~1.5 MB 1024px PNGs. Shrink them to a 512px WebP (~30-60 KB) before caching and
+// sending. If sharp can't load on this host, send the original rather than fail.
+const THUMB_PX = 512;
+type Sharp = typeof import('sharp');
+let sharpLib: Promise<Sharp | null> | null = null;
+function loadSharp() {
+  sharpLib ??= import('sharp').then((m) => ((m as { default?: Sharp }).default ?? (m as unknown as Sharp))).catch((err) => {
+    console.warn('sharp unavailable, sending full-size images:', err?.message || err);
+    return null;
+  });
+  return sharpLib;
+}
+async function toThumbnail(img: GeneratedImage): Promise<GeneratedImage> {
+  const sharp = await loadSharp();
+  if (!sharp) return img;
+  try {
+    const out = await sharp(Buffer.from(img.imageData, 'base64'))
+      .resize(THUMB_PX, THUMB_PX, { fit: 'cover', withoutEnlargement: true })
+      .webp({ quality: 78 })
+      .toBuffer();
+    return { imageData: out.toString('base64'), imageMime: 'image/webp' };
+  } catch (err: any) {
+    console.warn('thumbnail failed, sending full-size image:', err?.message || err);
+    return img;
+  }
+}
+
 // ---------- Server-side caches for identical requests ----------
-// Images are big (~1-2 MB of base64 each), so the image caches are bounded by
+// Content-pack images are big (~1-2 MB of base64 each; stop and avatar images are ~50 KB WebP), so the image caches are bounded by
 // bytes as well as entries to stay well inside a 512 MiB instance
 // (all caches together top out around 110 MB).
 const HOUR = 60 * 60 * 1000;
@@ -342,9 +384,7 @@ function imageBudget(req: express.Request) {
     b = { used: 0, resetAt: now + HOUR };
     imageBuckets.set(key, b);
   }
-  if (imageBuckets.size > 5000) {
-    for (const [k, v] of imageBuckets) if (v.resetAt <= now) imageBuckets.delete(k);
-  }
+  pruneBuckets(imageBuckets, now);
   return b;
 }
 
@@ -549,8 +589,32 @@ const ALLOWED_EVE_ORIGINS = new Set(['eve.mohitgoenka.com', 'localhost', '127.0.
 const PUBLIC_BASE_URL = process.env.NODE_ENV === 'production' ? 'https://eve.mohitgoenka.com' : `http://localhost:${PORT}`;
 const aiBuckets = new Map<string, { count: number; resetAt: number }>();
 
+/**
+ * Rate-limit key for a client. IPv4 as is; IPv6 by its /64 prefix, since one
+ * subscriber usually holds a whole /64 and could rotate through it.
+ */
 function clientIp(req: express.Request): string {
-  return req.ip || req.socket.remoteAddress || 'unknown';
+  return ipKey(req.ip || req.socket.remoteAddress || 'unknown');
+}
+
+export function ipKey(ip: string): string {
+  if (ip.startsWith('::ffff:') && ip.includes('.')) return ip.slice(7); // IPv4-mapped
+  if (!ip.includes(':')) return ip;
+  const [head, tail = ''] = ip.split('%')[0].split('::');
+  const h = head ? head.split(':') : [];
+  const t = tail ? tail.split(':') : [];
+  const groups = ip.includes('::') ? [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill('0'), ...t] : h;
+  return groups.slice(0, 4).map((g) => (parseInt(g, 16) || 0).toString(16)).join(':') + '::/64';
+}
+
+/** Keeps a per-client bucket map bounded: expired entries first, then the oldest. */
+function pruneBuckets(m: Map<string, { resetAt: number }>, now: number, max = 5000) {
+  if (m.size <= max) return;
+  for (const [k, v] of m) if (v.resetAt <= now) m.delete(k);
+  for (const k of m.keys()) {
+    if (m.size <= max) break;
+    m.delete(k);
+  }
 }
 
 function hostFrom(header: string | undefined): string | null {
@@ -582,9 +646,7 @@ function checkAiRateLimit(req: express.Request): boolean {
   const key = clientIp(req);
   const now = Date.now();
   const bucket = aiBuckets.get(key);
-  if (aiBuckets.size > 5000) {
-    for (const [k, v] of aiBuckets) if (v.resetAt <= now) aiBuckets.delete(k);
-  }
+  pruneBuckets(aiBuckets, now);
   if (!bucket || bucket.resetAt <= now) {
     aiBuckets.set(key, { count: 1, resetAt: now + 60_000 });
     return true;
@@ -670,7 +732,7 @@ app.post('/api/agent/run', metered('agent', estAgent, async (req, res) => {
     });
   } catch (err: any) {
     console.error('agent run failed:', err?.message || err);
-    jsonError(res, 500, `Agent run failed: ${err?.message || 'unknown'}`);
+    aiFailed(res, err, 'Agent run failed');
   }
 }));
 
@@ -698,7 +760,7 @@ app.post('/api/eve-intro', metered('intro', estIntro, async (req, res) => {
     res.json(cleanIntro(safeParseJson(response.text || '')));
   } catch (err: any) {
     console.error('eve-intro failed:', err?.message || err);
-    jsonError(res, 500, `Intro failed: ${err?.message || 'unknown'}`);
+    aiFailed(res, err, 'Intro failed');
   }
 }));
 
@@ -721,7 +783,7 @@ app.post('/api/eve-outro', metered('outro', estOutro, async (req, res) => {
     res.json({ outro });
   } catch (err: any) {
     console.error('eve-outro failed:', err?.message || err);
-    jsonError(res, 500, `Outro failed: ${err?.message || 'unknown'}`);
+    aiFailed(res, err, 'Outro failed');
   }
 }));
 
@@ -765,7 +827,7 @@ app.post('/api/eve-story', metered('story', estStory, async (req, res) => {
     res.json(parsed);
   } catch (err: any) {
     console.error('eve-story failed:', err?.message || err);
-    jsonError(res, 500, `Story failed: ${err?.message || 'unknown'}`);
+    aiFailed(res, err, 'Story failed');
   }
 }));
 
@@ -822,7 +884,7 @@ Return strict JSON only:
     res.json(parsed);
   } catch (err: any) {
     console.error('eve-refine failed:', err?.message || err);
-    jsonError(res, 500, `Refine failed: ${err?.message || 'unknown'}`);
+    aiFailed(res, err, 'Refine failed');
   }
 }));
 
@@ -877,7 +939,7 @@ app.post('/api/eve-parse-intent', metered('parse-intent', estParseIntent, async 
     res.json(parsed);
   } catch (err: any) {
     console.error('eve-parse-intent failed:', err?.message || err);
-    jsonError(res, 500, `Parse failed: ${err?.message || 'unknown'}`);
+    aiFailed(res, err, 'Parse failed');
   }
 }));
 
@@ -926,17 +988,18 @@ Strict constraints:
   if (!takeImages(req, res)) return;
 
   try {
-    const img = await generateImage(prompt);
-    if (!img) {
+    const raw = await generateImage(prompt);
+    if (!raw) {
       refundImages(req);
       return jsonError(res, 502, 'No avatar image returned');
     }
+    const img = await toThumbnail(raw);
     avatarCache.set(avatarKey, img);
     sendWithLimit(req, res, img);
   } catch (err: any) {
     refundImages(req);
     console.error('eve-avatar failed:', err?.message || err);
-    jsonError(res, 500, `Avatar failed: ${err?.message || 'unknown'}`);
+    aiFailed(res, err, 'Avatar failed');
   }
 }));
 
@@ -964,7 +1027,7 @@ app.post('/api/reverse-geocode', metered('reverse-geocode', estGeocode, async (r
     res.json({ city: place });
   } catch (err: any) {
     console.error('reverse-geocode failed:', err?.message || err);
-    jsonError(res, 500, `Geocode failed: ${err?.message || 'unknown'}`);
+    aiFailed(res, err, 'Geocode failed');
   }
 }));
 
@@ -1145,7 +1208,7 @@ Schema:
     res.json({ ...parsed, groundedSearchUsed, groundedSources });
   } catch (err: any) {
     console.error('plan-experience/skeleton failed:', err?.message || err);
-    jsonError(res, 500, `Skeleton failed: ${err?.message || 'unknown'}`);
+    aiFailed(res, err, 'Skeleton failed');
   }
 }));
 
@@ -1258,17 +1321,18 @@ CRITICAL composition rules:
 - Square aspect ratio. Subject extends to or is cropped by the edges of the frame.`;
 
   try {
-    const img = await generateImage(prompt);
-    if (!img) {
+    const raw = await generateImage(prompt);
+    if (!raw) {
       refundImages(req);
       return jsonError(res, 502, 'No image returned');
     }
+    const img = await toThumbnail(raw);
     stopImageCache.set(stopKey, img);
     sendWithLimit(req, res, img);
   } catch (err: any) {
     refundImages(req);
     console.error('stop-image failed:', err?.message || err);
-    jsonError(res, 500, `Stop image failed: ${err?.message || 'unknown'}`);
+    aiFailed(res, err, 'Stop image failed');
   }
 }));
 
@@ -1289,7 +1353,7 @@ app.post('/api/plan-experience/narration', metered('narration', estNarration, as
     res.json({ narration: text });
   } catch (err: any) {
     console.error('narration failed:', err?.message || err);
-    jsonError(res, 500, `Narration failed: ${err?.message || 'unknown'}`);
+    aiFailed(res, err, 'Narration failed');
   }
 }));
 
@@ -1355,7 +1419,7 @@ app.post('/api/content-pack', metered('content-pack', estContentPack, async (req
   } catch (err: any) {
     refundImages(req, PACK_IMAGES);
     console.error('content-pack/menu failed:', err?.message || err);
-    return jsonError(res, 500, `Copy generation failed: ${err?.message || 'unknown'}`);
+    return aiFailed(res, err, 'Copy generation failed');
   }
   if (!copyData) try {
     const str = { type: Type.STRING };
@@ -1387,7 +1451,7 @@ app.post('/api/content-pack', metered('content-pack', estContentPack, async (req
   } catch (err: any) {
     refundImages(req, PACK_IMAGES);
     console.error('content-pack/copy failed:', err?.message || err);
-    return jsonError(res, 500, `Copy generation failed: ${err?.message || 'unknown'}`);
+    return aiFailed(res, err, 'Copy generation failed');
   }
 
   const heroImagePrompt = `Editorial food photography of "${dishName}" at ${restaurantName}, a ${cuisine} restaurant.
@@ -1610,7 +1674,7 @@ Constraints:
     res.json(body);
   } catch (err: any) {
     console.error('suggest-special failed:', err?.message || err);
-    jsonError(res, 500, `Suggest failed: ${err?.message || 'unknown'}`);
+    aiFailed(res, err, 'Suggest failed');
   }
 }));
 
@@ -1652,7 +1716,7 @@ app.post('/api/post-special', async (req, res) => {
     });
     res.json({ ok: true, id });
   } catch (err: any) {
-    jsonError(res, 500, `post-special failed: ${err?.message || 'unknown'}`);
+    aiFailed(res, err, 'post-special failed');
   }
 });
 
@@ -1876,7 +1940,7 @@ app.post('/api/account/delete', async (req, res) => {
     bucket = { count: 0, resetAt: now + HOUR };
     deleteBuckets.set(ip, bucket);
   }
-  if (deleteBuckets.size > 5000) for (const [k, v] of deleteBuckets) if (v.resetAt <= now) deleteBuckets.delete(k);
+  pruneBuckets(deleteBuckets, now);
   if (++bucket.count > 10) {
     res.set('Retry-After', String(Math.ceil((bucket.resetAt - now) / 1000)));
     return jsonError(res, 429, 'Too many attempts. Please try again later.');
@@ -2164,7 +2228,7 @@ app.post('/api/tts', metered('tts', estTts, async (req, res) => {
     sendAudio(ttsJson.audioContent || '');
   } catch (err: any) {
     console.error('tts failed:', err?.message || err);
-    jsonError(res, 500, `TTS failed: ${err?.message || 'unknown'}`);
+    aiFailed(res, err, 'TTS failed');
   }
 }));
 
@@ -2206,6 +2270,20 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
   res.status(status).json({ error: status === 413 ? 'That request is too large.' : status < 500 ? 'Bad request.' : 'Something went wrong. Please try again.' });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Eve server on port ${PORT}`);
 });
+
+// Cloud Run sends SIGTERM before stopping an instance: stop accepting new
+// connections, let in-flight requests finish (up to 8 s), then exit.
+let shuttingDown = false;
+function shutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`${signal} received: draining requests`);
+  server.close(() => process.exit(0));
+  server.closeIdleConnections();
+  setTimeout(() => process.exit(0), 8_000).unref();
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

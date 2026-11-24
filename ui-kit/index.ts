@@ -3,7 +3,17 @@
 
 // components
 export { AppHeader } from './components/AppHeader';
-export type { AppHeaderProps } from './components/AppHeader';
+export type { AppHeaderProps, HeaderMenuItem } from './components/AppHeader';
+export { AppFooter } from './components/AppFooter';
+export type { AppFooterProps } from './components/AppFooter';
+export { StatusChip, RoomChip } from './components/StatusChip';
+export type { StatusChipProps, RoomChipProps, ChipTone } from './components/StatusChip';
+export { PlayerSetupRow } from './components/PlayerSetupRow';
+export type { PlayerSetupRowProps } from './components/PlayerSetupRow';
+export { GameHero } from './components/GameHero';
+export type { GameHeroProps } from './components/GameHero';
+export { InstallButton, installApp } from './components/InstallButton';
+export type { InstallButtonProps } from './components/InstallButton';
 export { Button, buttonVariants, buttonSizes } from './components/Button';
 export type { ButtonProps, ButtonVariant, ButtonSize } from './components/Button';
 export { IconButton } from './components/IconButton';
@@ -51,10 +61,12 @@ export { useOnline } from './hooks/useOnline';
 export { useWakeLock } from './hooks/useWakeLock';
 export { useLocalAi } from './hooks/useLocalAi';
 export { useSettings } from './hooks/useSettings';
+export { useInstallPrompt, promptInstall } from './hooks/useInstallPrompt';
+export type { InstallPromptState } from './hooks/useInstallPrompt';
 
 // utils
 export { cx } from './utils/cx';
-export { HUB_URL, HUB_LABEL, PRIVACY_URL, COPYRIGHT } from './utils/constants';
+export { HUB_URL, HUB_LABEL, PRIVACY_URL, TERMS_URL, COPYRIGHT } from './utils/constants';
 export { getSettings, setSettings, DEFAULT_SETTINGS, SETTINGS_KEY } from './utils/settingsStore';
 export type { MgSettings } from './utils/settingsStore';
 export { showToast, dismissToast } from './utils/toastBus';
@@ -71,7 +83,7 @@ export { lazyWithRetry, importWithRetry, isChunkLoadError, reloadOnceForNewVersi
 export { registerServiceWorker } from './utils/serviceWorker';
 export type { RegisterServiceWorkerOptions } from './utils/serviceWorker';
 export { safeGet, safeSet, safeRemove, readJson } from './utils/storage';
-export { isNativeApp, nativePlatform, goToHub, NATIVE_UA_TOKEN } from './utils/native';
+export { isNativeApp, nativePlatform, goToHub, NATIVE_UA_TOKEN, isTvDevice, applyTvClass, installDpadNav } from './utils/native';
 export { reportContent, REPORT_CONTENT_URL, REPORT_REASONS, REPORT_LIMITS } from './utils/reportContent';
 export type { ReportContentInput, ReportReason } from './utils/reportContent';
 export {
@@ -92,10 +104,16 @@ export {
   AI_CREDIT_PACKS,
   AI_STARTER_CREDITS,
   INSUFFICIENT_CREDITS,
+  AI_BUSY,
+  AiBusyError,
+  isAiBusyError,
+  speculativeAiAllowed,
+  speculativeAiAllowedAsync,
+  whenCreditsLoaded,
 } from './utils/credits';
 export type { AiFetchJsonOptions, CreditsProvider, CreditsProviderEvents, CreditsState } from './utils/credits';
 export { playCreditsProvider, getAppUserId, nativeBridge } from './utils/creditsPlay';
 export { webCreditsProvider, CREDITS_CHECKOUT_URL, CREDITS_CONFIRM_URL } from './utils/creditsWeb';
 export type { NativeBridge, NativeBilling, NativeProduct, NativePurchase } from './utils/creditsPlay';
-export { runLocalFirst, canRunLocally, localPrompt, localJson, parseLooseJson, prepareLocalAi, refreshLocalAi, getLocalAiInfo, subscribeLocalAi, localAiEnabled } from './utils/localAi';
+export { runLocalFirst, canRunLocally, localPrompt, localJson, parseLooseJson, prepareLocalAi, refreshLocalAi, getLocalAiInfo, subscribeLocalAi, localAiEnabled, enableLocalAiSetting, localAiSettingEnabled } from './utils/localAi';
 export type { LocalAiInfo, LocalAiState, LocalAiEngine, LocalPromptOptions, RunLocalFirstOptions } from './utils/localAi';

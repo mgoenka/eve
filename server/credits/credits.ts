@@ -16,10 +16,13 @@ import {
   CREDIT_USD,
   HOLD_TTL_MS,
   NATIVE_UA_TOKEN,
+  STARTER_BUDGET_SHARDS,
   STARTER_CREDITS,
+  STARTER_PER_IP,
+  STARTER_WINDOW_MS,
+  PLAY_VOIDED_SYNC_MS,
+  starterDailyCap,
   WEB_COOKIE_DOMAIN,
-  WEB_STARTER_PER_IP,
-  WEB_STARTER_WINDOW_MS,
   WEB_WALLET_COOKIE,
   WEB_WALLET_MAX_AGE_S,
   OWNER_CODE_SECRET,
@@ -36,10 +39,10 @@ import type { PaymentProvider } from './config.ts';
 import { costOfCall, usageOf } from './pricing.ts';
 import type { CallUsage } from './pricing.ts';
 import { FirestoreCreditStore } from './firestore-store.ts';
-import { MemoryCreditStore } from './store.ts';
-import type { AccountMeta, CreditStore } from './store.ts';
+import { MemoryCreditStore, utcDay } from './store.ts';
+import type { AccountMeta, CreditStore, StarterState } from './store.ts';
 import { GooglePlayApi, PlayApiError } from './play.ts';
-import type { PlayApi } from './play.ts';
+import type { PlayApi, VoidedPurchase } from './play.ts';
 import { SecretSource, StripeApiError, StripeRestApi, verifyStripeSignature } from './stripe.ts';
 import type { StripeApi, StripeCheckoutSession, StripeEvent } from './stripe.ts';
 
@@ -73,7 +76,7 @@ export interface Wallet {
   app: string;
   /** Where this wallet buys packs: Play inside the Android app, Stripe on the web. */
   provider: PaymentProvider;
-  /** Client address of the request (web: limits starter grants per address). */
+  /** Client address of the request (limits starter grants per address: IPv4, IPv6 /64). */
   address?: string;
 }
 /** Older name for a wallet the current request pays from. */
@@ -180,6 +183,13 @@ export interface CreditsOptions {
    * like the website (default, so old installs keep working); 'block' answers 426 update_required.
    */
   legacyNativeClients?: 'free' | 'block';
+  /** Global starter grants per UTC day across all apps. Default: env STARTER_DAILY_CAP, else 3000. 0 pauses them. */
+  starterDailyCap?: number;
+  /**
+   * Reverse Play refunds / chargebacks (purchases.voidedpurchases.list), checked at most every 6 h per package,
+   * kicked off in the background by Android balance and purchase requests. Default true.
+   */
+  playVoidedSync?: boolean;
   now?: () => Date;
 }
 
@@ -194,6 +204,32 @@ export const isNativeRequest = (req: ReqLike) => header(req, 'user-agent').inclu
 export const mask = (s: string) => (s ? s.slice(0, 6) + '…' : '');
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 const clientIp = (req: ReqLike) => req.ip || req.socket?.remoteAddress || 'unknown';
+
+/**
+ * The key a client address is counted under: an IPv4 address as is (also IPv4-mapped IPv6), an IPv6 address by
+ * its /64 (one home or phone gets a whole /64, so per-address limits must not be dodged by rotating the rest).
+ */
+export function ipKey(ip: string): string {
+  let a = ip.trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/%.*$/, '');
+  const v4 = a.match(/^(?:::ffff:)?(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (v4) return v4[1]!;
+  if (!a.includes(':')) return a || 'unknown';
+  // Embedded IPv4 tail (::ffff:0:1.2.3.4, 64:ff9b::1.2.3.4): as two hextets.
+  const tail = a.match(/(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (tail) {
+    const [b1, b2, b3, b4] = tail.slice(1).map(Number) as [number, number, number, number];
+    a = a.slice(0, tail.index) + ((b1 << 8) | b2).toString(16) + ':' + ((b3 << 8) | b4).toString(16);
+  }
+  const halves = a.split('::');
+  if (halves.length > 2) return a;
+  const head = halves[0] ? halves[0].split(':') : [];
+  const rest = halves.length === 2 ? (halves[1] ? halves[1].split(':') : []) : [];
+  const groups = halves.length === 2 ? [...head, ...Array<string>(Math.max(0, 8 - head.length - rest.length)).fill('0'), ...rest] : head;
+  if (groups.length !== 8 || !groups.every((g) => /^[0-9a-f]{1,4}$/.test(g))) return a;
+  return groups.slice(0, 4).map((g) => parseInt(g, 16).toString(16)).join(':') + '::/64';
+}
+/** Rate-limit key of a request: its address, IPv6 by /64. */
+const ipOf = (req: ReqLike) => ipKey(clientIp(req));
 const WEB_WALLET_RE = /^[A-Za-z0-9_-]{22,64}$/;
 const SESSION_RE = /^cs_(test|live)_[A-Za-z0-9]{10,250}$/;
 
@@ -231,11 +267,12 @@ function appendCookie(res: ResLike, cookie: string) {
   res.setHeader('Set-Cookie', list.length ? [...list, cookie] : cookie);
 }
 
-/** Starter-grant counter key for a client address: IPv4 as is, IPv6 by its /64. Salted hash, never the address. */
-function addressKey(ip: string): string {
-  let a = ip.replace(/^::ffff:/, '');
-  if (a.includes(':')) a = a.split(':').slice(0, 4).join(':') + '::/64';
-  return sha256('mg-credits-starter:' + a);
+/**
+ * Starter-grant counter key for a client address (IPv4 as is, IPv6 by its /64), counted separately for web and
+ * Android wallets. Salted hash, never the address.
+ */
+function addressKey(ip: string, kind: WalletKind = 'web'): string {
+  return sha256('mg-credits-starter:' + (kind === 'android' ? 'android:' : '') + ipKey(ip));
 }
 
 /** returnUrl for Stripe: https on *.mohitgoenka.com (or localhost outside production), no fragment. */
@@ -354,12 +391,84 @@ export function createCredits(options: CreditsOptions) {
   const secrets = options.secrets ?? new SecretSource();
 
   const meta = (w: Wallet): AccountMeta => ({ kind: w.kind, app: w.app, id: w.id });
-  /** Android wallets get the starter on creation; web wallets only through the per-address claim (prepareWeb). */
-  const starterFor = (w: Wallet) => (w.kind === 'web' ? 0 : STARTER_CREDITS);
   const webWallet = (id: string, address?: string): Wallet => ({ kind: 'web', key: walletKey.web(id), id, app: '*', provider: 'stripe', ...(address ? { address } : {}) });
 
-  /** Web wallets known to exist on this instance (skips a Firestore round trip per AI call). */
-  const knownWeb = new Set<string>();
+  // ---- starter Sparks: per address (rolling 24 h) + a global daily budget; granted lazily (prepareWallet).
+  const dailyCap = options.starterDailyCap ?? starterDailyCap();
+  const perShard = Math.ceil(dailyCap / STARTER_BUDGET_SHARDS);
+  /** Today's budget as this instance knows it: full = no more grants today (re-read at most once a minute). */
+  const budget = { day: '', full: false, checkedAt: 0 };
+  const budgetToday = () => {
+    const day = utcDay(now());
+    if (budget.day !== day) Object.assign(budget, { day, full: false, checkedAt: 0 });
+    return day;
+  };
+  /** Cheap view: false once a claim failed today (or the cap is 0). With `read`, also checks the shared counter (≤ 1/min). */
+  async function budgetOpen(read = false): Promise<boolean> {
+    if (dailyCap <= 0) return false;
+    const day = budgetToday();
+    if (budget.full) return false;
+    if (read && Date.now() - budget.checkedAt > 60_000) {
+      budget.checkedAt = Date.now();
+      try {
+        budget.full = (await store.starterBudgetUsed(day)) >= perShard * STARTER_BUDGET_SHARDS;
+      } catch (err) {
+        console.warn('[credits] starter budget read failed', (err as Error)?.message);
+      }
+    }
+    return !budget.full;
+  }
+  /** What a balance read shows a wallet whose starter is still open (nothing is written). */
+  async function starterPreview(w: Wallet): Promise<'granted' | 'paused' | 'address_limit'> {
+    if (!(await budgetOpen(true))) return 'paused';
+    const ok = await store.claimStarter(addressKey(w.address ?? 'unknown', w.kind), STARTER_PER_IP, STARTER_WINDOW_MS, now(), true).catch(() => true);
+    return ok ? 'granted' : 'address_limit';
+  }
+
+  /** Wallets whose account exists and whose starter question is settled (skips a Firestore round trip per AI call). */
+  const known = new Set<string>();
+  /** One prepare per wallet at a time on this instance (concurrent first actions share it). */
+  const preparing = new Map<string, Promise<void>>();
+  /**
+   * Before a wallet's first metered action or explicit claim (purchase, checkout, promo code, link code): make sure
+   * its account exists (created with starterState 'pending' in the same transaction) and, while the starter is
+   * 'pending' or 'paused', run the one-transaction grant (address slot + daily budget + Sparks together; nothing is
+   * counted unless the grant happens). Every caller awaits it, so a second concurrent first action reserves against
+   * the granted balance, not 0 (across instances the transaction makes it 'already'). A 'paused' wallet is tried
+   * again on a later action once there is budget; 'pending' stays until the grant or a definite refusal.
+   */
+  function prepareWallet(w: Wallet): Promise<void> {
+    if (known.has(w.key)) return Promise.resolve();
+    let p = preparing.get(w.key);
+    if (!p) {
+      p = prepareOnce(w).finally(() => preparing.delete(w.key));
+      preparing.set(w.key, p);
+    }
+    return p;
+  }
+  async function prepareOnce(w: Wallet): Promise<void> {
+    const s = await store.ensure(w.key, meta(w), 0, now());
+    const state = s.starterState;
+    if (state === 'pending' || state === 'paused') {
+      if (state === 'paused' && !(await budgetOpen())) return; // still paused today
+      const { outcome } = await store.claimStarterGrant(
+        w.key,
+        meta(w),
+        STARTER_CREDITS,
+        { addressKey: addressKey(w.address ?? 'unknown', w.kind), perAddress: STARTER_PER_IP, windowMs: STARTER_WINDOW_MS, day: budgetToday(), dailyCap, shards: STARTER_BUDGET_SHARDS },
+        now(),
+      );
+      if (outcome === 'paused') {
+        if (!budget.full) console.warn(`[credits] starter budget for ${budget.day} used up (${dailyCap}/day): new wallets start at 0`);
+        budget.full = true;
+      }
+      if (outcome !== 'already') console.log(`[credits] ${app}: ${state} ${w.kind} wallet ${mask(w.id)} (${outcome === 'granted' ? '+' + STARTER_CREDITS + ' starter' : 'no starter: ' + outcome})`);
+      if (outcome === 'paused') return;
+    }
+    if (known.size > 50_000) known.clear();
+    known.add(w.key);
+  }
+
   /**
    * Linked browsers: a web wallet that joined another one (mergedInto) is followed, so every browser in a
    * linked group keeps spending the same Sparks even after the group itself joins another device.
@@ -378,19 +487,6 @@ export function createCredits(options: CreditsOptions) {
     }
     return to.to === w.key ? w : webWallet(to.to.slice('web:'.length), w.address);
   }
-  /** Create a new web wallet; it gets the starter credits only while its address hasn't claimed WEB_STARTER_PER_IP. */
-  async function prepareWeb(wallet: Wallet) {
-    if (wallet.kind !== 'web' || knownWeb.has(wallet.key)) return;
-    const s = await store.ensure(wallet.key, meta(wallet), 0, now());
-    if (s.created) {
-      const ok = await store.claimStarter(addressKey(wallet.address ?? 'unknown'), WEB_STARTER_PER_IP, WEB_STARTER_WINDOW_MS, now());
-      if (ok) await store.grant(wallet.key, meta(wallet), STARTER_CREDITS, 'starter', now());
-      console.log(`[credits] ${app}: new web wallet ${mask(wallet.id)} (${ok ? '+' + STARTER_CREDITS + ' starter' : 'no starter: address limit'})`);
-    }
-    if (knownWeb.size > 50_000) knownWeb.clear();
-    knownWeb.add(wallet.key);
-  }
-
   /**
    * The wallet a request identifies, whether or not it must pay. Android: UA token + valid X-MG-App-User.
    * Web: the mg_wallet cookie (resolveWebWallet). Throws CreditsError 400 for a malformed app user id,
@@ -405,7 +501,7 @@ export function createCredits(options: CreditsOptions) {
       }
       const id = raw.toLowerCase();
       if (!APP_USER_RE.test(id)) throw new CreditsError(400, 'invalid_app_user');
-      return { kind: 'android', key: walletKey.android(pkg, id), id, app: pkg, provider: 'play' };
+      return { kind: 'android', key: walletKey.android(pkg, id), id, app: pkg, provider: 'play', address: clientIp(req) };
     }
     const webId = resolveWebWallet(req);
     if (webId && WEB_WALLET_RE.test(webId)) return webWallet(webId, clientIp(req));
@@ -451,13 +547,12 @@ export function createCredits(options: CreditsOptions) {
     const estimate = Math.max(1, Math.ceil(Number.isFinite(opts.estimate) ? opts.estimate : 1));
     let reserved;
     try {
-      await prepareWeb(wallet);
-      reserved = await store.reserve(wallet.key, meta(wallet), starterFor(wallet), holdId, estimate, HOLD_TTL_MS, now());
+      await prepareWallet(wallet);
+      reserved = await store.reserve(wallet.key, meta(wallet), 0, holdId, estimate, HOLD_TTL_MS, now());
     } catch (err) {
       console.error('[credits] reserve failed for', mask(wallet.id), (err as Error)?.message);
       throw new CreditsError(503, 'credits_unavailable');
     }
-    if (reserved.created) console.log(`[credits] ${app}: new ${wallet.kind} wallet ${mask(wallet.id)} (+${starterFor(wallet)} starter)`);
     const owner = reserved.owner === true;
     if (!reserved.ok) throw new CreditsError(402, 'insufficient_credits', { balance: reserved.balance, available: reserved.available, needed: estimate });
 
@@ -497,25 +592,42 @@ export function createCredits(options: CreditsOptions) {
     }
   }
 
+  /**
+   * Balance answer. A wallet without an account yet is NOT created here (a balance read never grants the
+   * starter): it shows the starter it will get on its first AI action (starterPending), or 0 with the reason.
+   */
   async function balance(wallet: Wallet) {
-    await prepareWeb(wallet);
-    const s = await store.ensure(wallet.key, meta(wallet), starterFor(wallet), now());
-    if (s.created) console.log(`[credits] ${app}: new ${wallet.kind} wallet ${mask(wallet.id)} (+${starterFor(wallet)} starter)`);
+    const s = await store.getAccount(wallet.key, now());
+    // No account yet = 'pending'. Pending / paused: show what the next action will get (or why not).
+    const state: StarterState | undefined = s ? s.starterState : 'pending';
+    let missed: 'paused' | 'address_limit' | null = state === 'address_limit' ? 'address_limit' : null;
+    let pending = false;
+    if (state === 'pending' || state === 'paused') {
+      const preview = await starterPreview(wallet);
+      pending = preview === 'granted';
+      missed = pending ? null : preview === 'granted' ? null : preview;
+    }
+    const bal = (s?.balance ?? 0) + (pending ? STARTER_CREDITS : 0);
+    const avail = (s?.available ?? 0) + (pending ? STARTER_CREDITS : 0);
     const body: Record<string, unknown> = {
       enforced: true,
-      balance: s.balance,
-      available: s.available,
+      balance: bal,
+      available: avail,
       starterCredits: STARTER_CREDITS,
       creditUsd: CREDIT_USD,
       provider: wallet.provider,
       packs: packsFor(wallet.provider).map((p) => ({ id: p.id, credits: p.credits, priceUsd: p.priceUsd })),
     };
-    if (s.owner) body.owner = true;
+    if (s?.owner) body.owner = true;
+    if (s?.paid) body.paid = true; // has bought Sparks (the kit allows speculative AI for paying users)
+    if (pending) body.starterPending = true;
+    if (missed === 'paused') body.starterPaused = true; // free starter Sparks are paused for today (global budget)
+    if (missed === 'address_limit') body.starterLimited = true; // this network already used its free starters
     if (wallet.kind === 'web') {
       body.checkout = await stripe()
         .configured()
         .catch(() => false);
-      body.taxNote = 'Prices in US dollars; sales tax or VAT is added at checkout where it applies.';
+      body.taxNote = 'Taxes (like VAT) are added at checkout and shown before you pay.';
     }
     return body as { enforced: true; balance: number; available: number } & Record<string, unknown>;
   }
@@ -538,7 +650,7 @@ export function createCredits(options: CreditsOptions) {
       {
         key,
         meta: meta(p.wallet),
-        starter: starterFor(p.wallet),
+        starter: 0,
         provider: p.provider,
         purchaseKey: purchaseKeyOf(p.provider, p.externalId),
         secondaryKeys,
@@ -564,13 +676,14 @@ export function createCredits(options: CreditsOptions) {
     const token = typeof b.purchaseToken === 'string' ? b.purchaseToken.trim() : '';
     if (!pack || !TOKEN_RE.test(token)) return { status: 400, body: { error: 'invalid' } };
     const purchaseKey = purchaseKeyOf('play', token);
+    await prepareWallet(wallet); // buying is an explicit claim: the starter comes first
 
     // Already credited (retry after a lost response or a crash before consume): finish the consume, report ok.
     const prior = await store.getPurchase(purchaseKey);
     if (prior) {
       if (prior.account !== wallet.key) return { status: 403, body: { error: 'account_mismatch' } };
       if (!prior.finalized) await consume(pack.id, token, purchaseKey);
-      const s = await store.ensure(wallet.key, meta(wallet), STARTER_CREDITS, now());
+      const s = await store.ensure(wallet.key, meta(wallet), 0, now());
       return { status: 200, body: { ok: true, credited: 0, alreadyProcessed: true, balance: s.balance } };
     }
 
@@ -627,6 +740,89 @@ export function createCredits(options: CreditsOptions) {
     } catch (err) {
       console.warn('[credits] consume failed (will retry on next app start):', err instanceof PlayApiError ? err.status : (err as Error)?.message);
     }
+  }
+
+  // ---- Play refunds: voided purchases (refund, chargeback, revoke) take their Sparks back.
+
+  const VOIDED_SYNC = `play-voided:${pkg}`;
+  const VOIDED_MAX_AGE_MS = 30 * 24 * 60 * 60_000 - 60_000; // the API answers at most 30 days back
+  const VOIDED_OVERLAP_MS = 60 * 60_000; // re-read the last hour (reversal is idempotent)
+  const VOIDED_RETRY_MS = 10 * 60_000; // after a failed run
+  const VOIDED_REASONS: Record<number, string> = { 1: 'remorse', 2: 'not received', 3: 'defective', 4: 'accidental', 5: 'fraud', 6: 'friendly fraud', 7: 'chargeback', 8: 'unacknowledged' };
+
+  async function reverseVoided(v: VoidedPurchase): Promise<number> {
+    const token = typeof v.purchaseToken === 'string' ? v.purchaseToken : '';
+    const reason = 'play refund' + (typeof v.voidedReason === 'number' && VOIDED_REASONS[v.voidedReason] ? ` (${VOIDED_REASONS[v.voidedReason]})` : '');
+    // One reversal per voided record (a purchase can have several quantity-based partial refunds), idempotent on
+    // the record: token + voided time + quantity. A record without voidedQuantity takes back what is left.
+    const q = Number(v.voidedQuantity);
+    const partial = Number.isFinite(q) && q > 0 ? Math.floor(q) : 0;
+    const reversalId = sha256(`play-voided|${token || v.orderId || ''}|${v.voidedTimeMillis ?? ''}|${partial || 'all'}`).slice(0, 24);
+    let r: Awaited<ReturnType<CreditStore['reversePurchaseOnce']>> = null;
+    if (TOKEN_RE.test(token)) {
+      const purchaseKey = purchaseKeyOf('play', token);
+      const rec = await store.getPurchase(purchaseKey);
+      if (rec) {
+        const pack = packById(rec.productId, 'play');
+        const credits = partial && pack ? partial * pack.credits : rec.credits;
+        r = await store.reversePurchaseOnce({ purchaseKey }, reversalId, credits, reason, now());
+      }
+    }
+    if (!r && typeof v.orderId === 'string' && SECONDARY_RE.test(v.orderId)) {
+      // Token not in our ledger (another token of the same order): find it by the Play orderId, take back what is left.
+      r = await store.reversePurchaseOnce({ secondaryKey: `play:${v.orderId}` }, reversalId, Number.MAX_SAFE_INTEGER, reason, now());
+    }
+    if (r?.reversed) console.log(`[credits] ${app}: -${r.reversed} (${reason}) for ${mask(r.account.split(':').pop() ?? '')}, balance ${r.balance}`);
+    return r?.reversed ?? 0;
+  }
+
+  /**
+   * Fetch this app's voided Play purchases since the last checkpoint (Firestore aiCreditSync/play-voided:<pkg>)
+   * and reverse their Sparks (idempotent, like Stripe refunds; the balance may go negative). Runs at most once per
+   * PLAY_VOIDED_SYNC_MS across all instances unless `force`. Uses the same ADC / Play API access as verifyPlay.
+   */
+  async function syncPlayVoided(opts: { force?: boolean } = {}): Promise<{ ran: boolean; voided: number; reversed: number }> {
+    if (typeof play.listVoidedPurchases !== 'function') return { ran: false, voided: 0, reversed: 0 };
+    if (opts.force) await store.deferSyncRun(VOIDED_SYNC, now());
+    const lease = await store.claimSyncRun(VOIDED_SYNC, PLAY_VOIDED_SYNC_MS, now());
+    if (!lease.ok) return { ran: false, voided: 0, reversed: 0 };
+    const endTime = now().getTime();
+    const startTime = Math.max(endTime - VOIDED_MAX_AGE_MS, (lease.checkpoint ?? 0) - VOIDED_OVERLAP_MS);
+    let token: string | null = null;
+    let voided = 0;
+    let reversed = 0;
+    try {
+      for (let page = 0; page < 20; page++) {
+        const res = await play.listVoidedPurchases(pkg, { startTime, endTime, token });
+        for (const v of res.voidedPurchases) {
+          voided++;
+          reversed += await reverseVoided(v);
+        }
+        token = res.nextPageToken;
+        if (!token) break;
+      }
+      await store.saveSyncCheckpoint(VOIDED_SYNC, endTime, now());
+    } catch (err) {
+      // A failed run is tried again in ~10 minutes (any instance), not after the full 6 h; the checkpoint stays.
+      await store.deferSyncRun(VOIDED_SYNC, new Date(now().getTime() + VOIDED_RETRY_MS)).catch(() => {});
+      throw err;
+    }
+    if (voided) console.log(`[credits] ${app}: Play voided purchases: ${voided} seen, ${reversed} Sparks reversed`);
+    return { ran: true, voided, reversed };
+  }
+
+  /** Fire-and-forget voided sync (no scheduler): at most every 6 h per instance; errors are logged and retried in 10 min. */
+  let voidedNextAt = 0;
+  function maybeSyncPlayVoided() {
+    if (options.playVoidedSync === false || typeof play.listVoidedPurchases !== 'function') return;
+    const t = Date.now();
+    if (t < voidedNextAt) return;
+    voidedNextAt = t + PLAY_VOIDED_SYNC_MS;
+    void syncPlayVoided().catch((err) => {
+      voidedNextAt = Date.now() + VOIDED_RETRY_MS;
+      const status = err instanceof PlayApiError ? err.status : 0;
+      console.warn('[credits] Play voided purchases sync failed', status || (err as Error)?.message);
+    });
   }
 
   // ---- Stripe adapter (web): Checkout Session -> credits, once per session id and payment intent.
@@ -698,11 +894,11 @@ export function createCredits(options: CreditsOptions) {
     const code = typeof raw === 'string' ? raw.trim() : '';
     // Only unknown codes count (5 per hour per address, 5 per day per wallet): friends redeeming a shared code
     // on one Wi-Fi aren't blocked (nor by an expired or used-up code), guessing is.
-    const wait = Math.max(ownerIpLimit.peek(clientIp(req)), ownerWalletLimit.peek(wallet.key));
+    const wait = Math.max(ownerIpLimit.peek(ipOf(req)), ownerWalletLimit.peek(wallet.key));
     if (wait) return { status: 429, body: { error: 'rate_limited', retryAfter: wait } };
     const miss = (error: string) => {
       if (error === 'wrong_code') {
-        ownerIpLimit.hit(clientIp(req));
+        ownerIpLimit.hit(ipOf(req));
         ownerWalletLimit.hit(wallet.key);
       }
       return { status: 403, body: { error } };
@@ -714,10 +910,7 @@ export function createCredits(options: CreditsOptions) {
     } catch {
       secret = null;
     }
-    const prepare = async () => {
-      if (wallet.kind === 'web') await prepareWeb(wallet);
-      else await store.ensure(wallet.key, meta(wallet), starterFor(wallet), now());
-    };
+    const prepare = () => prepareWallet(wallet);
     if (secret && timingSafeEqual(sha(code), sha(secret))) {
       await prepare();
       const r = await store.setOwner(wallet.key, meta(wallet), true, `code (${app})`, now());
@@ -727,12 +920,11 @@ export function createCredits(options: CreditsOptions) {
     const promo = normalizePromoCode(code);
     if (!PROMO_CODE_RE.test(promo)) return miss('wrong_code');
     await prepare();
-    const r = await store.redeemPromo(promo, wallet.key, meta(wallet), starterFor(wallet), now());
+    const r = await store.redeemPromo(promo, wallet.key, meta(wallet), 0, now());
     if (r.ok === false) {
       console.warn(`[credits] ${app}: promo ${r.error === 'promo_unknown' ? 'unknown code' : `${promo} ${r.error}`} for ${wallet.kind} wallet ${mask(wallet.id)}`);
       return miss(r.error === 'promo_unknown' ? 'wrong_code' : r.error);
     }
-    if (wallet.kind === 'web') knownWeb.add(wallet.key);
     console.log(`[credits] ${app}: promo ${promo} +${r.credits} for ${wallet.kind} wallet ${mask(wallet.id)}`);
     return { status: 200, body: { ok: true, promo: true, credited: r.credits, balance: r.balance } };
   }
@@ -751,7 +943,7 @@ export function createCredits(options: CreditsOptions) {
       if (!wallet || wallet.kind !== 'web') return { status: 402, body: { error: 'wallet_required' } };
       const wait = linkCreateLimit.hit(wallet.key);
       if (wait) return { status: 429, body: { error: 'rate_limited', retryAfter: wait } };
-      await prepareWeb(wallet);
+      await prepareWallet(wallet);
       const target = await store.resolveAccount(wallet.key);
       const code = Array.from({ length: LINK_CODE_LENGTH }, () => LINK_CODE_ALPHABET[randomInt(LINK_CODE_ALPHABET.length)]).join('');
       await store.createLinkCode(createHash('sha256').update(code).digest('hex'), target, new Date(now().getTime() + LINK_CODE_TTL_MS), now());
@@ -760,12 +952,12 @@ export function createCredits(options: CreditsOptions) {
     }
     const code = typeof body.linkCode === 'string' ? normalizeLinkCode(body.linkCode) : '';
     const ip = clientIp(req);
-    const waitIp = ownerIpLimit.peek(ip);
+    const waitIp = ownerIpLimit.peek(ipKey(ip));
     if (waitIp) return { status: 429, body: { error: 'rate_limited', retryAfter: waitIp } };
     if (code.length !== LINK_CODE_LENGTH) return { status: 400, body: { error: 'invalid' } };
     const targetKey = await store.takeLinkCode(createHash('sha256').update(code).digest('hex'), now());
     if (!targetKey || !targetKey.startsWith('web:')) {
-      ownerIpLimit.hit(ip);
+      ownerIpLimit.hit(ipKey(ip));
       return { status: 403, body: { error: 'wrong_link_code' } };
     }
     if (!wallet || wallet.kind !== 'web') {
@@ -780,7 +972,6 @@ export function createCredits(options: CreditsOptions) {
     webLinks.delete(wallet.key);
     const targetId = targetKey.slice('web:'.length);
     appendCookie(res, walletCookie(req, targetId));
-    knownWeb.add(targetKey);
     console.log(`[credits] ${app}: web wallet ${mask(wallet.id)} linked into ${mask(targetId)} (+${r.moved})`);
     return { status: 200, body: { ok: true, linked: true, moved: r.moved, balance: r.balance, owner: r.owner } };
   }
@@ -831,7 +1022,7 @@ export function createCredits(options: CreditsOptions) {
     /** GET /api/credits/balance — { enforced: false } unless this request pays. */
     async balance(req: ReqLike, res: ResLike) {
       res.setHeader('Cache-Control', 'no-store');
-      const wait = balanceLimit.hit(clientIp(req));
+      const wait = balanceLimit.hit(ipOf(req));
       if (wait) return limited(res, wait);
       try {
         if (!isNativeRequest(req)) await webEnabled();
@@ -840,6 +1031,7 @@ export function createCredits(options: CreditsOptions) {
           res.status(200).json({ enforced: false });
           return;
         }
+        if (wallet.kind === 'android') maybeSyncPlayVoided();
         const current = await currentWeb(wallet);
         const body = await balance(current);
         // Renew the 400-day cookie; a browser whose wallet was linked into another switches to it here.
@@ -856,7 +1048,7 @@ export function createCredits(options: CreditsOptions) {
     /** POST /api/credits/purchase { productId, purchaseToken } — Play purchases from the Android app. */
     async purchase(req: ReqLike, res: ResLike) {
       res.setHeader('Cache-Control', 'no-store');
-      const wait = purchaseIpLimit.hit(clientIp(req));
+      const wait = purchaseIpLimit.hit(ipOf(req));
       if (wait) return limited(res, wait);
       try {
         const wallet = walletFor(req);
@@ -873,6 +1065,7 @@ export function createCredits(options: CreditsOptions) {
         }
         const w2 = purchaseUserLimit.hit(wallet.id);
         if (w2) return limited(res, w2);
+        maybeSyncPlayVoided();
         const out = await verifyPlay(wallet, req.body);
         if (typeof out.body.balance === 'number') res.setHeader(BALANCE_HEADER, String(out.body.balance));
         res.status(out.status).json(out.body);
@@ -886,7 +1079,7 @@ export function createCredits(options: CreditsOptions) {
     /** POST /api/credits/checkout { packId, returnUrl } — web: start a Stripe Checkout, answer { url }. */
     async checkout(req: ReqLike, res: ResLike) {
       res.setHeader('Cache-Control', 'no-store');
-      const wait = checkoutIpLimit.hit(clientIp(req));
+      const wait = checkoutIpLimit.hit(ipOf(req));
       if (wait) return limited(res, wait);
       try {
         const lb = (req.body ?? {}) as { linkAction?: unknown; linkCode?: unknown };
@@ -925,7 +1118,7 @@ export function createCredits(options: CreditsOptions) {
         }
         const w2 = checkoutWalletLimit.hit(wallet.id);
         if (w2) return limited(res, w2);
-        await prepareWeb(wallet); // the buyer's address: starter credits before the first purchase
+        await prepareWallet(wallet); // the buyer's address: starter credits before the first purchase
         const b = (req.body ?? {}) as { packId?: unknown; returnUrl?: unknown };
         const pack = packById(b.packId, 'stripe');
         const returnUrl = safeReturnUrl(b.returnUrl);
@@ -950,7 +1143,7 @@ export function createCredits(options: CreditsOptions) {
     /** POST /api/credits/stripe/confirm { sessionId } — the buyer is back from Checkout: credit now (the webhook is the backup). */
     async confirm(req: ReqLike, res: ResLike) {
       res.setHeader('Cache-Control', 'no-store');
-      const wait = confirmIpLimit.hit(clientIp(req));
+      const wait = confirmIpLimit.hit(ipOf(req));
       if (wait) return limited(res, wait);
       try {
         const sessionId = typeof (req.body as { sessionId?: unknown } | undefined)?.sessionId === 'string' ? (req.body as { sessionId: string }).sessionId.trim() : '';
@@ -1035,6 +1228,7 @@ export function createCredits(options: CreditsOptions) {
     balance,
     creditPurchase,
     verifyPlay,
+    syncPlayVoided,
     applyHeaders,
     sendError,
     handlers,

@@ -1,7 +1,7 @@
 /* generated from app-platform/ui-kit — edit there and re-sync. */
 import { useRef } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { COPYRIGHT, PRIVACY_URL } from '../utils/constants';
+import { COPYRIGHT, PRIVACY_URL, TERMS_URL } from '../utils/constants';
 import { isNativeApp } from '../utils/native';
 import { DownloadIcon } from './icons';
 import { IconButton } from './IconButton';
@@ -129,7 +129,10 @@ export function RulesOverlay({ open = true, onClose, appName, sections = [], chi
           <div className="flex flex-col items-center gap-1 text-center text-[10px] text-mg-muted sm:grid sm:grid-cols-[1fr_auto_1fr] sm:gap-2 sm:text-left">
             {!isNativeApp() ? <span className="sm:justify-self-start">{lastUpdated()}</span> : <span className="sm:justify-self-start" aria-hidden="true" />}
             <span className="sm:justify-self-center">© {new Date().getFullYear()} {COPYRIGHT}</span>
-            <a href={PRIVACY_URL} target="_blank" rel="noopener noreferrer" className="text-mg-muted underline-offset-2 hover:text-mg-text hover:underline sm:justify-self-end">Privacy Policy</a>
+            <span className="flex gap-3 sm:justify-self-end">
+              <a href={PRIVACY_URL} target="_blank" rel="noopener noreferrer" className="text-mg-muted underline-offset-2 hover:text-mg-text hover:underline">Privacy Policy</a>
+              <a href={TERMS_URL} target="_blank" rel="noopener noreferrer" className="text-mg-muted underline-offset-2 hover:text-mg-text hover:underline">Terms</a>
+            </span>
           </div>
         ) : undefined
       }

@@ -41,7 +41,8 @@ const APP_RULES: RuleSection[] = [
     title: 'Your evening',
     icon: '✨',
     items: [
-      'Each stop shows a painted scene, arrival time, what to order or do, walking time, a map link and reservation links where the venue takes bookings.',
+      'Each stop shows its arrival time, what to order or do, walking time, a map link and reservation links where the venue takes bookings.',
+      'Eve paints the first stop’s scene on her own. Tap Show picture on any other card to paint that one.',
       'With her voice on, Eve walks you through the evening stop by stop. You can stop the walkthrough, or play her narration.',
       'Ask for changes in the chat ("swap dessert for live music") or tap a tweak chip like Cheaper or Earlier.',
       'Share sends a link with the whole plan, so friends see the same evening. The pencil takes you back to the form.',
@@ -54,6 +55,7 @@ const APP_RULES: RuleSection[] = [
     items: [
       'Eve paints up to 40 pictures an hour for each visitor, and shows how many are left under Plan my evening. Cards she has already painted are free.',
       'If a picture fails or the hour’s paintings run out, the plan still works. Tap Repaint on a card to try again.',
+      ...(isNativeApp() ? ['Out of Sparks, a card shows Get Sparks to see pictures instead of its picture; the plan itself stays.'] : []),
       'If Eve can’t finish a plan, you get a clear message and a Try again button.',
     ],
   },
@@ -67,8 +69,8 @@ const APP_RULES: RuleSection[] = [
           items: [
             'Each painted picture costs about 40 credits (a stop card about 55, with the web research behind it). Cards and portraits she has already painted are free.',
             'The plan itself costs about 25 credits (it searches the web for real venues); her lines, story and replies about 2 to 5 each; her voice about 1 to 3 per line and about 12 for the full narration.',
-            'A whole evening with four painted stops is usually 250 to 300 credits; a restaurant content pack (4 pictures) about 170.',
-            'If you run out mid-plan, the plan still shows: tap Repaint on a card after getting more credits.',
+            'A plan with its first painted stop is usually about 100 credits; each extra Show picture about 55. A restaurant content pack (4 pictures) is about 170.',
+            'If you run out mid-plan, the plan still shows: get more credits, then tap Show picture or Repaint on a card.',
           ],
         },
       ]
@@ -79,7 +81,7 @@ const APP_RULES: RuleSection[] = [
     items: [
       'Tap the shop icon. Enter your restaurant and city; cuisine, voice and signature dishes are optional.',
       'Eve suggests tonight’s special from recent reviews or trends. Different dish asks for another idea.',
-      'Generate tonight’s look makes an Instagram post, a Reel storyboard with voiceover, a menu card, an email and an SMS. It uses 4 of the hour’s paintings.',
+      'Generate tonight’s look makes an Instagram post, a Reel storyboard with voiceover, a menu card, an email and an SMS. It uses 4 of the hour’s paintings. Tap Cancel to stop while Eve is making it.',
       'Publish to Eve diners features your special to people planning evenings nearby.',
     ],
   },

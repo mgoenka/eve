@@ -94,7 +94,7 @@ export function AccountDataSection({ compact = false, onDeleted }: { compact?: b
       <h3 id="eve-account-data" className="mb-1.5 text-sm font-semibold text-mg-text">
         Account and data
       </h3>
-      <div className={`space-y-2 text-[13px] leading-relaxed text-mg-muted ${compact ? '' : 'sm:text-sm'}`}>
+      <div className={`space-y-2 text-[0.8125rem] leading-relaxed text-mg-muted ${compact ? '' : 'sm:text-sm'}`}>
         <p>
           Eve has no sign-in. Your recent evenings and restaurant profile stay on this device. Specials you publish to Eve
           diners (dish, caption, picture) and an Instagram connection are stored on Eve’s server, linked to this device.

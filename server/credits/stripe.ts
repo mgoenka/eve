@@ -11,7 +11,7 @@
 // Prices are created once per pack by lookup key (stripeLookupKey) with the AIaaS tax code and
 // tax_behavior "exclusive": the buyer pays tax on top of the US list price.
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { STRIPE_API_VERSION, STRIPE_SECRETS, STRIPE_TAX_CODE, stripeLookupKey } from './config.ts';
+import { STRIPE_API_VERSION, STRIPE_SECRETS, STRIPE_TAX_CODE, TERMS_URL, stripeLookupKey } from './config.ts';
 import type { PackInfo } from './config.ts';
 
 export interface StripeCheckoutSession {
@@ -188,8 +188,12 @@ const API = 'https://api.stripe.com/v1/';
 export class StripeRestApi implements StripeApi {
   private readonly secrets: SecretSource;
   private readonly priceIds = new Map<string, string>();
-  constructor(secrets = new SecretSource()) {
+  /** Stripe refused Terms consent (no Terms URL in the Dashboard yet): skip it until then, per instance. */
+  private consentOffUntil = 0;
+  private readonly clock: () => number;
+  constructor(secrets = new SecretSource(), clock: () => number = Date.now) {
     this.secrets = secrets;
+    this.clock = clock;
   }
 
   configured(): Promise<boolean> {
@@ -230,7 +234,7 @@ export class StripeRestApi implements StripeApi {
       const credits = pack.credits.toLocaleString('en-US');
       const product = await this.call<{ id: string }>('POST', 'products', {
         name: `${credits} Sparks`,
-        description: `${credits} Sparks for the magic features in Mohit's apps and games on mohitgoenka.com. Sparks never expire.`,
+        description: `${credits} Sparks for the magic features in Mohit's apps and games on mohitgoenka.com, kept in this browser as long as you use them at least once every 400 days.`,
         tax_code: STRIPE_TAX_CODE,
         metadata: { mg_pack: pack.id, mg_credits: pack.credits },
       });
@@ -257,15 +261,23 @@ export class StripeRestApi implements StripeApi {
 
   async createCheckoutSession(input: CheckoutInput): Promise<{ id: string; url: string }> {
     const price = await this.ensurePrice(input.pack);
-    const metadata = { mg_wallet: input.walletId, mg_pack: input.pack.id, mg_credits: input.pack.credits, mg_app: input.app };
-    const s = await this.call<StripeCheckoutSession>('POST', 'checkout/sessions', {
-      mode: 'payment',
-      line_items: [{ price, quantity: 1 }],
-      managed_payments: { enabled: true },
-      success_url: withParams(input.returnUrl, { mg_credits: 'paid', mg_session: '{CHECKOUT_SESSION_ID}' }),
-      cancel_url: withParams(input.returnUrl, { mg_credits: 'cancel' }),
-      metadata,
-    });
+    const params = checkoutSessionParams(input, price);
+    const { consent_collection: _c, custom_text: _t, ...withoutConsent } = params;
+    let s: StripeCheckoutSession;
+    if (this.clock() < this.consentOffUntil) {
+      s = await this.call<StripeCheckoutSession>('POST', 'checkout/sessions', withoutConsent);
+    } else {
+      try {
+        s = await this.call<StripeCheckoutSession>('POST', 'checkout/sessions', params);
+      } catch (err) {
+        // Terms consent needs a Terms of service URL in the Stripe Dashboard (Settings → Public details). Until it is
+        // set, Stripe refuses consent_collection: keep checkout working without it, skip it for an hour, log once.
+        if (!(err instanceof StripeApiError) || err.status !== 400) throw err;
+        s = await this.call<StripeCheckoutSession>('POST', 'checkout/sessions', withoutConsent);
+        this.consentOffUntil = this.clock() + 60 * 60_000;
+        console.error('[credits] Stripe refused Terms consent at checkout (set the Terms of service URL in Dashboard → Settings → Public details); checkouts skip it for 1 h:', err.code);
+      }
+    }
     if (!s.id || !s.url) throw new StripeApiError(502, 'no_session_url');
     return { id: s.id, url: s.url };
   }
@@ -273,6 +285,20 @@ export class StripeRestApi implements StripeApi {
   retrieveCheckoutSession(id: string): Promise<StripeCheckoutSession> {
     return this.call<StripeCheckoutSession>('GET', 'checkout/sessions/' + encodeURIComponent(id));
   }
+}
+
+/** Checkout Session parameters (exported for tests): one pack, Managed Payments, Terms consent, return URLs. */
+export function checkoutSessionParams(input: CheckoutInput, price: string): Record<string, unknown> {
+  return {
+    mode: 'payment',
+    line_items: [{ price, quantity: 1 }],
+    managed_payments: { enabled: true },
+    consent_collection: { terms_of_service: 'required' },
+    custom_text: { terms_of_service_acceptance: { message: `I agree to the [Terms](${TERMS_URL}).` } },
+    success_url: withParams(input.returnUrl, { mg_credits: 'paid', mg_session: '{CHECKOUT_SESSION_ID}' }),
+    cancel_url: withParams(input.returnUrl, { mg_credits: 'cancel' }),
+    metadata: { mg_wallet: input.walletId, mg_pack: input.pack.id, mg_credits: input.pack.credits, mg_app: input.app },
+  };
 }
 
 // ---------------------------------------------------------------- test double
