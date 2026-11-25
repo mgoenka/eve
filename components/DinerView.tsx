@@ -72,6 +72,8 @@ import { AppFooter, AppHeader, COPYRIGHT, CreditsChip, IconButton, PRIVACY_URL, 
 
 interface Props {
   onSwitchToRestaurant: () => void;
+  /** Bumped by the "Plan tonight" app shortcut: back to the planner form, the first field focused. */
+  planSignal?: number;
 }
 
 type Phase = 'input' | 'forging' | 'ready';
@@ -213,7 +215,7 @@ function timeAgo(ts: number): string {
   return days === 1 ? 'yesterday' : `${days} days ago`;
 }
 
-export function DinerView({ onSwitchToRestaurant }: Props) {
+export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
   const openRules = useOpenRules();
   const openSettings = useOpenSettings();
   const toast = useToast();
@@ -430,6 +432,22 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
     setPlaying(false);
     setError(null);
   }, []);
+
+  // "Plan tonight" shortcut: a finished evening goes back to the form (like the pencil); a plan being made is left alone.
+  const locationInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!planSignal) return;
+    if (phaseRef.current === 'forging') return;
+    if (phaseRef.current === 'ready') reset();
+    setFormExpanded(true);
+    const t = setTimeout(() => {
+      const el = locationInputRef.current;
+      if (!el) return;
+      el.focus({ preventScroll: true });
+      el.scrollIntoView({ block: 'center' });
+    }, 80);
+    return () => clearTimeout(t);
+  }, [planSignal, reset]);
 
   const toggleDietary = (d: DietaryPreference) => {
     setDietary((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]));
@@ -2089,6 +2107,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                 </label>
                 <div className="relative">
                   <input
+                    ref={locationInputRef}
                     type="text"
                     aria-label="Location"
                     value={city === SUGGESTED_CITY ? '' : city}

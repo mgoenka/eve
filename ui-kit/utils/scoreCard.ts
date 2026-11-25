@@ -23,6 +23,10 @@ export interface ScoreCardPlayer {
 export interface ScoreCardStat {
   label: string;
   value: string;
+  /** Who earned it, e.g. "Mohit" for "Best spin". Drawn under the value in `whoColor` (or the card accent). */
+  who?: string;
+  /** That player's color (hex). */
+  whoColor?: string;
 }
 
 export interface ScoreCardData {
@@ -30,8 +34,11 @@ export interface ScoreCardData {
   app: string;
   /** Where to play, e.g. "https://faceoff.mohitgoenka.com". Shown in the footer and encoded in the QR code. */
   url: string;
-  /** Brand accent. Default gold #f5c542. */
+  /** Brand accent. Default gold #f5c542. The card is themed in the winner's color instead when the winning row has a
+   *  hex `color` (set `winnerTheme: false` to keep the brand accent). */
   accent?: string;
+  /** Theme the card in the winner's color (background glow, medal, highlights). Default true. */
+  winnerTheme?: boolean;
   /** Big line, e.g. "Team Blue wins!" or "You reached $1,000,000". */
   headline: string;
   /** Line under the headline, e.g. "Movies theme · 3 rounds". */
@@ -40,7 +47,7 @@ export interface ScoreCardData {
   players?: ScoreCardPlayer[];
   /** Suffix after numeric scores, e.g. "pts". */
   scoreSuffix?: string;
-  /** Up to 4 small stat tiles, e.g. { label: 'Rounds', value: '3' }. */
+  /** Up to 6 small stat tiles (two rows of 3 past 4), e.g. { label: 'Best spin', value: '$2,500', who: 'Mohit' }. */
   stats?: ScoreCardStat[];
   /** Emoji in the medal at the top. Default 🏆. */
   emoji?: string;
@@ -133,7 +140,7 @@ function drawQr(ctx: CanvasRenderingContext2D, value: string, x: number, y: numb
  */
 export function drawScoreCard(ctx: CanvasRenderingContext2D, data: ScoreCardData, format: ScoreCardFormat = 'post', t = Infinity) {
   const { w: W, h: H } = SCORE_CARD_SIZES[format];
-  const accent = data.accent || '#f5c542';
+  const accent = scoreCardAccent(data);
   const story = format === 'story';
   const pad = 72;
 
@@ -173,7 +180,11 @@ export function drawScoreCard(ctx: CanvasRenderingContext2D, data: ScoreCardData
   const headerH = 40 + (medalR * 2 + 16) + 84 + Math.round(hsMeasured * 0.5) + 30 + (data.subline ? 52 : 0) + (story ? 40 : 18);
   const allRows = data.players || [];
   const footerH = story ? 330 : 250;
-  const statsH = data.stats && data.stats.length ? (story ? 190 : 150) : 0;
+  const statList = (data.stats || []).slice(0, 6);
+  const statRows = statList.length > 4 ? 2 : statList.length ? 1 : 0;
+  const statHasWho = statList.some((s) => s.who);
+  const statTileH = (story ? 150 : 110) + (statHasWho ? (story ? 40 : 34) : 0);
+  const statsH = statRows ? 40 + statRows * statTileH + (statRows - 1) * 16 : 0;
   const top0 = story ? 170 : 96;
   const MORE_H = 46;
   // Rows shrink to fit (gap 16 → 10, height down to 56); past that, the lowest rows fold into "+ N more".
@@ -329,28 +340,43 @@ export function drawScoreCard(ctx: CanvasRenderingContext2D, data: ScoreCardData
     y += moreH;
   }
 
-  // stats tiles
-  const stats = (data.stats || []).slice(0, 4);
-  if (stats.length) {
+  // stats tiles (1 row of up to 4, or 2 rows of 3 for 5–6)
+  if (statList.length) {
     const sa = t === Infinity ? 1 : easeOut((t - (0.9 + rows.length * 0.28)) / 0.5);
     ctx.globalAlpha = sa;
     const top = y + 30;
     const gap = 18;
-    const tw = (W - pad * 2 - gap * (stats.length - 1)) / stats.length;
-    const th = statsH - 40;
-    stats.forEach((s, i) => {
-      const tx = pad + i * (tw + gap);
-      roundRect(ctx, tx, top, tw, th, 22);
+    const perRow = statRows === 2 ? 3 : statList.length;
+    const th = statTileH;
+    statList.forEach((s, i) => {
+      const r = Math.floor(i / perRow);
+      const inRow = r === statRows - 1 ? statList.length - r * perRow : perRow;
+      const c = i - r * perRow;
+      const tw = (W - pad * 2 - gap * (inRow - 1)) / inRow;
+      const tx = pad + c * (tw + gap);
+      const ty = top + r * (th + 16);
+      roundRect(ctx, tx, ty, tw, th, 22);
       ctx.fillStyle = 'rgba(255,255,255,0.05)';
       ctx.fill();
+      if (s.who) {
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = hexA(s.whoColor && isHex(s.whoColor) ? s.whoColor : accent, 0.35);
+        ctx.stroke();
+      }
       ctx.textAlign = 'center';
       ctx.textBaseline = 'alphabetic';
+      const valueY = ty + (s.who ? th * 0.42 : th * 0.52);
       ctx.fillStyle = '#fafaf9';
       fitText(ctx, s.value, tw - 24, story ? 52 : 44, SANS, 'bold', 18);
-      ctx.fillText(s.value, tx + tw / 2, top + th * 0.52);
+      ctx.fillText(s.value, tx + tw / 2, valueY);
+      if (s.who) {
+        ctx.fillStyle = s.whoColor && isHex(s.whoColor) ? lighten(s.whoColor) : accent;
+        fitText(ctx, s.who, tw - 24, story ? 32 : 28, SANS, '700', 16);
+        ctx.fillText(ellipsize(ctx, s.who, tw - 24), tx + tw / 2, ty + th * 0.64);
+      }
       ctx.fillStyle = '#a1a1aa';
       fitText(ctx, s.label.toUpperCase(), tw - 24, 22, SANS, '600', 14);
-      ctx.fillText(s.label.toUpperCase(), tx + tw / 2, top + th * 0.8);
+      ctx.fillText(s.label.toUpperCase(), tx + tw / 2, ty + (s.who ? th * 0.86 : th * 0.8));
     });
     ctx.globalAlpha = 1;
   }
@@ -385,6 +411,29 @@ export function drawScoreCard(ctx: CanvasRenderingContext2D, data: ScoreCardData
     fitText(ctx, 'Also on Google Play', textMax, 28, SANS, '500', 16);
     ctx.fillText('Also on Google Play', pad + 36, fy + fh * 0.84);
   }
+}
+
+const isHex = (c: string) => /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(c.trim());
+
+/** Mixes a hex color toward white so it stays readable as text on the dark card. */
+function lighten(color: string, amt = 0.25): string {
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(color.trim());
+  if (!m) return color;
+  let h = m[1]!;
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  const n = parseInt(h, 16);
+  const ch = (v: number) => Math.round(v + (255 - v) * amt);
+  return `rgb(${ch((n >> 16) & 255)},${ch((n >> 8) & 255)},${ch(n & 255)})`;
+}
+
+/** The card's theme color: the winner's (hex) color when there is one, else the brand accent, else gold. */
+export function scoreCardAccent(data: ScoreCardData): string {
+  if (data.winnerTheme !== false) {
+    const rows = data.players || [];
+    const win = rows.find((p) => p.winner) || (data.marker !== 'none' ? rows[0] : undefined);
+    if (win?.color && isHex(win.color)) return win.color;
+  }
+  return data.accent || '#f5c542';
 }
 
 /** #rgb / #rrggbb + alpha → rgba(); other CSS colors are returned unchanged. */

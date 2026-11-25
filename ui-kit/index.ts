@@ -44,10 +44,17 @@ export { ReportContentButton, ReportContentDialog, aiContentRuleSection } from '
 export type { ReportContentButtonProps, ReportContentDialogProps } from './components/ReportContentButton';
 export { AiCreditsHost, CreditsChip, CreditsSheet, useCredits, aiCreditsRuleSections } from './components/AiCredits';
 export type { CreditsChipProps } from './components/AiCredits';
+export { JoinScanButton, useNativeJoinScan } from './components/JoinScanButton';
+export type { JoinScanButtonProps, UseNativeJoinScanOptions, NativeJoinScan } from './components/JoinScanButton';
+export { NotifyTurnPrompt } from './components/NotifyTurnPrompt';
+export type { NotifyTurnPromptProps } from './components/NotifyTurnPrompt';
 export { LazyQRCode } from './components/LazyQRCode';
 export { LazyShareSheet } from './components/LazyShareSheet';
 export { LocalAiSetting } from './components/LocalAiSetting';
 export type { ShareSheetProps } from './components/ShareSheet';
+export { ResultsCard } from './components/ResultsCard';
+export type { ResultsCardProps } from './components/ResultsCard';
+export { scoreCardAccent } from './utils/scoreCard';
 export type { QRCodeProps } from './components/QRCode';
 // Static QRCode (pulls the encoder into the importing chunk): import { QRCode } from './ui-kit/components/QRCode'
 export * from './components/icons';
@@ -88,6 +95,27 @@ export { isAutomatedBrowser, AI_TEST_HEADER } from './utils/testMode';
 export type { LazySocketOptions } from './utils/lazySocket';
 export { safeGet, safeSet, safeRemove, readJson } from './utils/storage';
 export { isNativeApp, nativePlatform, goToHub, NATIVE_UA_TOKEN, isTvDevice, applyTvClass, installDpadNav } from './utils/native';
+export {
+  nativeShell,
+  hasNativeScanner,
+  nativeScanQr,
+  nativeScanQrResult,
+  onAppShortcut,
+  onNotificationOpen,
+  pushAvailable,
+  notificationPermission,
+  getPushToken,
+  requestPushToken,
+  scheduleDailyReminder,
+  cancelReminder,
+  SHORTCUT_EVENT,
+  NOTIFICATION_EVENT,
+} from './utils/nativeShell';
+export type { MGNativeShell, MGNativeShellNotifications, NativeScanResult, NativePermission, NativeDailyReminder, NotificationOpenDetail } from './utils/nativeShell';
+export { parseJoinCode } from './utils/joinCode';
+export type { ParseJoinCodeOptions } from './utils/joinCode';
+export { registerSeatPush, notifySeats, pushConsent, setPushConsent, PUSH_CONSENT_KEY, PUSH_ALLOWED_EVENT, PUSH_CONSENT_EVENT } from './utils/pushClient';
+export type { PushConsent, PushSocketLike, RegisterSeatPushOptions, NotifySeatsInput, NotifyKind } from './utils/pushClient';
 export { reportContent, REPORT_CONTENT_URL, REPORT_REASONS, REPORT_LIMITS } from './utils/reportContent';
 export type { ReportContentInput, ReportReason } from './utils/reportContent';
 export {

@@ -388,6 +388,41 @@ skill that starts just under the humans' observed accuracy, eases off while the 
 and pushes harder while it trails. Map it onto the game's own AI decisions (chance of a right answer, size of a
 numeric error, buzz delay…). Humans can always win; games don't turn one-sided.
 
+### Native shell: QR scanner, shortcuts, notifications (Android app)
+Feature-detected wrappers for `window.MGNativeShell` (`utils/nativeShell.ts`; contract in
+`~/Dev/native-apps/docs/native-features.md`). On the website and in old app builds every call is a no-op that
+returns `null` / `false`; nothing throws.
+
+| helper | what |
+| --- | --- |
+| `hasNativeScanner()` / `nativeScanQr()` → `string \| null` | native QR scanner (null on cancel / unavailable); `nativeScanQrResult()` gives the full `{ ok, text } \| { ok: false, error }` |
+| `onAppShortcut((id) => …)` → unsubscribe | launcher shortcuts: the cold-start one (`takeLaunchShortcut()` or `?shortcut=<id>`, stripped with `history.replaceState`) and warm `mg-shortcut` events. Each shortcut reaches the handler once, also under StrictMode |
+| `onNotificationOpen(({ path, data }) => …)` → unsubscribe | `mg-notification` (a tap, or a push while the app is in the foreground) |
+| `pushAvailable()`, `notificationPermission()` | push support / `'granted' \| 'denied' \| 'prompt' \| null` |
+| `requestPushToken()` → `string \| null` | asks for permission (Android 13+ prompt), then returns the FCM token. `getPushToken()` never prompts |
+| `scheduleDailyReminder({ id, hour, minute, title, body, path? })` / `cancelReminder(id)` → `boolean` | local daily reminders (e.g. Fit) |
+| `parseJoinCode(text, { maxLength?, hosts? })` | the room code in a scanned QR: `https://<app>.mohitgoenka.com/?join=CODE` (also this page's host, localhost) or a bare CODE; null for other sites |
+
+```tsx
+const { scan } = useNativeJoinScan(joinRoom, { onFallback: () => setShowScan(true) }); // your ScanQrModal stays the fallback
+useEffect(() => onAppShortcut((id) => { if (id === 'join') void scan(); if (id === 'new') newGame(); }), [scan]);
+<JoinScanButton onCode={joinRoom} onFallback={() => setShowScan(true)} />   // kit Button, "Scan to join", outline
+```
+`useNativeJoinScan(onCode, { onFallback?, onUnknownQr?, maxLength?, hosts? })` → `{ scan, scanning, native }`: native
+scanner first; no native scanner (website, old build) or "unavailable" → `onFallback`; cancel → nothing; a QR that
+isn't a room link → `onUnknownQr` (default toast "That QR code isn't a room link.").
+
+**Turn notifications (phones in the Android app).** `<NotifyTurnPrompt />` (`label?`, `onResult?`, `className?`):
+an inline card "🔔 Notify me when it's my turn" · Not now · Allow. Asked once (answer in localStorage
+`mg:push-prompt:v1`); renders nothing on the website, in old builds, on TVs, once answered, or when notifications
+are blocked. Allow → `requestPushToken()`. Pair it with:
+- `registerSeatPush(socket, { joinedEvents? = ['joined'] })` → cleanup: after the player allowed it, emits
+  `push-token { token }` (now, after each `joined`, and right after Allow) and `visibility { hidden }` (now and on
+  every `visibilitychange`). `useEffect(() => registerSeatPush(socket), [socket])`.
+- Host screens: `notifySeats(socket, { to: seatTokensOrNames | 'all', kind: 'turn' | 'start', title?, body? })` →
+  `{ sent } | null`. The server (`server-kit/push/rooms.ts`) pushes only players who are away. Wiring: app-platform README
+  "Push notifications".
+
 ### `LazyQRCode` / `QRCode`
 Pure SVG QR code from a vendored MIT encoder (uqr, license in `vendor/uqr.js`). Encodes locally — the value is never
 sent anywhere. `LazyQRCode` splits the encoder (~4 kB gz) into its own chunk with a same-size skeleton.

@@ -2,7 +2,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { DinerView } from './components/DinerView';
 import { findCity, CITIES } from './data/cities';
 import { RulesContext } from './components/RulesContext';
-import { RulesOverlay, aiContentRuleSection, aiCreditsRuleSections, isNativeApp, lazyWithRetry, type RuleSection } from './ui-kit';
+import { RulesOverlay, aiContentRuleSection, aiCreditsRuleSections, isNativeApp, lazyWithRetry, onAppShortcut, type RuleSection } from './ui-kit';
 import { DataPage, EveSettings } from './components/AccountData';
 
 // Secondary screens load on demand so the planner opens fast.
@@ -142,6 +142,23 @@ export default function App() {
   const closeRules = useCallback(() => setRulesOpen(false), []);
   const openSettings = useCallback(() => setSettingsOpen(true), []);
   const rulesCtx = useMemo(() => ({ open: openRules, openSettings }), [openRules, openSettings]);
+  const [planSignal, setPlanSignal] = useState(0);
+
+  // "Plan tonight" launcher shortcut (Android app): the planner form, focused, from any screen.
+  useEffect(
+    () =>
+      onAppShortcut((id) => {
+        if (id !== 'plan') return;
+        setRulesOpen(false);
+        setSettingsOpen(false);
+        if (getRoute().kind !== 'diner') {
+          window.history.pushState({}, '', '/');
+          setRoute({ kind: 'diner' });
+        }
+        setPlanSignal((n) => n + 1);
+      }),
+    [],
+  );
 
   useEffect(() => {
     const onPop = () => setRoute(getRoute());
@@ -199,7 +216,7 @@ export default function App() {
       />
     );
   } else {
-    screen = <DinerView onSwitchToRestaurant={() => navigate('restaurant')} />;
+    screen = <DinerView onSwitchToRestaurant={() => navigate('restaurant')} planSignal={planSignal} />;
   }
 
   return (
