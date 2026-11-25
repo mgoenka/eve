@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Sparkles, Wand2, RotateCcw, Download, Copy, Check, ChefHat, Send, Lightbulb, Loader2, TrendingUp, Link as LinkIcon } from 'lucide-react';
 import { CUISINES, DEMO_RESTAURANTS } from '../constants';
 import type { Cuisine, ContentPack, RestaurantBrand } from '../types';
-import { generateContentPack, postSpecial, synthesize, suggestSpecial } from '../services/eveService';
+import { generateContentPack, postSpecial, restaurantMetrics, synthesize, suggestSpecial } from '../services/eveService';
 import type { SuggestSpecialResponse } from '../services/eveService';
 import { EveLogo } from './EveLogo';
 import { useOpenRules, useOpenSettings } from './RulesContext';
@@ -120,7 +120,14 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
 
   const [suggesting, setSuggesting] = useState(false);
   const [suggestion, setSuggestion] = useState<SuggestSpecialResponse | null>(null);
-  const [evePulse, setEvePulse] = useState<{ viewers: number; planning: number; cuisineRank: number } | null>(null);
+  // Real numbers from Eve's dining index for this restaurant (last 7 days), shown once it has published.
+  const [evePulse, setEvePulse] = useState<{ published: number; picked: number } | null>(null);
+  const loadPulse = (n: string, c: string) =>
+    restaurantMetrics(n, c)
+      .then((m) => {
+        if (m.totals.specialsPublished > 0) setEvePulse({ published: m.totals.specialsPublished, picked: m.totals.planInclusions });
+      })
+      .catch(() => {});
   // Instagram connection state — pulled from server brand doc.
   const [igConnected, setIgConnected] = useState<boolean>(false);
   const [igPublishing, setIgPublishing] = useState<boolean>(false);
@@ -382,12 +389,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
         imageMime: pack.instagramPost.imageMime,
       });
       setPosted(true);
-      const seedNum = (pack.dishName || '').length + (cuisine || '').length + new Date().getHours();
-      setEvePulse({
-        viewers: 7 + (seedNum % 11),
-        planning: 2 + (seedNum % 5),
-        cuisineRank: 1 + (seedNum % 3),
-      });
+      void loadPulse(name.trim(), city.trim());
     } catch (err: any) {
       setError(err?.message || 'Publish failed');
     }
@@ -671,25 +673,21 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
               )}
             </div>
 
-            {/* Illustrative numbers, not live metrics: never shown inside the native app. */}
-            {evePulse && !isNativeApp() && (
+            {/* Real numbers from Eve's dining index (last 7 days). */}
+            {evePulse && (
               <div className="mt-5 p-4 rounded-2xl border border-eve-rose/35 bg-gradient-to-br from-eve-rose/8 to-eve-gold/5 animate-fade-in">
                 <p className="text-mg-2xs tracking-wide text-eve-rose italic font-serif mb-3 inline-flex items-center gap-1.5">
                   <TrendingUp size={12} />
-                  Live on Eve right now
+                  On Eve this week
                 </p>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 gap-3">
                   <div className="text-center">
-                    <div className="font-serif text-3xl text-eve-cream">{evePulse.viewers}</div>
-                    <div className="text-xs text-eve-cream/60 italic font-serif">diners viewing</div>
+                    <div className="font-serif text-3xl text-eve-cream">{evePulse.published}</div>
+                    <div className="text-xs text-eve-cream/60 italic font-serif">{evePulse.published === 1 ? 'special featured' : 'specials featured'}</div>
                   </div>
                   <div className="text-center">
-                    <div className="font-serif text-3xl text-eve-gold">{evePulse.planning}</div>
-                    <div className="text-xs text-eve-cream/60 italic font-serif">planning to come</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="font-serif text-3xl text-eve-rose">#{evePulse.cuisineRank}</div>
-                    <div className="text-xs text-eve-cream/60 italic font-serif">in {cuisine || 'cuisine'} tonight</div>
+                    <div className="font-serif text-3xl text-eve-gold">{evePulse.picked}</div>
+                    <div className="text-xs text-eve-cream/60 italic font-serif">{evePulse.picked === 1 ? 'evening Eve planned here' : 'evenings Eve planned here'}</div>
                   </div>
                 </div>
               </div>

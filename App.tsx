@@ -41,13 +41,15 @@ const APP_RULES: RuleSection[] = [
     title: 'Your evening',
     icon: '✨',
     items: [
-      'Each stop shows its arrival time, what to order or do, walking time, a map link and reservation links where the venue takes bookings.',
+      'Each stop shows its arrival time, what to order or do, walking time, a map link and reservation links where the venue takes bookings. Arrival times add up: each stop starts when the one before ends plus the walk.',
       'Eve paints the first stop’s scene on her own. Tap Show picture on any other card to paint that one.',
-      'With her voice on, Eve walks you through the evening stop by stop. You can stop the walkthrough, or play her narration.',
+      'With her voice on, Eve walks you through the evening stop by stop, every stop of it. You can stop the walkthrough, or play her narration.',
       'Ask for changes in the chat ("swap dessert for live music") or tap a tweak chip: More upscale, More casual, Earlier, Vegan only or Cheaper.',
-      'A tweak chip adjusts the evening you have, it never starts over: the same number of stops in the same order, in the same area and vibe. Eve keeps the stops that already fit and swaps the rest for nearby places of the same kind (Earlier moves the times and keeps the places). Cheaper also halves the budget per person on the form.',
+      'A tweak chip adjusts the evening you have, it never starts over: the same number of stops in the same order, in the same area and vibe. Eve keeps the stops that already fit and swaps the rest for nearby places of the same kind. Earlier moves the whole evening an hour earlier and keeps the places (the start time on the form moves too). Cheaper also halves the budget per person on the form, and Vegan only adds vegan to the dietary needs.',
+      'After any change, stops Eve kept keep their pictures, and her story and narration are rewritten for the new evening.',
+      'Planning the same evening twice in a row gets you a fresh set of ideas.',
       'Share sends a link with the whole plan, so friends see the same evening. The pencil takes you back to the form.',
-      'Your last six evenings are saved on this device under Your recent evenings. Tap one to reopen it, or the x to remove it.',
+      'Your last six evenings are saved on this device under Your recent evenings. Tap one to reopen it (pictures already painted on this device come back without a new painting), or the x to remove it.',
     ],
   },
   {
@@ -83,7 +85,7 @@ const APP_RULES: RuleSection[] = [
       'Tap the shop icon. Enter your restaurant and city; cuisine, voice and signature dishes are optional.',
       'Eve suggests tonight’s special from recent reviews or trends. Different dish asks for another idea.',
       'Generate tonight’s look makes an Instagram post, a Reel storyboard with voiceover, a menu card, an email and an SMS. It uses 4 of the hour’s paintings. Tap Cancel to stop while Eve is making it.',
-      'Publish to Eve diners features your special to people planning evenings nearby.',
+      'Publish to Eve diners features your special to people planning evenings nearby. After you publish, Eve shows how many specials you featured this week and how many evenings she planned at your restaurant.',
     ],
   },
   aiContentRuleSection(

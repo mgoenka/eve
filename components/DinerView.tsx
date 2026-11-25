@@ -205,6 +205,43 @@ function buildShareURL(state: any, evening?: { title: string; stops: ExperienceS
   return url.toString();
 }
 
+// The story around the stops: a scene for every stop (2 to 6) and a bridge into Stops 2 and 3
+// (from Stop 4 on, each scene carries its own way there).
+function sceneTextFor(story: EveStory | null, i: number): string {
+  if (!story) return '';
+  if (i === 0) return story.atStop1;
+  if (i === 1) return story.atStop2;
+  if (i === 2) return story.atStop3;
+  return story.laterStops?.[i - 3] || '';
+}
+function transitionTextFor(story: EveStory | null, i: number): string {
+  if (!story) return '';
+  return i === 1 ? story.transition1to2 : i === 2 ? story.transition2to3 : '';
+}
+interface StoryBeat {
+  text: string;
+  kind: 'opening' | 'transition' | 'scene' | 'closing';
+  /** The stop this beat belongs to (-1 for the opening and closing). */
+  stop: number;
+}
+/** What Eve says in the walkthrough, in order: only beats for stops the plan has. */
+function storyBeats(story: EveStory | null, stopCount: number): StoryBeat[] {
+  if (!story) return [];
+  const beats: StoryBeat[] = [{ text: story.opening, kind: 'opening', stop: -1 }];
+  for (let i = 0; i < stopCount; i++) {
+    beats.push({ text: transitionTextFor(story, i), kind: 'transition', stop: i });
+    beats.push({ text: sceneTextFor(story, i), kind: 'scene', stop: i });
+  }
+  beats.push({ text: story.closing, kind: 'closing', stop: -1 });
+  return beats.filter((b) => b.text);
+}
+
+/** "19:30" -> "7:30 PM". */
+function clockLabel(hhmm: string): string {
+  const [h, m] = hhmm.split(':').map((n) => parseInt(n, 10) || 0);
+  return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
+}
+
 function timeAgo(ts: number): string {
   const mins = Math.round((Date.now() - ts) / 60000);
   if (mins < 1) return 'just now';
@@ -281,8 +318,7 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
 
   // Animated walkthrough — Eve walks the user through the evening narratively,
   // highlighting each stop card in turn while speaking the corresponding beat.
-  // walkingIdx semantics: -1 idle, 0 opening, 1 atStop1, 2 transition1to2,
-  // 3 atStop2, 4 transition2to3, 5 atStop3, 6 closing, 7 done
+  // walkingIdx: -1 idle, else the index of the beat Eve is speaking (storyBeats).
   const [walkingIdx, setWalkingIdx] = useState<number>(-1);
   const walkingCancelRef = useRef(false);
   // Once-per-plan auto-walk guard so Eve narrates the night the moment it
@@ -762,12 +798,50 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
     (list: ExperienceStop[], useCity: string, useVibe: Vibe) => {
       setStops((prev) => prev.map((st, idx) => (idx === 0 ? st : { ...st, status: st.imageData ? st.status : 'pending' })));
       // Speculative: only when it can't spend Sparks the user didn't choose to spend (else "Show picture" stays).
-      if (list[0] && speculativeAiAllowed()) return paintStop(list[0], 0, useCity, useVibe, { background: true });
+      // A first stop that kept its picture (a refine that kept it) is not painted again.
+      if (list[0] && !list[0].imageData && speculativeAiAllowed()) return paintStop(list[0], 0, useCity, useVibe, { background: true });
       return Promise.resolve();
     },
     [paintStop]
   );
 
+  // Eve's narration of the evening (text + voice, kept on this device by key) and her send-off line.
+  // Asked again whenever the stops change, so the player never narrates an evening that is gone.
+  const loadNarrationAndOutro = useCallback(
+    async (title: string, list: ExperienceStop[], useCity: string, useVibe: Vibe, isCurrent: () => boolean = () => !cancelRef.current) => {
+      const textStops = list.map(({ imageData, imageMime, imageKey, availability, restored, status, error, errorCode, ...rest }) => ({ ...rest, status: 'pending' as const }));
+      try {
+        const nText = await narrationText({ title, stops: textStops, vibe: useVibe });
+        if (!isCurrent()) return;
+        setNarrationText(nText.narration || '');
+        const audio = await synthesize(nText.narration, 'eve');
+        if (!isCurrent()) return;
+        setNarrationAudio(audio.audioData);
+        setNarrationMime(audio.audioMime || 'audio/mpeg');
+        // Kept on this device (by key) so a restored evening keeps its narration without new audio.
+        const nKey = `narration|${title || ''}|${useCity}|${list.map((st) => st.name).join('|')}`.slice(0, 400);
+        setNarrationKey(nKey);
+        void putPicture(nKey, audio.audioData, audio.audioMime || 'audio/mpeg');
+      } catch (err) {
+        console.warn('narration audio skipped', err);
+      }
+      if (!isCurrent()) return;
+      try {
+        const o = await eveOutro({
+          vibe: useVibe,
+          city: useCity,
+          stops: list.map((st) => ({ name: st.name, kind: st.kind })),
+        });
+        // Set the text bubble but DON'T auto-speak — the "Walk me through this
+        // evening" button is the canonical Eve-narrated experience now,
+        // and auto-speaking outro was a source of overlapping audio.
+        if (isCurrent()) setEveOutroText(o.outro || '');
+      } catch {}
+    },
+    []
+  );
+
+  const lastPlanKeyRef = useRef('');
   const buildPlan = useCallback(
     async (
       overrides: Partial<{
@@ -894,19 +968,26 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
         .catch(() => []);
 
       let skeleton: Awaited<ReturnType<typeof planSkeleton>>;
+      const request = {
+        city: useCity,
+        vibe: useVibe,
+        party: useParty,
+        dietary: useDietary,
+        budgetPerPersonUSD: budgetPerPerson,
+        freeText: useFreeText || 'Eve, surprise me.',
+        cuisinePref,
+        whenISO,
+        startTime,
+        durationHours,
+        // "Tonight" is the visitor's tonight, whatever time zone the server runs in.
+        todayISO: todayISO(),
+      };
+      // Asking again for the very evening just planned here means "give me another one", not the cached plan.
+      const requestKey = JSON.stringify(request);
+      const fresh = lastPlanKeyRef.current === requestKey;
+      lastPlanKeyRef.current = requestKey;
       try {
-        skeleton = await planSkeleton({
-          city: useCity,
-          vibe: useVibe,
-          party: useParty,
-          dietary: useDietary,
-          budgetPerPersonUSD: budgetPerPerson,
-          freeText: useFreeText || 'Eve, surprise me.',
-          cuisinePref,
-          whenISO,
-          startTime,
-          durationHours,
-        });
+        skeleton = await planSkeleton({ ...request, ...(fresh ? { fresh: true } : {}) });
       } catch (err: any) {
         setError(err?.message || 'Eve could not plan your evening.');
         setPhase('input');
@@ -956,39 +1037,9 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
 
       if (cancelRef.current) return;
 
-      try {
-        const nText = await narrationText({
-          title: skeleton.title,
-          stops: initialStops as any,
-          vibe: useVibe,
-        });
-        if (cancelRef.current) return;
-        setNarrationText(nText.narration || '');
-        const audio = await synthesize(nText.narration, 'eve');
-        if (cancelRef.current) return;
-        setNarrationAudio(audio.audioData);
-        setNarrationMime(audio.audioMime || 'audio/mpeg');
-        // Kept on this device (by key) so a restored evening keeps its narration without new audio.
-        const nKey = `narration|${skeleton.title || ''}|${useCity}`.slice(0, 400);
-        setNarrationKey(nKey);
-        void putPicture(nKey, audio.audioData, audio.audioMime || 'audio/mpeg');
-      } catch (err) {
-        console.warn('narration audio skipped', err);
-      }
-
-      try {
-        const o = await eveOutro({
-          vibe: useVibe,
-          city: useCity,
-          stops: initialStops.map((s) => ({ name: s.name, kind: s.kind })),
-        });
-        // Set the text bubble but DON'T auto-speak — the "Walk me through this
-        // evening" button is the canonical Eve-narrated experience now,
-        // and auto-speaking outro was a source of overlapping audio.
-        setEveOutroText(o.outro || '');
-      } catch {}
+      await loadNarrationAndOutro(skeleton.title, initialStops, useCity, useVibe);
     },
-    [city, vibe, party, dietary, budgetPerPerson, freeText, cuisinePref, whenISO, startTime, durationHours, speakAsEve, paintFirstStop]
+    [city, vibe, party, dietary, budgetPerPerson, freeText, cuisinePref, whenISO, startTime, durationHours, speakAsEve, paintFirstStop, loadNarrationAndOutro]
   );
 
 
@@ -1033,7 +1084,20 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
           })
           .catch(() => {});
       }
-      void paintFirstStop(restored, e.city, e.vibe);
+      // Pictures painted for these stops before (kept on this device) come back without a new painting.
+      void Promise.all(restored.map((st) => getPicture(pictureKey(st, e.city, e.vibe)).catch(() => null))).then((pics) => {
+        if (cancelRef.current || eveningIdRef.current !== e.id) return;
+        const withPics = restored.map((st, i) => {
+          const pic = pics[i];
+          return pic ? { ...st, imageData: pic.data, imageMime: pic.mime, imageKey: pictureKey(st, e.city, e.vibe), status: 'ready' as const } : st;
+        });
+        if (pics.some(Boolean)) {
+          setStops((prev) =>
+            prev.map((st, i) => (st.name === withPics[i]?.name && !st.imageData && withPics[i].imageData ? withPics[i] : st))
+          );
+        }
+        void paintFirstStop(withPics, e.city, e.vibe);
+      });
     },
     [paintFirstStop]
   );
@@ -1171,6 +1235,8 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
   // If a plan already exists (we're in walkthrough or post-plan chat),
   // route the transcript to eve-refine instead — the user is asking for a
   // tweak, not a new plan from scratch.
+  // Voice changes go through refineEvening (defined below, read through a ref).
+  const refineEveningRef = useRef<(msg: string, opts?: { voice?: boolean }) => Promise<void>>(async () => {});
   const processTranscript = useCallback(
     async (transcript: string) => {
       if (!transcript.trim()) return;
@@ -1181,55 +1247,8 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
         walkingCancelRef.current = true;
         setWalkingIdx(-1);
         stopAllAudio();
-        setRefining(true);
-        try {
-          const result = await eveRefine({
-            message: transcript,
-            previousPlan: { stops: stops.map((s) => ({ name: s.name, kind: s.kind, oneLineVibe: s.oneLineVibe, approxArrival: s.approxArrival })) },
-            vibe,
-            city,
-            dietary,
-            party,
-            budgetUSD: budgetPerPerson * party,
-          });
-          if (result.spokenReply) {
-            setEveIntroText(result.spokenReply);
-            await speakAsEveAndWait(result.spokenReply);
-          }
-          if (result.stops?.length) {
-            setPlanTitle(result.title || planTitle);
-            const newStops: ExperienceStop[] = result.stops.map((s) => ({
-              kind: s.kind as any,
-              name: s.name,
-              oneLineVibe: s.oneLineVibe,
-              whyThisFits: s.whyThisFits,
-              approxArrival: s.approxArrival,
-              durationMinutes: s.durationMinutes || 60,
-              walkMinutesFromPrev: s.walkMinutesFromPrev || 0,
-              signatureItem: s.signatureItem,
-              isEveOriginal: !!s.isEveOriginal,
-              status: 'pending',
-            }));
-            setStops(newStops);
-            // Reset auto-walk so the refreshed plan auto-narrates.
-            autoWalkedRef.current = false;
-            // Refresh story for the new plan
-            loadStory({
-              title: result.title || planTitle,
-              stops: newStops.map((s) => ({ name: s.name, kind: s.kind, oneLineVibe: s.oneLineVibe, signatureItem: s.signatureItem })),
-              vibe,
-              city,
-              party,
-            }).then(setStory).catch(() => {});
-            // First stop's picture automatically, the rest on tap.
-            await paintFirstStop(newStops, city, vibe);
-          }
-        } catch (err: any) {
-          console.error('refine-by-voice failed:', err);
-          toast.error(err?.message || 'Eve couldn\u2019t change the plan just now. Try again.');
-        } finally {
-          setRefining(false);
-        }
+        // Same path as a typed change: kept stops keep their pictures, the story and narration follow.
+        await refineEveningRef.current(transcript, { voice: true });
         // Keep the mic open for the next ask.
         try {
           const rec = recognitionRef.current;
@@ -1597,49 +1616,85 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
 
   // Ask Eve (typed) and the tweak chips change the current evening; they never re-plan it from scratch.
   // A chip (adjust) keeps the stops' number, order, kinds, area and vibe and only swaps or adjusts stops.
-  const refineEvening = useCallback(async (msg: string, opts: { adjust?: boolean; budgetPerPerson?: number; shown?: string } = {}) => {
+  const refineEvening = useCallback(async (
+    msg: string,
+    opts: { adjust?: boolean; budgetPerPerson?: number; dietary?: DietaryPreference[]; shown?: string; voice?: boolean } = {}
+  ) => {
     if (!msg || refining) return;
     setChatHistory((h) => [...h, { role: 'user', text: opts.shown || msg }]);
     setRefining(true);
     const perPerson = opts.budgetPerPerson ?? budgetPerPerson;
+    const useDietary = opts.dietary ?? dietary;
+    const before = stops;
 
     try {
       const previousPlan = {
-        stops: stops.map((s) => ({ name: s.name, kind: s.kind, oneLineVibe: s.oneLineVibe, approxArrival: s.approxArrival, signatureItem: s.signatureItem, durationMinutes: s.durationMinutes, walkMinutesFromPrev: s.walkMinutesFromPrev })),
+        stops: before.map((s) => ({ name: s.name, kind: s.kind, oneLineVibe: s.oneLineVibe, approxArrival: s.approxArrival, signatureItem: s.signatureItem, durationMinutes: s.durationMinutes, walkMinutesFromPrev: s.walkMinutesFromPrev })),
       };
       const result = await eveRefine({
         message: msg,
         previousPlan,
         vibe,
         city,
-        dietary,
+        dietary: useDietary,
         party,
         budgetUSD: perPerson * party,
         adjust: !!opts.adjust,
       });
+      if (cancelRef.current) return;
 
       setChatHistory((h) => [...h, { role: 'eve', text: result.spokenReply, ai: true }]);
-      if (result.spokenReply) speakAsEve(result.spokenReply);
+      if (result.spokenReply) {
+        if (opts.voice) {
+          setEveIntroText(result.spokenReply);
+          await speakAsEveAndWait(result.spokenReply);
+        } else speakAsEve(result.spokenReply);
+      }
 
       if (result.stops?.length) {
-        setPlanTitle(result.title || planTitle);
-        const newStops: ExperienceStop[] = result.stops.map((s) => ({
-          kind: s.kind as any,
-          name: s.name,
-          oneLineVibe: s.oneLineVibe,
-          whyThisFits: s.whyThisFits,
-          approxArrival: s.approxArrival,
-          durationMinutes: s.durationMinutes || 60,
-          walkMinutesFromPrev: s.walkMinutesFromPrev || 0,
-          signatureItem: s.signatureItem,
-          isEveOriginal: !!s.isEveOriginal,
-          status: 'pending',
-        }));
+        const title = result.title || planTitle;
+        setPlanTitle(title);
+        const newStops: ExperienceStop[] = result.stops.map((s) => {
+          const fresh: ExperienceStop = {
+            kind: s.kind as any,
+            name: s.name,
+            oneLineVibe: s.oneLineVibe,
+            whyThisFits: s.whyThisFits,
+            approxArrival: s.approxArrival,
+            durationMinutes: s.durationMinutes || 60,
+            walkMinutesFromPrev: s.walkMinutesFromPrev || 0,
+            signatureItem: s.signatureItem,
+            isEveOriginal: !!s.isEveOriginal,
+            status: 'pending',
+          };
+          // A stop Eve kept (same place, same kind) keeps its picture and booking links: nothing is painted
+          // or checked again for it.
+          const kept = before.find((p) => p.kind === fresh.kind && p.name.trim().toLowerCase() === fresh.name.trim().toLowerCase());
+          if (!kept) return fresh;
+          return {
+            ...fresh,
+            isEveOriginal: fresh.isEveOriginal || !!kept.isEveOriginal,
+            ...(kept.availability ? { availability: kept.availability } : {}),
+            ...(kept.imageData
+              ? { imageData: kept.imageData, imageMime: kept.imageMime, imageKey: kept.imageKey, status: 'ready' as const }
+              : {}),
+          };
+        });
         setStops(newStops);
+        // The old narration and send-off describe the old evening: drop them until the new ones arrive.
+        setNarrationAudio(null);
+        setNarrationText('');
+        setNarrationKey('');
+        setPlaying(false);
+        try {
+          audioRef.current?.pause();
+        } catch {}
+        setEveOutroText('');
+        // The refreshed plan walks itself through again (voice on).
+        autoWalkedRef.current = false;
 
-        // refresh story
         loadStory({
-          title: result.title || planTitle,
+          title,
           stops: newStops.map((s) => ({
             name: s.name,
             kind: s.kind,
@@ -1650,11 +1705,14 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
           city,
           party,
         })
-          .then(setStory)
+          .then((st) => {
+            if (!cancelRef.current) setStory(st);
+          })
           .catch(() => {});
 
-        // First stop's picture automatically, the rest on tap.
+        // First stop's picture automatically (unless it kept one), the rest on tap.
         await paintFirstStop(newStops, city, vibe);
+        void loadNarrationAndOutro(title, newStops, city, vibe);
       }
     } catch (err: any) {
       setChatHistory((h) => [
@@ -1662,11 +1720,14 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
         { role: 'eve', text: 'Sorry, I lost my train of thought. Try that again?' },
       ]);
       // Put a typed message back so one tap on Send retries it (a chip is just tapped again).
-      if (!opts.adjust) setChatInput((cur) => cur || msg);
+      if (!opts.adjust && !opts.voice) setChatInput((cur) => cur || msg);
+      if (opts.voice) toast.error(err?.message || 'Eve couldn\u2019t change the plan just now. Try again.');
     } finally {
       setRefining(false);
     }
-  }, [refining, stops, vibe, city, dietary, party, budgetPerPerson, planTitle, speakAsEve]);
+  }, [refining, stops, vibe, city, dietary, party, budgetPerPerson, planTitle, speakAsEve, speakAsEveAndWait, paintFirstStop, loadNarrationAndOutro, loadStory, toast]);
+
+  refineEveningRef.current = refineEvening;
 
   const sendChat = useCallback(() => {
     const msg = chatInput.trim();
@@ -1703,24 +1764,16 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
       }
     } catch {}
 
-    const beats: { idx: number; text: string }[] = [
-      { idx: 0, text: story.opening },
-      { idx: 1, text: story.atStop1 },
-      { idx: 2, text: story.transition1to2 },
-      { idx: 3, text: story.atStop2 },
-      { idx: 4, text: story.transition2to3 },
-      { idx: 5, text: story.atStop3 },
-      { idx: 6, text: story.closing },
-    ].filter((b) => b.text);
+    const beats = storyBeats(story, stops.length);
 
-    for (const beat of beats) {
+    for (let b = 0; b < beats.length; b++) {
       if (walkingCancelRef.current) break;
-      setWalkingIdx(beat.idx);
-      await speakAsEveAndWait(beat.text);
+      setWalkingIdx(b);
+      await speakAsEveAndWait(beats[b].text);
       await new Promise((r) => setTimeout(r, 250));
     }
     if (!walkingCancelRef.current) setWalkingIdx(-1);
-  }, [story, speakAsEveAndWait, stopAllAudio]);
+  }, [story, stops.length, speakAsEveAndWait, stopAllAudio]);
 
   // Auto-trigger the walkthrough once the plan is fully loaded. Eve walks
   // the user through the evening on her own — no button click needed.
@@ -1751,15 +1804,10 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
     }
   }, []);
 
-  // Map walking idx to which stop is currently in focus (highlighted).
-  // Beats 1, 3, 5 are AT a specific stop. Transitions don't highlight one.
-  const highlightedStopIdx = (() => {
-    if (walkingIdx < 0) return -1;
-    if (walkingIdx === 1) return 0;
-    if (walkingIdx === 3) return 1;
-    if (walkingIdx === 5) return 2;
-    return -1;
-  })();
+  // The beat Eve is speaking: a scene highlights its stop's card; a transition lights its bridge.
+  const walkBeats = storyBeats(story, stops.length);
+  const activeBeat = walkingIdx >= 0 ? walkBeats[walkingIdx] : undefined;
+  const highlightedStopIdx = activeBeat?.kind === 'scene' ? activeBeat.stop : -1;
 
   // What the user sees of the plan, for a content report (the kit trims to 1200 chars).
   const planReportText = () =>
@@ -1767,7 +1815,7 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
       `Plan: ${planTitle} (${city}, ${formatDate(whenISO)})`,
       ...stops.map((s, i) => `${i + 1}. ${s.name} (${s.kind}, ${s.approxArrival}): ${s.oneLineVibe} ${s.whyThisFits}${s.signatureItem ? ` Order: ${s.signatureItem}.` : ''}`),
       story
-        ? `Story: ${[story.opening, story.atStop1, story.transition1to2, story.atStop2, story.transition2to3, story.atStop3, story.closing].filter(Boolean).join(' ')}`
+        ? `Story: ${storyBeats(story, stops.length).map((b) => b.text).join(' ')}`
         : '',
     ]
       .filter(Boolean)
@@ -2588,20 +2636,10 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
           )}
 
           {stops.map((stop, i) => {
-            const sceneText =
-              i === 0 ? story?.atStop1 : i === 1 ? story?.atStop2 : i === 2 ? story?.atStop3 : '';
-            const transitionText =
-              i === 1 ? story?.transition1to2 : i === 2 ? story?.transition2to3 : '';
-            const transitionActive =
-              walkingIdx === 2 && i === 1 ? true : walkingIdx === 4 && i === 2 ? true : false;
-            const sceneActive =
-              walkingIdx === 1 && i === 0
-                ? true
-                : walkingIdx === 3 && i === 1
-                  ? true
-                  : walkingIdx === 5 && i === 2
-                    ? true
-                    : false;
+            const sceneText = sceneTextFor(story, i);
+            const transitionText = transitionTextFor(story, i);
+            const transitionActive = activeBeat?.kind === 'transition' && activeBeat.stop === i;
+            const sceneActive = activeBeat?.kind === 'scene' && activeBeat.stop === i;
             return (
               <div key={`${stop.name}-${i}`} className="space-y-4">
                 {transitionText && (
@@ -2721,7 +2759,7 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
           {[
             { label: 'More upscale', icon: ArrowUpRight, suffix: ' Make every stop more upscale and refined.' },
             { label: 'More casual', icon: ArrowDownRight, suffix: ' Make every stop more casual and easygoing.' },
-            { label: 'Earlier', icon: ClockIcon, suffix: ' Shift the entire evening earlier — start by 6 PM.' },
+            { label: 'Earlier', icon: ClockIcon, suffix: '' },
             { label: 'Vegan only', icon: Leaf, suffix: ' Strictly vegan across all stops.' },
             { label: 'Cheaper', icon: Coins, suffix: '' },
           ].map((chip) => {
@@ -2733,6 +2771,24 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
                 onClick={() => {
                   // A tweak adjusts this evening (same stops, order, area and vibe). The form keeps the ask,
                   // so a later "Plan my evening" plans with it too.
+                  if (chip.label === 'Earlier') {
+                    // An hour earlier than this evening starts now (never before 3 PM); the form follows.
+                    const [hh, mm] = (startTime || '19:30').split(':').map((n) => parseInt(n, 10) || 0);
+                    const mins = Math.max(15 * 60, hh * 60 + mm - 60);
+                    const next = `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+                    setStartTime(next);
+                    void refineEvening(
+                      `Move the whole evening earlier: Stop 1 at ${clockLabel(next)}, and every later stop earlier by the same amount. Keep every venue.`,
+                      { adjust: true, shown: chip.label },
+                    );
+                    return;
+                  }
+                  if (chip.label === 'Vegan only') {
+                    const nextDietary: DietaryPreference[] = dietary.includes('vegan') ? dietary : [...dietary, 'vegan'];
+                    setDietary(nextDietary);
+                    void refineEvening(chip.suffix.trim(), { adjust: true, dietary: nextDietary, shown: chip.label });
+                    return;
+                  }
                   if (chip.label === 'Cheaper') {
                     const half = Math.max(20, Math.round(budgetPerPerson / 2 / 10) * 10);
                     setBudgetPerPerson(half);
@@ -2742,7 +2798,7 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
                     );
                     return;
                   }
-                  setFreeText((freeText || '') + chip.suffix);
+                  if (!freeText.includes(chip.suffix.trim())) setFreeText((freeText || '') + chip.suffix);
                   void refineEvening(chip.suffix.trim(), { adjust: true, shown: chip.label });
                 }}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.10] border border-white/10 hover:border-eve-gold/40 text-xs font-medium text-eve-cream/80 hover:text-eve-cream transition-colors disabled:opacity-50"
