@@ -37,6 +37,7 @@ import { aiFixturesActive, aiTestModeMiddleware } from './server/ai-guard.ts';
 import { normalizeArrivals } from './server/planTimes.ts';
 import { ttsFixture } from './server/ai-fixtures.ts';
 import { keepPlanShape, refinePrompt } from './server/refine.ts';
+import { saveSpecial } from './server/specials.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -1776,18 +1777,12 @@ app.post('/api/post-special', async (req, res) => {
   try {
     // Linked to this device so "Delete my account and data" can remove it.
     const ownerKeyHash = sha256(ownerKeyFor(req, res));
-    const id = await firestore.addSpecial({
-      ownerKeyHash,
-      restaurantName,
-      city,
-      cuisine,
-      dishName,
-      caption,
-      imageData,
-      imageMime,
-      postedAtISO: new Date().toISOString(),
-    });
-    res.json({ ok: true, id });
+    // Free AI test mode (smoke tests, automated browsers) never writes to the real dining index.
+    const result = await saveSpecial(
+      { ownerKeyHash, restaurantName, city, cuisine, dishName, caption, imageData, imageMime, postedAtISO: new Date().toISOString() },
+      firestore.addSpecial,
+    );
+    res.json(result);
   } catch (err: any) {
     aiFailed(res, err, 'post-special failed');
   }

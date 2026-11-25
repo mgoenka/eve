@@ -239,7 +239,8 @@ export async function postSpecial(input: {
   caption: string;
   imageData?: string;
   imageMime?: string;
-}): Promise<{ ok: boolean; id: string }> {
+}): Promise<{ ok: boolean; id: string; testMode?: boolean }> {
+  // testMode: free AI test mode; the server stored nothing.
   return call('/api/post-special', input, { timeoutMs: 30_000, retries: 0 });
 }
 

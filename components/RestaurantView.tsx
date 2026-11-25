@@ -115,6 +115,8 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
   const [pack, setPack] = useState<ContentPack | null>(null);
   const [reelAudio, setReelAudio] = useState<string | null>(null);
   const [posted, setPosted] = useState(false);
+  // Free AI test mode: the server stored nothing, so the button must not claim the special is live.
+  const [postedTest, setPostedTest] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -379,7 +381,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
   const publishToEve = async () => {
     if (!pack) return;
     try {
-      await postSpecial({
+      const result = await postSpecial({
         restaurantName: name.trim(),
         city: city.trim(),
         cuisine,
@@ -389,7 +391,8 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
         imageMime: pack.instagramPost.imageMime,
       });
       setPosted(true);
-      void loadPulse(name.trim(), city.trim());
+      setPostedTest(!!result?.testMode);
+      if (!result?.testMode) void loadPulse(name.trim(), city.trim());
     } catch (err: any) {
       setError(err?.message || 'Publish failed');
     }
@@ -668,7 +671,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                   }`}
                 >
                   {posted ? <Check size={14} /> : <Send size={14} />}
-                  {posted ? 'Featured on Eve this evening' : 'Publish to Eve diners'}
+                  {posted ? (postedTest ? 'Test mode: not published' : 'Featured on Eve this evening') : 'Publish to Eve diners'}
                 </button>
               )}
             </div>
