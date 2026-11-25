@@ -55,8 +55,12 @@ export type { ShareSheetProps } from './components/ShareSheet';
 export { ResultsCard } from './components/ResultsCard';
 export { BackupModal, BackupButton, useBackupEntry, useBackupStatus } from './components/BackupModal';
 export type { BackupModalProps } from './components/BackupModal';
+export { SearchSuggestions } from './components/SearchSuggestions';
+export { isSearchSuggestionsHtml } from './utils/searchSuggestions';
+export type { SearchSuggestionsProps } from './components/SearchSuggestions';
 export type { ResultsCardProps } from './components/ResultsCard';
 export { SCORER_FEED_URL, reportToScorer } from './utils/scorerFeed';
+export { trackPulse, trackGamePulse, gameFingerprint } from './utils/pulse';
 export { scoreCardAccent } from './utils/scoreCard';
 export type { QRCodeProps } from './components/QRCode';
 // Static QRCode (pulls the encoder into the importing chunk): import { QRCode } from './ui-kit/components/QRCode'

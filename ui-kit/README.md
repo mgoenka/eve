@@ -441,6 +441,14 @@ another device, and Export / Import to a JSON file. Engine: `createBackup` (your
 (existing localStorage keys). Server side: `server-kit/backup` (`scripts/sync-backup.sh`). Full guide: the
 app-platform README, "Backup and sync".
 
+### `SearchSuggestions` (+ `utils/searchSuggestions.ts` `isSearchSuggestionsHtml`, plain TS a server can import)
+For answers grounded with Google Search (Gemini `tools: [{ googleSearch: {} }]`). Google's Gemini API terms require
+grounded results to be shown with their Search Suggestions, unmodified. Pass
+`groundingMetadata.searchEntryPoint.renderedContent` as `html`: it renders in a sandboxed iframe (no scripts, opaque
+origin, links open a new tab) and renders nothing for HTML that isn't shaped like Google's (only Google search
+links, no active content), so a shared link or backup file can't inject markup. `height` (64). Store the HTML with
+the grounded answer so saved copies still show it; don't serve one user's grounded answer to another from a cache.
+
 ## 6. Hooks
 
 | hook | what |

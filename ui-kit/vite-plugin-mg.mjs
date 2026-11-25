@@ -4,6 +4,8 @@
  * Vite plugin for the kit (plain JS so app tsconfigs don't need @types/node):
  *   - preloads the kit's two main woff2 fonts in the built index.html (hashed URLs)
  *   - writes dist/sw.js from ui-kit/sw-template.js (or your own swSrc) with the precache list + version injected
+ *   - adds ui-kit/pulse.js as /mg-pulse.js (anonymous usage counts, see server-kit/pulse); pulse: false turns it off,
+ *     pulse: { endpoint } sends beacons elsewhere (apps without a /api/pulse route of their own)
  *
  *   // vite.config.ts
  *   import { mgKit } from './ui-kit/vite-plugin-mg.mjs';    // or './src/ui-kit/…', './client/src/ui-kit/…'
@@ -83,7 +85,7 @@ export function injectPrecache(outDir, opts = {}) {
 }
 
 /**
- * @param {{ sw?: boolean | { swSrc?: string, swDest?: string, include?: RegExp, exclude?: RegExp[], extra?: string[], lazyMaxBytes?: number }, preloadFonts?: boolean }} [options]
+ * @param {{ sw?: boolean | { swSrc?: string, swDest?: string, include?: RegExp, exclude?: RegExp[], extra?: string[], lazyMaxBytes?: number }, preloadFonts?: boolean, pulse?: boolean | { endpoint?: string } }} [options]
  * @returns {any[]}
  */
 export function mgKit(options = {}) {
@@ -108,6 +110,27 @@ export function mgKit(options = {}) {
             }
           }
           return tags;
+        },
+      },
+    },
+    {
+      name: 'mg-kit:pulse',
+      apply: 'build',
+      generateBundle() {
+        if (options.pulse === false) return;
+        // @ts-ignore Rollup plugin context
+        this.emitFile({ type: 'asset', fileName: 'mg-pulse.js', source: readFileSync(join(HERE, 'pulse.js'), 'utf8') });
+      },
+      transformIndexHtml: {
+        order: 'post',
+        /** @param {string} _html @param {any} ctx */
+        handler(_html, ctx) {
+          if (options.pulse === false || !ctx.bundle) return;
+          const endpoint = typeof options.pulse === 'object' && options.pulse.endpoint;
+          /** @type {Record<string, string | boolean>} */
+          const attrs = { src: base + 'mg-pulse.js', defer: true };
+          if (endpoint) attrs['data-endpoint'] = endpoint;
+          return [{ tag: 'script', attrs, injectTo: 'head' }];
         },
       },
     },

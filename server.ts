@@ -1,5 +1,6 @@
 import express from 'express';
 import { backupRouter } from './server/backup/index.ts';
+import { pulseRouter } from './server/pulse/index.ts';
 import helmet from 'helmet';
 import crypto from 'crypto';
 import compression from 'compression';
@@ -613,6 +614,8 @@ function metered(action: string, estimate: Estimate, handler: AiHandler): expres
 // credits.identify. Mounted before the /api origin guard: the balance GET may arrive without
 // Origin/Referer; it changes nothing but creating a wallet. The kit rate-limits the credits endpoints.
 // Recent evenings: private-key backup and device linking (server-kit/backup), with its own JSON parser.
+// Anonymous usage counts (server-kit/pulse): beacons from ui-kit/pulse.js, no cookies, nothing personal.
+app.use('/api/pulse', pulseRouter(express, { app: 'eve', allowedHosts: ['eve.mohitgoenka.com'] }));
 app.use('/api/backup', backupRouter(express, { app: 'eve', allowedHosts: ['eve.mohitgoenka.com'], projectId: 'public-mohit-260610' }));
 
 app.use('/api', (req, res, next) => void credits.middleware(req, res, next));

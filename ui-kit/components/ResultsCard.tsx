@@ -4,6 +4,7 @@ import type { ScoreCardData, ScoreCardFormat } from '../utils/scoreCard';
 import { SCORE_CARD_SIZES, drawScoreCard, scoreCardAccent, scoreVideoDuration } from '../utils/scoreCard';
 import { cx } from '../utils/cx';
 import { reportToScorer } from '../utils/scorerFeed';
+import { trackGamePulse } from '../utils/pulse';
 
 export interface ResultsCardProps {
   /** The same data the share sheet uses: the final screen is the share card itself. */
@@ -38,6 +39,11 @@ export function ResultsCard({ data, format = 'post', animate = true, report = tr
   useEffect(() => {
     if (report) reportToScorer(shown);
   }, [shown, report]);
+
+  // Anonymous usage count: one finished game (every screen of a party game shares one fingerprint).
+  useEffect(() => {
+    trackGamePulse(shown);
+  }, [shown]);
 
   useEffect(() => {
     const canvas = ref.current;
