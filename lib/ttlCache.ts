@@ -3,6 +3,12 @@
 // pack, same lookup) from memory instead of paying for another generation.
 // Per instance only: Cloud Run instances are few and short-lived, so this
 // stays tiny and needs no extra service.
+//
+// Free AI test mode answers (fixtures) are kept apart from real answers: a test
+// request never fills the cache a real visitor reads, and never reads a real answer.
+import { aiFixturesActive } from '../server/ai-guard.ts';
+
+const scoped = (key: string): string => (aiFixturesActive() ? `fixture\u0000${key}` : key);
 
 export class TtlCache<V> {
   private map = new Map<string, { value: V; expiresAt: number; bytes: number }>();
@@ -13,10 +19,11 @@ export class TtlCache<V> {
   ) {}
 
   get(key: string): V | undefined {
+    key = scoped(key);
     const hit = this.map.get(key);
     if (!hit) return undefined;
     if (hit.expiresAt <= Date.now()) {
-      this.delete(key);
+      this.remove(key);
       return undefined;
     }
     // Refresh recency.
@@ -26,9 +33,10 @@ export class TtlCache<V> {
   }
 
   set(key: string, value: V, ttlMs = this.opts.ttlMs): void {
+    key = scoped(key);
     const bytes = this.opts.sizeOf ? this.opts.sizeOf(value) : 0;
     if (this.opts.maxBytes && bytes > this.opts.maxBytes) return;
-    this.delete(key);
+    this.remove(key);
     this.map.set(key, { value, expiresAt: Date.now() + ttlMs, bytes });
     this.totalBytes += bytes;
     while (
@@ -37,11 +45,15 @@ export class TtlCache<V> {
     ) {
       const oldest = this.map.keys().next().value;
       if (oldest === undefined) break;
-      this.delete(oldest);
+      this.remove(oldest);
     }
   }
 
   delete(key: string): void {
+    this.remove(scoped(key));
+  }
+
+  private remove(key: string): void {
     const hit = this.map.get(key);
     if (!hit) return;
     this.totalBytes -= hit.bytes;

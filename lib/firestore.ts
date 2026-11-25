@@ -313,7 +313,8 @@ export interface SpecialMetrics {
 }
 
 export async function getMetricsForBrand(brandName: string, brandCity: string, days = 7): Promise<SpecialMetrics> {
-  const all = await listSpecials(500);
+  // The cached newest 200 (a week of specials easily fits) instead of a fresh 500-document read with pictures.
+  const all = await listSpecials(SPECIALS_CACHE_LIMIT);
   const matched = all.filter(
     (s) =>
       (s.restaurantName || '').toLowerCase() === (brandName || '').toLowerCase() &&

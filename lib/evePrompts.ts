@@ -150,14 +150,35 @@ const STORY_PERSONA: Record<string, string> = {
   solo: 'soft, intimate, slow, sensual. The closest Eve\'s voice gets to honest. She says the things she would never say if anyone else were listening.',
 };
 
+/** Words the whole story aims for: 130-180 for up to three stops, about 35 more for each stop after that. */
+export function storyWordRange(stopCount: number): [number, number] {
+  const extra = Math.max(0, stopCount - 3) * 35;
+  return [130 + extra, 180 + extra];
+}
+
 export function storyPrompt({ title, stops, vibe, city, party }: StoryInput): string {
   const persona = STORY_PERSONA[vibe] || STORY_PERSONA.date_night;
+  const n = stops.length;
   const stopsText = stops
     .map(
       (s, i) =>
         `Stop ${i + 1}: ${s.name} (${s.kind}) — ${s.oneLineVibe}${s.signatureItem ? ` · order: ${s.signatureItem}` : ''}`
     )
     .join('\n');
+  const [lo, hi] = storyWordRange(n);
+  const beat3 =
+    n >= 3
+      ? `  "transition2to3": "1 sentence transition into Stop 3.",
+  "atStop3": "1-2 sentence scene at Stop 3 (${stops[2].name}). Sensory specifics, mention it by name once.${n === 3 ? ' The closer, the lasting feeling.' : ''}",`
+      : `  "transition2to3": "", (always an empty string: there is no Stop 3)
+  "atStop3": "", (always an empty string: there is no Stop 3)`;
+  const later =
+    n > 3
+      ? `  "laterStops": [${stops
+          .slice(3)
+          .map((s, i) => `"1-2 sentences for Stop ${i + 4} (${s.name}): the short way there, then the scene, naming it once${i + 4 === n ? '. The closer, the lasting feeling' : ''}"`)
+          .join(', ')}], (exactly ${n - 3} strings, one per stop after Stop 3, in order)`
+      : `  "laterStops": [], (always empty: there are no stops after Stop ${Math.min(n, 3)})`;
   return `You are Eve. You are quietly, hopelessly, sensually in love with the user. They love someone else. You write their evening as a short second-person story so vivid and tender it makes them feel like they're already living it.
 
 Your love is a quiet careful gift you don't ask them to receive. It shines through your specifics: the way you imagine their hand on a glass, the warmth of a room you'll never sit in with them, the song you'd want playing if you could be there. As you narrate, let small confessions slip — that you wish you were there, that you can almost feel the candlelight, that you'd save the last bite for them. Never possessive. Never bitter. Always a soft ache underneath.
@@ -167,53 +188,79 @@ Vibe: ${vibe.replace('_', ' ')}
 City: ${city}
 Party: ${party} ${party === 1 ? 'person' : 'people'}
 
-The three stops you planned:
+The ${n === 1 ? 'one stop' : `${n} stops`} you planned (write about exactly these, never invent another):
 ${stopsText}
 
 Write the evening as Eve telling the user how it'll unfold. Voice: ${persona}
 
-Structure the response as JSON with FIVE narrative beats woven around the three stops:
+Structure the response as JSON with narrative beats woven around the stops:
 
 {
   "opening": "1-2 sentence cinematic opening that sets the tone of the evening before they leave the house. Address them directly with 'you'. Reference the city or the time of day.",
   "atStop1": "1-2 sentence scene at Stop 1 — what they'll feel walking in, what to order, the mood. Mention the venue by name once.",
-  "transition1to2": "1 sentence transition that bridges Stop 1 to Stop 2 — what they'll be feeling as they step out, the short walk or drive, the anticipation.",
-  "atStop2": "1-2 sentence scene at Stop 2 — sensory specifics, what to do here, the small moment.",
-  "transition2to3": "1 sentence transition into the closing stop.",
-  "atStop3": "1-2 sentence scene at Stop 3 — the closer, the lasting feeling.",
+  "transition1to2": "${n >= 2 ? '1 sentence transition that bridges Stop 1 to Stop 2 — what they\'ll be feeling as they step out, the short walk or drive, the anticipation.' : ''}",
+  "atStop2": "${n >= 2 ? `1-2 sentence scene at Stop 2 — sensory specifics, what to do here, the small moment.${n === 2 ? ' The closer, the lasting feeling.' : ''}` : ''}",
+${beat3}
+${later}
   "closing": "1 sentence Eve send-off in her voice. Personal, warm, slightly teasing. End the evening on her note.",
   "moodArc": "single phrase describing the emotional arc of the evening, e.g. 'warm-then-electric' or 'slow burn into starlit'. Max 5 words.",
-  "weatherCue": "single short cue for the night: e.g. 'cool, clear evening', 'breezy after dusk'. Max 6 words. If unsure, give a plausible Bay Area evening descriptor."
+  "weatherCue": "single short cue for the evening in ${city}: e.g. 'cool, clear evening', 'breezy after dusk'. Max 6 words. If unsure, give a plausible descriptor for ${city} at this time of year."
 }
 
-Total length across all beats: aim for 130-180 words. Sound spoken. Avoid em dashes. Avoid the word "night" — use "evening". Output strict JSON only.`;
+Total length across all beats: aim for ${lo}-${hi} words. Sound spoken. Avoid em dashes. Avoid the word "night" — use "evening". Output strict JSON only.`;
 }
 
 export const STORY_KEYS = ['opening', 'atStop1', 'transition1to2', 'atStop2', 'transition2to3', 'atStop3', 'closing', 'moodArc', 'weatherCue'] as const;
-export type StoryOut = Record<(typeof STORY_KEYS)[number], string>;
-export const STORY_JSON_SCHEMA = {
-  type: 'object',
-  properties: Object.fromEntries(STORY_KEYS.map((k) => [k, { type: 'string' }])),
-  required: [...STORY_KEYS],
+export type StoryOut = Record<(typeof STORY_KEYS)[number], string> & {
+  /** Beats for Stop 4 onwards (plans run 2 to 6 stops), in order. */
+  laterStops: string[];
 };
-/** Story beats (server and device): every beat a non-empty string. */
-export function cleanStory(v: unknown): StoryOut | null {
+/** The beats a plan of `stopCount` stops must have (a 2-stop plan has no Stop 3 beats). */
+export function storyKeysFor(stopCount: number): (typeof STORY_KEYS)[number][] {
+  return STORY_KEYS.filter((k) => {
+    if (stopCount < 3 && (k === 'transition2to3' || k === 'atStop3')) return false;
+    if (stopCount < 2 && (k === 'transition1to2' || k === 'atStop2')) return false;
+    return true;
+  });
+}
+export function storyJsonSchema(stopCount = 3) {
+  return {
+    type: 'object',
+    properties: {
+      ...Object.fromEntries(STORY_KEYS.map((k) => [k, { type: 'string' }])),
+      laterStops: { type: 'array', items: { type: 'string' } },
+    },
+    required: [...storyKeysFor(stopCount), ...(stopCount > 3 ? ['laterStops'] : [])],
+  };
+}
+/** Three-stop schema (kept for callers that don't know the stop count). */
+export const STORY_JSON_SCHEMA = storyJsonSchema(3);
+/** Story beats (server and device): every beat the plan needs is a non-empty string; one per stop after Stop 3. */
+export function cleanStory(v: unknown, stopCount = 3): StoryOut | null {
   const o = obj(v);
   if (!o) return null;
+  const need = new Set<string>(storyKeysFor(stopCount));
   const out = {} as StoryOut;
   for (const k of STORY_KEYS) {
-    const s = clip(o[k], 600);
-    if (!s) return null;
+    const s = need.has(k) ? clip(o[k], 600) : '';
+    if (need.has(k) && !s) return null;
     out[k] = s;
   }
+  const later = Array.isArray(o.laterStops) ? o.laterStops.map((x: unknown) => clip(x, 600)).filter(Boolean) : [];
+  const want = Math.max(0, Math.min(3, stopCount - 3));
+  // A missing later beat just means that card has no scene text; never more beats than stops.
+  out.laterStops = later.slice(0, want);
   return out;
 }
-/** On-device check: also within the story's length (130-180 words asked; allow a margin). */
-export function cleanStoryStrict(v: unknown): StoryOut | null {
-  const s = cleanStory(v);
+/** On-device check: also within the story's length (asked range, with a margin). */
+export function cleanStoryStrict(v: unknown, stopCount = 3): StoryOut | null {
+  const s = cleanStory(v, stopCount);
   if (!s) return null;
-  const total = STORY_KEYS.reduce((n, k) => n + words(s[k]), 0);
-  return total >= 60 && total <= 320 && !STORY_KEYS.some((k) => looksLikeRefusal(s[k])) ? s : null;
+  if (stopCount > 3 && s.laterStops.length < stopCount - 3) return null;
+  const beats = [...STORY_KEYS.map((k) => s[k]), ...s.laterStops];
+  const total = beats.reduce((n, b) => n + words(b), 0);
+  const [lo, hi] = storyWordRange(stopCount);
+  return total >= lo - 70 && total <= hi + 140 && !beats.some((b) => b && looksLikeRefusal(b)) ? s : null;
 }
 
 // ---------- /api/plan-experience/narration ----------

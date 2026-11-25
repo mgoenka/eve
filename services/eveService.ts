@@ -147,6 +147,10 @@ export interface PlanSkeletonRequest {
   whenISO?: string;
   startTime?: string;       // 24-hour "HH:MM", e.g. "19:30"
   durationHours?: number;    // total hours the evening should run
+  /** The visitor's local calendar date ("tonight" is theirs, not the server's). */
+  todayISO?: string;
+  /** Skip the server's short plan cache (asking again for the same evening). */
+  fresh?: boolean;
 }
 
 export interface PlanSkeletonResponse {
@@ -239,6 +243,15 @@ export async function postSpecial(input: {
   return call('/api/post-special', input, { timeoutMs: 30_000, retries: 0 });
 }
 
+export interface RestaurantMetrics {
+  totals: { views: number; planInclusions: number; clickThroughs: number; specialsPublished: number };
+}
+
+/** This restaurant's last-7-days numbers on Eve (specials published, times a plan picked it). */
+export async function restaurantMetrics(name: string, city: string): Promise<RestaurantMetrics> {
+  return call<RestaurantMetrics>(`/api/restaurant/metrics/${encodeURIComponent(name)}?city=${encodeURIComponent(city)}&days=7`, undefined, { timeoutMs: 15_000 });
+}
+
 export async function listSpecials(city?: string): Promise<{ specials: PostedSpecial[] }> {
   const url = city ? `/api/specials?city=${encodeURIComponent(city)}` : '/api/specials';
   return call<{ specials: PostedSpecial[] }>(url, undefined, { timeoutMs: 15_000 });
@@ -277,7 +290,8 @@ export async function eveStory(input: {
   party: number;
 }): Promise<EveStory> {
   return runLocalFirst<EveStory>({
-    minOutputTokens: LOCAL_TOKENS.story,
+    // Longer evenings (4-6 stops) need room for a beat per extra stop.
+    minOutputTokens: LOCAL_TOKENS.story + Math.max(0, input.stops.length - 3) * 90,
     local: () => localStory(input),
     server: () => call('/api/eve-story', input, { timeoutMs: 45_000, ai: 'background' }),
   });

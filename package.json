@@ -11,7 +11,7 @@
     "start": "node dist-server/server.mjs",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
-    "test": "node --test server/refine.test.ts"
+    "test": "node --import tsx --test server/*.test.ts lib/*.test.ts"
   },
   "dependencies": {
     "@google-cloud/firestore": "^9.4.1",

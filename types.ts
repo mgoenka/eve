@@ -66,6 +66,8 @@ export interface EveStory {
   atStop2: string;
   transition2to3: string;
   atStop3: string;
+  /** Beats for Stop 4 onwards (an evening runs 2 to 6 stops). Older saved stories don't have it. */
+  laterStops?: string[];
   closing: string;
   moodArc: string;
   weatherCue: string;

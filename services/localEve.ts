@@ -26,7 +26,7 @@ import {
   reelPrompt,
   REEL_JSON_SCHEMA,
   storyPrompt,
-  STORY_JSON_SCHEMA,
+  storyJsonSchema,
 } from '../lib/evePrompts';
 import type { ContentPackInput, DeviceCopyData, IntentForm, LocalPackText, ParsedIntentOut, StoryOut } from '../lib/evePrompts';
 
@@ -102,7 +102,7 @@ export function localStory(input: { title: string; stops: StopLike[]; vibe: stri
   const stops = stopsIn(input.stops);
   if (!stops.length) return Promise.resolve(null);
   const prompt = storyPrompt({ title: clip(input.title, 160), stops, vibe: vibeIn(input.vibe), city: clip(input.city, 120), party: intIn(input.party, 2, 1, 20) });
-  return localJson({ prompt, schema: STORY_JSON_SCHEMA, temperature: 0.92, validate: cleanStoryStrict });
+  return localJson({ prompt, schema: storyJsonSchema(stops.length), temperature: 0.92, validate: (v: unknown) => cleanStoryStrict(v, stops.length) });
 }
 
 export async function localNarration(input: { title: string; stops: StopLike[]; vibe: string }) {

@@ -1,6 +1,6 @@
-// Recent evenings, kept on this device only (localStorage). Text only:
-// stop cards are repainted on reopen, which the server usually serves from
-// its image cache, so reopening an evening costs no new planning call.
+// Recent evenings, kept on this device only (localStorage). Text only: on reopen,
+// pictures painted before come back from this device (stopPictures), and only a
+// missing first picture is painted again, so reopening costs no new planning call.
 import type { DietaryPreference, EveStory, ExperienceStop, StopKind, Vibe } from '@/types';
 import { STOP_KINDS, VIBES } from '@/constants';
 
@@ -60,7 +60,9 @@ function sanitizeStory(raw: any): EveStory | null {
   if (!raw || typeof raw !== 'object') return null;
   const keys: (keyof EveStory)[] = ['opening', 'atStop1', 'transition1to2', 'atStop2', 'transition2to3', 'atStop3', 'closing', 'moodArc', 'weatherCue'];
   const out = {} as EveStory;
-  for (const k of keys) out[k] = str(raw[k], 600);
+  for (const k of keys) (out as any)[k] = str(raw[k], 600);
+  const later = Array.isArray(raw.laterStops) ? raw.laterStops.map((b: unknown) => str(b, 600)).filter(Boolean).slice(0, 3) : [];
+  if (later.length) out.laterStops = later;
   return out.opening || out.atStop1 ? out : null;
 }
 

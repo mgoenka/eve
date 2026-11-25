@@ -17,6 +17,7 @@ import {
   cleanParsedIntent,
   cleanSpokenLine,
   cleanStory,
+  storyKeysFor,
   contentSharedContext,
   copyPrompt,
   copyChannelPrompt,
@@ -31,7 +32,8 @@ import { createCredits, costOfCall } from './server/credits/index.ts';
 import type { Meter } from './server/credits/index.ts';
 import { cloudTtsUsage, recordCloudTts, recordGemini, withMeter } from './server/aiMeter.ts';
 import { guardedCall, isAiBusy, sendAiBusy } from './server/ai-guard.ts';
-import { aiTestModeMiddleware } from './server/ai-guard.ts';
+import { aiFixturesActive, aiTestModeMiddleware } from './server/ai-guard.ts';
+import { normalizeArrivals } from './server/planTimes.ts';
 import { ttsFixture } from './server/ai-fixtures.ts';
 import { keepPlanShape, refinePrompt } from './server/refine.ts';
 
@@ -402,6 +404,9 @@ const contentPackCache = new TtlCache<{ body: any; bytes: number }>({
 const venueDetailsCache = new TtlCache<string>({ maxEntries: 500, ttlMs: 24 * HOUR });
 const suggestCache = new TtlCache<any>({ maxEntries: 300, ttlMs: 6 * HOUR });
 const geocodeCache = new TtlCache<string>({ maxEntries: 500, ttlMs: 7 * 24 * HOUR });
+// The same evening asked for twice (sample chips, a city page, a shared ?plan= link) within half an hour gets the
+// same plan instead of another grounded search. "Plan my evening" again with the same form sends `fresh`.
+const skeletonCache = new TtlCache<any>({ maxEntries: 200, ttlMs: HOUR / 2 });
 
 // ---------- Image-generation budget (per IP, per hour) ----------
 // Image generation is the expensive part of Eve. Cache hits are free; every
@@ -490,7 +495,10 @@ const estStory: Estimate = () => est(TEXT_MODEL, 900, 900);
 const estRefine: Estimate = () => est(TEXT_MODEL, 800, 1300, 1);
 const estParseIntent: Estimate = () => est(TEXT_MODEL, 900, 750);
 const estGeocode: Estimate = () => est(TEXT_MODEL, 80, 620);
-const estSkeleton: Estimate = () => est(TEXT_MODEL, 1200, 2100, 1);
+const estSkeleton: Estimate = (req) => {
+  const b = body(req);
+  return !b.fresh && skeletonCache.get(skeletonInput(b).key) ? 1 : est(TEXT_MODEL, 1200, 2100, 1);
+};
 const estNarration: Estimate = () => est(TEXT_MODEL, 500, 800);
 const estReservations: Estimate = () => est(TEXT_MODEL, 200, 630, 1);
 const AVATAR_MOODS = new Set(['devoted', 'listening', 'speaking', 'thinking', 'longing']);
@@ -835,9 +843,10 @@ app.post('/api/eve-story', metered('story', estStory, async (req, res) => {
 
   try {
     const beat = { type: Type.STRING };
+    const required = [...storyKeysFor(stops.length), ...(stops.length > 3 ? ['laterStops'] : [])];
     const response = await generateText({
       contents: prompt,
-      maxOutputTokens: 2048,
+      maxOutputTokens: 2048 + Math.max(0, stops.length - 3) * 256,
       config: { temperature: 0.92, topP: 0.95 },
       schema: {
         type: Type.OBJECT,
@@ -848,14 +857,15 @@ app.post('/api/eve-story', metered('story', estStory, async (req, res) => {
           atStop2: beat,
           transition2to3: beat,
           atStop3: beat,
+          laterStops: { type: Type.ARRAY, items: beat },
           closing: beat,
           moodArc: beat,
           weatherCue: beat,
         },
-        required: ['opening', 'atStop1', 'transition1to2', 'atStop2', 'transition2to3', 'atStop3', 'closing', 'moodArc', 'weatherCue'],
+        required,
       },
     });
-    const parsed = cleanStory(safeParseJson(response.text || ''));
+    const parsed = cleanStory(safeParseJson(response.text || ''), stops.length);
     if (!parsed) return jsonError(res, 502, 'Story returned non-JSON');
     res.json(parsed);
   } catch (err: any) {
@@ -894,9 +904,11 @@ app.post('/api/eve-refine', metered('refine', estRefine, async (req, res) => {
       ...parsed,
       spokenReply: str((parsed as any).spokenReply, 400),
       title: str((parsed as any).title, 120),
-      stops: adjust
-        ? keepPlanShape(planStopsOut((parsed as any).stops), previousPlan.stops, (prev) => planStopsOut([prev])[0])
-        : planStopsOut((parsed as any).stops),
+      stops: normalizeArrivals(
+        adjust
+          ? keepPlanShape(planStopsOut((parsed as any).stops), previousPlan.stops, (prev) => planStopsOut([prev])[0])
+          : planStopsOut((parsed as any).stops),
+      ),
     });
   } catch (err: any) {
     console.error('eve-refine failed:', err?.message || err);
@@ -1053,32 +1065,56 @@ app.get('/api/specials', async (req, res) => {
     const specials = cityFilter
       ? await firestore.listSpecialsForCity(cityFilter, 25)
       : await firestore.listSpecials(25);
-    res.json({ specials });
+    // Pictures only on request (?images=1): the planner just matches names, and each picture is ~1 MB.
+    const withImages = req.query?.images === '1';
+    res.json({ specials: withImages ? specials : specials.map(({ imageData: _i, imageMime: _m, ...rest }) => rest) });
   } catch (err: any) {
     res.json({ specials: [] });
   }
 });
 
+/** The planner form, normalized (shared by the cost estimate and the route), with its cache key. */
+function skeletonInput(b: any) {
+  b = b && typeof b === 'object' ? b : {};
+  const durationHoursRaw = Number(b.durationHours);
+  const serverToday = new Date().toISOString().slice(0, 10);
+  const todayRaw = str(b.todayISO, 10);
+  const i = {
+    city: str(b.city, 120),
+    vibe: vibeIn(b.vibe),
+    party: intIn(b.party, 2, 1, 20),
+    dietary: dietaryIn(b.dietary),
+    budgetPerPersonUSD: intIn(b.budgetPerPersonUSD ?? b.budgetUSD, 80, 5, 2000),
+    freeText: str(b.freeText, 500),
+    cuisinePref: str(b.cuisinePref, 60),
+    whenISO: str(b.whenISO, 10),
+    // Start time of the evening as 24-hour "HH:MM" (e.g. "19:30"). Optional.
+    startTime: str(b.startTime, 5),
+    // Total length of the evening, in hours. Drives stop count.
+    durationHours: Number.isFinite(durationHoursRaw) && durationHoursRaw > 0 ? Math.min(8, Math.max(1.5, durationHoursRaw)) : 4,
+    // The visitor's calendar date (a day either side of the server's, for time zones), for "tonight".
+    todayISO: /^\d{4}-\d{2}-\d{2}$/.test(todayRaw) && Math.abs(Date.parse(todayRaw) - Date.parse(serverToday)) <= 86400000 ? todayRaw : serverToday,
+  };
+  return { ...i, key: cacheKey(i.city, i.vibe, i.party, [...i.dietary].sort(), i.budgetPerPersonUSD, i.freeText, i.cuisinePref, i.whenISO, i.startTime, i.durationHours, i.todayISO) };
+}
+
+/** Eve-posted specials a plan picked (restaurant analytics: "picked for Eve evenings"). Real plans only. */
+function countPlanInclusions(stops: Array<{ name: string }>, specials: Array<{ id?: string; restaurantName: string }>) {
+  if (aiFixturesActive() || !Array.isArray(stops)) return;
+  const names = stops.map((st) => (st?.name || '').toLowerCase()).filter(Boolean);
+  for (const sp of specials) {
+    const r = (sp.restaurantName || '').toLowerCase().trim();
+    if (!sp.id || r.length < 3) continue;
+    if (names.some((n) => n.includes(r) || r.includes(n))) void firestore.bumpSpecialMetric(sp.id, 'planInclusions');
+  }
+}
+
 app.post('/api/plan-experience/skeleton', metered('plan', estSkeleton, async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
 
-  const city: string = str(req.body?.city, 120);
-  const vibe: string = vibeIn(req.body?.vibe);
-  const party: number = intIn(req.body?.party, 2, 1, 20);
-  const dietary = dietaryIn(req.body?.dietary);
-  const budgetPerPersonUSD = intIn(req.body?.budgetPerPersonUSD ?? req.body?.budgetUSD, 80, 5, 2000);
+  const input = skeletonInput(req.body);
+  const { city, vibe, party, dietary, budgetPerPersonUSD, freeText, cuisinePref, whenISO, startTime, durationHours, todayISO } = input;
   const totalBudget = budgetPerPersonUSD * party;
-  const freeText: string = str(req.body?.freeText, 500);
-  const cuisinePref: string = str(req.body?.cuisinePref, 60);
-  const whenISO: string = str(req.body?.whenISO, 10);
-  // Start time of the evening as 24-hour "HH:MM" (e.g. "19:30"). Optional.
-  const startTime: string = str(req.body?.startTime, 5);
-  // Total length of the evening, in hours. Drives stop count.
-  const durationHoursRaw = Number(req.body?.durationHours);
-  const durationHours = Number.isFinite(durationHoursRaw) && durationHoursRaw > 0
-    ? Math.min(8, Math.max(1.5, durationHoursRaw))
-    : 4;
-
   if (!city) return jsonError(res, 400, 'city required');
 
   // Map duration -> number of stops. Each stop ~75 minutes effective
@@ -1108,24 +1144,26 @@ app.post('/api/plan-experience/skeleton', metered('plan', estSkeleton, async (re
   const cuisineLine = cuisinePref ? `Preferred cuisine for the dinner anchor: ${cuisinePref}.` : '';
   let whenLine = '';
   if (/^\d{4}-\d{2}-\d{2}$/.test(whenISO)) {
-    const target = new Date(whenISO + 'T00:00:00');
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // Days from the visitor's own today (their device's date), not the server's: Cloud Run runs on UTC,
+    // which is already tomorrow during a US evening.
+    const target = new Date(whenISO + 'T00:00:00Z');
+    const today = new Date(todayISO + 'T00:00:00Z');
     const diffDays = Math.round((target.getTime() - today.getTime()) / 86400000);
     const dayLabel =
       diffDays === 0
         ? 'TONIGHT'
         : diffDays === 1
           ? 'TOMORROW NIGHT'
-          : `the night of ${target.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}`;
+          : `the night of ${target.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' })}`;
     whenLine = `Date: this plan is for ${dayLabel}. Consider day-of-week vibe (Tuesdays are quiet, Saturdays are busy) and pick venues that will plausibly be open and good that night.`;
   }
 
-  const allSpecials = await firestore.listSpecials(200);
-  const specialsHints = allSpecials.filter((s) =>
-    (s.city || '').toLowerCase().includes(city.toLowerCase().split(',')[0])
-  )
-    .slice(-5)
+  // Specials posted in this area (newest first).
+  const allSpecials = (await firestore.listSpecials(200)).filter((s) =>
+    (s.city || '').toLowerCase().includes(city.toLowerCase().split(',')[0].trim())
+  );
+  const specialsHints = allSpecials
+    .slice(0, 5)
     .map(
       (s) =>
         `- ${s.restaurantName} (${s.cuisine}) is offering "${s.dishName}" tonight: ${s.caption.slice(0, 120)}`
@@ -1180,6 +1218,13 @@ Schema:
   ]
 }`;
 
+  const cachedPlan = req.body?.fresh ? undefined : skeletonCache.get(input.key);
+  if (cachedPlan) {
+    res.set('X-Eve-Cache', 'hit');
+    countPlanInclusions(cachedPlan.stops, allSpecials);
+    return res.json(cachedPlan);
+  }
+
   try {
     let response: any;
     let groundedSearchUsed = false;
@@ -1222,10 +1267,14 @@ Schema:
     const parsed = safeParseJson(response.text || '');
     if (!parsed) return jsonError(res, 502, 'Model returned non-JSON skeleton');
     // No usable stops is a failed plan (Try again), never a blank one.
-    const stops = planStopsOut((parsed as any).stops);
+    // Arrival times follow from the start time and each stop's length and walk, so the cards add up.
+    const stops = normalizeArrivals(planStopsOut((parsed as any).stops), startTime);
     if (!stops.length) return jsonError(res, 502, 'Skeleton had no stops');
-    const title = str((parsed as any).title, 120);
-    res.json({ ...parsed, title, stops, groundedSearchUsed, groundedSources });
+    const title = str((parsed as any).title, 120) || 'A planned evening.';
+    const plan = { title, stops, groundedSearchUsed, groundedSources };
+    skeletonCache.set(input.key, plan);
+    countPlanInclusions(stops, allSpecials);
+    res.json(plan);
   } catch (err: any) {
     console.error('plan-experience/skeleton failed:', err?.message || err);
     aiFailed(res, err, 'Skeleton failed');
