@@ -19,6 +19,8 @@ interface Props {
   onRetryImage?: () => void;
   /** Paint this card's picture on request (only the first stop is painted automatically). */
   onShowImage?: () => void;
+  /** The background booking check answered (kept with the stop so a restored page shows the same links). */
+  onAvailability?: (a: AvailabilityMap) => void;
 }
 
 const RESERVABLE_KINDS: StopKind[] = ['dinner', 'dessert', 'drink', 'live_music'];
@@ -53,7 +55,7 @@ const KIND_GRADIENTS: Record<StopKind, { from: string; via: string; to: string }
   activity: { from: 'from-emerald-500/25', via: 'via-teal-500/25', to: 'to-amber-400/25' },
 };
 
-export function StopCard({ stop, index, city, whenISO, startTime, party, highlighted, dimmed, onRetryImage, onShowImage }: Props) {
+export function StopCard({ stop, index, city, whenISO, startTime, party, highlighted, dimmed, onRetryImage, onShowImage, onAvailability }: Props) {
   const kindMeta = STOP_KINDS.find((k) => k.kind === stop.kind);
   const grad = KIND_GRADIENTS[stop.kind] || KIND_GRADIENTS.dinner;
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${stop.name} ${city || ''}`.trim())}`;
@@ -77,22 +79,22 @@ export function StopCard({ stop, index, city, whenISO, startTime, party, highlig
   // Check actual availability on each platform via the server
   // (Gemini + Google Search). Filter out platforms that don't list the
   // venue. Falls back to all-three on error so the user always has a path.
-  const [availability, setAvailability] = useState<AvailabilityMap | null>(null);
+  const [availability, setAvailability] = useState<AvailabilityMap | null>(stop.availability || null);
   // Speculative: re-checked once the Sparks balance is known; skipped (all three links stay) when it could spend
   // Sparks the user didn't choose to spend.
   const creditsLoaded = useCredits().loaded;
   useEffect(() => {
     if (!isReservable || !stop.name || !speculativeAiAllowed()) return;
+    // Already known, or a restored page (which never asks the AI again on its own).
+    if (stop.availability || stop.restored) return;
     let cancelled = false;
     // Background check (AI credits in the Android app; never opens the credits sheet).
     checkReservations({ restaurantName: stop.name, city: city || '' })
       .then((data) => {
         if (cancelled || !data) return;
-        setAvailability({
-          opentable: !!data.opentable,
-          resy: !!data.resy,
-          tock: !!data.tock,
-        });
+        const found = { opentable: !!data.opentable, resy: !!data.resy, tock: !!data.tock };
+        setAvailability(found);
+        onAvailability?.(found);
       })
       .catch(() => {});
     return () => {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Sparkles,
   Wand2,
@@ -61,6 +61,10 @@ import {
   sanitizeEvening,
 } from '../services/savedEvenings';
 import type { SavedEvening } from '../services/savedEvenings';
+import { clearSnapshot, useSnapshot } from '../services/persist';
+import { DINER_SNAPSHOT_KEY, DINER_SNAPSHOT_V, readDinerSnapshot } from '../services/dinerSnapshot';
+import type { DinerSnapshot } from '../services/dinerSnapshot';
+import { getPicture, pictureKey, putPicture } from '../services/stopPictures';
 import { StopCard } from './StopCard';
 import { EveLogo } from './EveLogo';
 import { useOpenRules, useOpenSettings } from './RulesContext';
@@ -80,6 +84,7 @@ interface ChatMessage {
 }
 
 const AVATAR_REPORT = 'Image: AI-painted portrait of Eve (Gemini)';
+const AVATAR_PICTURE_KEY = 'eve-avatar|devoted';
 
 const SURPRISE_VIBES: Vibe[] = ['date_night', 'casual', 'celebrating', 'friends'];
 const SURPRISE_FREETEXT = [
@@ -212,12 +217,22 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   const openRules = useOpenRules();
   const openSettings = useOpenSettings();
   const toast = useToast();
-  const initial = readURLParams();
+  // What was on screen before a reload / relaunch (form + finished evening), restored without asking Eve
+  // again. A shared evening (?e=) or a different ?plan= link than the one saved wins over it.
+  const [restored] = useState<DinerSnapshot | null>(() => {
+    if (readSharedEvening()) return null;
+    const snap = readDinerSnapshot();
+    if (!snap) return null;
+    if (readURLParams() && window.location.search !== snap.search) return null;
+    return snap;
+  });
+  const restoredEvening = restored?.evening || null;
+  const initial = restored?.form || readURLParams();
 
-  const [phase, setPhase] = useState<Phase>('input');
+  const [phase, setPhase] = useState<Phase>(restoredEvening ? 'ready' : 'input');
   // Live mirror so async loops (e.g. background filler talk during plan
   // generation) can see the current phase without stale closures.
-  const phaseRef = useRef<Phase>('input');
+  const phaseRef = useRef<Phase>(restoredEvening ? 'ready' : 'input');
   useEffect(() => {
     phaseRef.current = phase;
   }, [phase]);
@@ -228,7 +243,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   const [dietary, setDietary] = useState<DietaryPreference[]>(initial?.dietary || ['vegetarian']);
   const [budgetPerPerson, setBudgetPerPerson] = useState<number>(initial?.budgetPerPerson || 100);
   const [cuisinePref, setCuisinePref] = useState(initial?.cuisinePref || '');
-  const [whenISO, setWhenISO] = useState(initial?.whenISO || todayISO());
+  const [whenISO, setWhenISO] = useState(initial?.whenISO && initial.whenISO >= todayISO() ? initial.whenISO : todayISO());
   // Start time of the evening (24-hour). 19:30 = 7:30pm by default.
   const [startTime, setStartTime] = useState<string>(initial?.startTime || '19:30');
   // Total length of the evening, in hours. 4 hours is the default sweet spot
@@ -237,9 +252,12 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   const [freeText, setFreeText] = useState(initial?.freeText || '');
   const [error, setError] = useState<string | null>(null);
 
-  const [planTitle, setPlanTitle] = useState('');
-  const [stops, setStops] = useState<ExperienceStop[]>([]);
-  const [story, setStory] = useState<EveStory | null>(null);
+  const [planTitle, setPlanTitle] = useState(restoredEvening?.title || '');
+  // Restored stops: text right away; a picture painted before comes back from this device (no new paint).
+  const [stops, setStops] = useState<ExperienceStop[]>(() =>
+    (restoredEvening?.stops || []).map((st) => ({ ...st, restored: true, status: st.imageKey ? 'generating' : 'pending' }))
+  );
+  const [story, setStory] = useState<EveStory | null>(restoredEvening?.story || null);
   // While Eve writes the story, a placeholder holds its place above the stops
   // (so the cards don't jump down when the text lands).
   const [storyPending, setStoryPending] = useState(false);
@@ -249,12 +267,13 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   }, []);
   const [narrationAudio, setNarrationAudio] = useState<string | null>(null);
   const [narrationMime, setNarrationMime] = useState<string>('audio/mpeg');
-  const [narrationText_, setNarrationText] = useState<string>('');
-  const [groundedSearchUsed, setGroundedSearchUsed] = useState(false);
-  const [groundedSources, setGroundedSources] = useState<string[]>([]);
+  const [narrationText_, setNarrationText] = useState<string>(restoredEvening?.narrationText || '');
+  const [narrationKey, setNarrationKey] = useState(restoredEvening?.narrationKey || '');
+  const [groundedSearchUsed, setGroundedSearchUsed] = useState(restoredEvening?.groundedSearchUsed || false);
+  const [groundedSources, setGroundedSources] = useState<string[]>(restoredEvening?.groundedSources || []);
 
-  const [eveIntroText, setEveIntroText] = useState('');
-  const [eveOutroText, setEveOutroText] = useState('');
+  const [eveIntroText, setEveIntroText] = useState(restoredEvening?.introText || '');
+  const [eveOutroText, setEveOutroText] = useState(restoredEvening?.outroText || '');
   const [eveSpeaking, setEveSpeaking] = useState(false);
   const [eveAvatarUrl, setEveAvatarUrl] = useState<string | null>(null);
 
@@ -266,10 +285,11 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   const walkingCancelRef = useRef(false);
   // Once-per-plan auto-walk guard so Eve narrates the night the moment it
   // finishes loading, instead of waiting on the user to hit the button.
-  const autoWalkedRef = useRef(false);
+  // A restored evening never starts talking on its own (that would mean new voice audio).
+  const autoWalkedRef = useRef(!!restoredEvening);
 
-  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
-  const [chatInput, setChatInput] = useState('');
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>(restoredEvening?.chatHistory || []);
+  const [chatInput, setChatInput] = useState(restoredEvening?.chatInput || '');
   const [refining, setRefining] = useState(false);
 
   const [locating, setLocating] = useState(false);
@@ -278,7 +298,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   // Recent evenings (this device) + the visitor's hourly picture budget.
   const [recentEvenings, setRecentEvenings] = useState<SavedEvening[]>(() => loadEvenings());
   const [imageLimit, setImageLimit] = useState<ImageLimit | null>(null);
-  const eveningIdRef = useRef<string>('');
+  const eveningIdRef = useRef<string>(restoredEvening?.id || '');
   useEffect(() => {
     const off = subscribeImageLimit(setImageLimit);
     refreshImageLimit();
@@ -309,7 +329,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
   const eveSpeakingRef = useRef(false);
 
   // Form is expanded by default. Users can collapse it to "just talk to Eve".
-  const [formExpanded, setFormExpanded] = useState(true);
+  const [formExpanded, setFormExpanded] = useState(restored ? restored.form.formExpanded : true);
   // Cycling trivia message shown inside the primary buttons while a plan
   // is being built. Mirrors the Recipe / Buzzer "loading-tip" pattern.
   const [loadingMessage, setLoadingMessage] = useState<string>('');
@@ -363,6 +383,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
 
   const reset = useCallback(() => {
     cancelRef.current = true;
+    clearSnapshot(DINER_SNAPSHOT_KEY);
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.src = '';
@@ -698,9 +719,11 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           },
           { background: opts.background }
         );
+        const imageKey = pictureKey(stop, useCity, useVibe);
+        void putPicture(imageKey, img.imageData, img.imageMime);
         setStops((prev) =>
           prev.map((st, idx) =>
-            same(st, idx) ? { ...st, imageData: img.imageData, imageMime: img.imageMime, status: 'ready' } : st
+            same(st, idx) ? { ...st, imageData: img.imageData, imageMime: img.imageMime, imageKey, status: 'ready' } : st
           )
         );
       } catch (err: any) {
@@ -841,6 +864,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           .then((a) => {
             const url = `data:${a.imageMime || 'image/png'};base64,${a.imageData}`;
             setEveAvatarUrl(url);
+            void putPicture(AVATAR_PICTURE_KEY, a.imageData, a.imageMime || 'image/png');
           })
           .catch(() => {});
       }
@@ -923,6 +947,10 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
         if (cancelRef.current) return;
         setNarrationAudio(audio.audioData);
         setNarrationMime(audio.audioMime || 'audio/mpeg');
+        // Kept on this device (by key) so a restored evening keeps its narration without new audio.
+        const nKey = `narration|${skeleton.title || ''}|${useCity}`.slice(0, 400);
+        setNarrationKey(nKey);
+        void putPicture(nKey, audio.audioData, audio.audioMime || 'audio/mpeg');
       } catch (err) {
         console.warn('narration audio skipped', err);
       }
@@ -1016,7 +1044,7 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
           whenISO,
           startTime,
           durationHours,
-          stops: stops.map(({ status, imageData, imageMime, error, errorCode, ...rest }) => rest),
+          stops: stops.map(({ status, imageData, imageMime, imageKey, availability, restored, error, errorCode, ...rest }) => rest),
           story,
         })
       );
@@ -1024,6 +1052,77 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, planTitle, stopsSig, story]);
+
+  // Pictures painted before a reload come back from this device; a missing one waits for "Show picture".
+  useEffect(() => {
+    if (restoredEvening?.narrationKey) {
+      void getPicture(restoredEvening.narrationKey).then((clip) => {
+        if (!clip) return;
+        setNarrationMime(clip.mime);
+        setNarrationAudio((cur) => cur || clip.data);
+      });
+    }
+    if (restoredEvening) {
+      void getPicture(AVATAR_PICTURE_KEY).then((pic) => {
+        if (pic) setEveAvatarUrl((cur) => cur || `data:${pic.mime};base64,${pic.data}`);
+      });
+    }
+    const keyed = (restoredEvening?.stops || []).map((st, i) => ({ i, name: st.name, key: st.imageKey })).filter((x) => x.key);
+    for (const { i, name, key } of keyed) {
+      void getPicture(key!).then((pic) => {
+        setStops((prev) =>
+          prev.map((st, idx) =>
+            idx === i && st.name === name && st.status === 'generating' && !st.imageData
+              ? pic
+                ? { ...st, imageData: pic.data, imageMime: pic.mime, status: 'ready' }
+                : { ...st, imageKey: undefined, status: 'pending' }
+              : st
+          )
+        );
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Keep what is on screen (form + finished evening) so a reload or relaunch lands back here.
+  // While a plan is being made only the form is kept: it comes back filled in, not re-sent.
+  const [leavingHome, setLeavingHome] = useState(false);
+  const snapshot = useMemo<DinerSnapshot | null>(() => {
+    const form = { city, vibe, party, dietary, budgetPerPerson, cuisinePref, whenISO, startTime, durationHours, freeText, formExpanded };
+    const search = typeof window === 'undefined' ? '' : window.location.search;
+    if (phase !== 'ready' || stops.length === 0 || !planTitle) return { search, form, evening: null };
+    // A change sent to Eve but not answered yet: keep the message in the box (unsent) instead.
+    let history = chatHistory;
+    let input = chatInput;
+    const last = chatHistory[chatHistory.length - 1];
+    if (refining && last?.role === 'user') {
+      history = chatHistory.slice(0, -1);
+      input = chatInput || last.text;
+    }
+    return {
+      search,
+      form,
+      evening: {
+        id: eveningIdRef.current,
+        title: planTitle,
+        stops: stops.map(({ status, imageData, imageMime, imageKey, restored, error, errorCode, ...rest }) =>
+          imageData && imageKey ? { ...rest, imageKey } : rest
+        ),
+        story,
+        introText: eveIntroText,
+        outroText: eveOutroText,
+        chatHistory: history,
+        chatInput: input,
+        narrationText: narrationAudio ? narrationText_ : '',
+        narrationKey: narrationAudio ? narrationKey : '',
+        groundedSources,
+        groundedSearchUsed,
+      },
+    };
+  }, [city, vibe, party, dietary, budgetPerPerson, cuisinePref, whenISO, startTime, durationHours, freeText, formExpanded,
+    phase, stops, planTitle, story, eveIntroText, eveOutroText, chatHistory, chatInput, refining, groundedSources, groundedSearchUsed,
+    narrationAudio, narrationText_, narrationKey]);
+  useSnapshot(DINER_SNAPSHOT_KEY, DINER_SNAPSHOT_V, leavingHome ? null : snapshot);
 
   const toggleVoiceListening = useCallback(() => {
     const rec = recognitionRef.current;
@@ -1711,7 +1810,14 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
         <AppHeader
           title="Eve"
           icon={<EveLogo size={26} />}
-          onTitleClick={() => { window.location.href = '/'; }}
+          onTitleClick={() => {
+            // Eve home starts completely fresh: drop the saved form too, then leave once that render is in.
+            clearSnapshot(DINER_SNAPSHOT_KEY);
+            setLeavingHome(true);
+            setTimeout(() => {
+              window.location.href = '/';
+            }, 0);
+          }}
           titleLabel="Eve home"
           onRules={openRules}
           rulesLabel="How Eve works"
@@ -2495,6 +2601,9 @@ export function DinerView({ onSwitchToRestaurant }: Props) {
                   dimmed={walkingIdx >= 0 && highlightedStopIdx >= 0 && highlightedStopIdx !== i}
                   onRetryImage={() => paintStop(stop, i, city, vibe)}
                   onShowImage={() => paintStop(stop, i, city, vibe)}
+                  onAvailability={(a) =>
+                    setStops((prev) => prev.map((st, idx) => (idx === i && st.name === stop.name ? { ...st, availability: a } : st)))
+                  }
                 />
                 {sceneText && (
                   <div

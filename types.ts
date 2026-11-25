@@ -33,6 +33,12 @@ export interface ExperienceStop {
   isEveOriginal?: boolean;
   imageData?: string;
   imageMime?: string;
+  /** Where this picture is kept on the device (stopPictures), so a restored page shows it again. */
+  imageKey?: string;
+  /** Booking platforms that list this venue (the background check's answer), kept so a restore needn't ask again. */
+  availability?: { opentable: boolean; resy: boolean; tock: boolean };
+  /** Came back from the page snapshot: no background checks on its own. */
+  restored?: boolean;
   status: 'pending' | 'generating' | 'ready' | 'error';
   error?: string;
   /** e.g. 'image_limit' when the hourly picture budget is used up. */
