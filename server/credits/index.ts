@@ -52,7 +52,7 @@ export {
   packsFor,
 } from './config.ts';
 export type { PackId, PackInfo, PaymentProvider } from './config.ts';
-export { PRICE_TABLE, PRICING_SOURCE, costOfCall, creditsForUsd, estimateCredits, usageOf, groundedRequestsOf } from './pricing.ts';
+export { PRICE_TABLE, PRICING_SOURCE, costOfCall, creditsForUsd, estimateCredits, usageOf, groundedRequestsOf, searchQueriesOf } from './pricing.ts';
 export type { CallUsage, ModelPrice, Rates, UsageMetadata } from './pricing.ts';
 export { MemoryCreditStore } from './store.ts';
 export type { CreditStore, LedgerEntry, MergeResult, PromoCode, PromoError, PromoResult, StarterMissed, StarterOutcome, StarterRule, StarterState } from './store.ts';

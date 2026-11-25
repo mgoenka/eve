@@ -35,17 +35,20 @@ export interface ModelPrice {
   model: string;
   /** Rates by period, oldest first. `from` = first UTC day the rates apply (inclusive). */
   periods: Array<{ from?: string; rates: Rates }>;
-  /** Grounding with Google Search, USD per grounded request (charged only when the answer cites web sources). */
+  /** Grounding with Google Search, USD per billed unit (see groundingPer). */
   groundingUsd?: number;
+  /** What Google bills grounding by: 'query' = each search query the model runs (Gemini 3+, the default),
+   *  'prompt' = each grounded prompt that cites web sources (Gemini 2.5). */
+  groundingPer?: 'query' | 'prompt';
   /** What candidate tokens are when the response has no per-modality breakdown. */
   defaultOutput?: 'text' | 'audio' | 'image';
   note?: string;
 }
 
-// Gemini 3+ grounding: 5,000 free requests/month shared by all Gemini 3+ models, then $14 / 1,000.
+// Gemini 3+ grounding: billed per search query; 5,000 free queries/month shared by all Gemini 3+ models, then $14 / 1,000.
 // We always charge it (the free allowance is shared by every app; usage beyond it is the real cost).
 const G3_GROUNDING = 14 / 1000;
-// Gemini 2.5 grounding: 1,500 grounded prompts/day free, then $35 / 1,000.
+// Gemini 2.5 grounding: billed per grounded prompt; 1,500 grounded prompts/day free, then $35 / 1,000.
 const G25_GROUNDING = 35 / 1000;
 
 export const PRICE_TABLE: readonly ModelPrice[] = [
@@ -115,12 +118,12 @@ export const PRICE_TABLE: readonly ModelPrice[] = [
   { model: 'gemini-3-pro-image', periods: [{ rates: { input: 2.0, output: 12.0, outputImage: 120.0 } }], groundingUsd: G3_GROUNDING, defaultOutput: 'image' },
   // ---- 2.5 family (deprecated; Google reroutes 2.5 Flash -> 3.5 Flash-Lite and 2.5 Pro -> 3.8 Flash from 2026-12-01,
   //      and the response's modelVersion then names the model that really ran)
-  { model: 'gemini-2.5-flash-lite', periods: [{ rates: { input: 0.1, inputAudio: 0.3, cachedInput: 0.01, output: 0.4 } }], groundingUsd: G25_GROUNDING },
-  { model: 'gemini-2.5-flash', periods: [{ rates: { input: 0.3, inputAudio: 1.0, cachedInput: 0.03, output: 2.5 } }], groundingUsd: G25_GROUNDING },
+  { model: 'gemini-2.5-flash-lite', periods: [{ rates: { input: 0.1, inputAudio: 0.3, cachedInput: 0.01, output: 0.4 } }], groundingUsd: G25_GROUNDING, groundingPer: 'prompt' },
+  { model: 'gemini-2.5-flash', periods: [{ rates: { input: 0.3, inputAudio: 1.0, cachedInput: 0.03, output: 2.5 } }], groundingUsd: G25_GROUNDING, groundingPer: 'prompt' },
   {
     model: 'gemini-2.5-pro',
     periods: [{ rates: { input: 1.25, cachedInput: 0.125, output: 10.0, long: { threshold: 200_000, input: 2.5, output: 15.0, cachedInput: 0.25 } } }],
-    groundingUsd: G25_GROUNDING,
+    groundingUsd: G25_GROUNDING, groundingPer: 'prompt',
   },
 ];
 
@@ -176,6 +179,8 @@ export interface CallUsage {
   usage: UsageMetadata | undefined;
   /** Grounded requests in this call (Google Search with web citations). */
   groundedRequests?: number;
+  /** Distinct Google Search queries the model ran in this call (groundingMetadata.webSearchQueries). */
+  searchQueries?: number;
 }
 
 const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0);
@@ -220,7 +225,7 @@ export function costOfCall(call: CallUsage, when: Date = new Date()): CallCost {
     usd += (cand * rateFor(price.defaultOutput ?? 'text')) / 1e6;
   }
   usd += (n(u.thoughtsTokenCount) * outRate) / 1e6; // thinking is billed as output
-  usd += n(call.groundedRequests) * (price.groundingUsd ?? 0);
+  usd += groundingUnits(call, price) * (price.groundingUsd ?? 0);
   return { model: call.model, priced: price.model, known, usd, credits: creditsForUsd(usd) };
 }
 
@@ -235,7 +240,24 @@ export function estimateCredits(model: string, inputTokens: number, outputTokens
   return costOfCall({ model, usage: { promptTokenCount: inputTokens, candidatesTokenCount: outputTokens } }, when).credits;
 }
 
-/** True when a generateContent response was grounded with web sources (the only case Google bills). */
+/** Billed grounding units for one call: search queries on Gemini 3+, grounded prompts on Gemini 2.5. */
+function groundingUnits(call: CallUsage, price: ModelPrice): number {
+  const prompts = n(call.groundedRequests);
+  if (price.groundingPer === 'prompt') return prompts;
+  // Per query; a grounded answer whose response doesn't list its queries still ran at least one.
+  return Math.max(n(call.searchQueries), prompts);
+}
+
+/** Distinct search queries a generateContent response ran (Gemini 3+ bills each one). */
+export function searchQueriesOf(response: unknown): number {
+  const cands = (response as { candidates?: Array<{ groundingMetadata?: { webSearchQueries?: unknown[] } }> })?.candidates;
+  if (!Array.isArray(cands)) return 0;
+  const qs = new Set<string>();
+  for (const c of cands) for (const q of c?.groundingMetadata?.webSearchQueries ?? []) if (typeof q === 'string' && q.trim()) qs.add(q.trim().toLowerCase());
+  return qs.size;
+}
+
+/** 1 when a generateContent response was grounded with web sources (what Gemini 2.5 bills), else 0. */
 export function groundedRequestsOf(response: unknown): number {
   const cands = (response as { candidates?: Array<{ groundingMetadata?: { groundingChunks?: unknown[]; webSearchQueries?: unknown[] } }> })?.candidates;
   if (!Array.isArray(cands)) return 0;
@@ -246,5 +268,5 @@ export function groundedRequestsOf(response: unknown): number {
 export function usageOf(response: unknown, requestedModel: string): CallUsage {
   const r = response as { modelVersion?: unknown; usageMetadata?: UsageMetadata } | null;
   const version = typeof r?.modelVersion === 'string' && r.modelVersion.trim() ? r.modelVersion : requestedModel;
-  return { model: version, usage: r?.usageMetadata, groundedRequests: groundedRequestsOf(response) };
+  return { model: version, usage: r?.usageMetadata, groundedRequests: groundedRequestsOf(response), searchQueries: searchQueriesOf(response) };
 }
