@@ -46,11 +46,12 @@ export function useNativeJoinScan(onCode: (code: string) => void, options: UseNa
     try {
       const r = await nativeScanQrResult();
       const { onCode: cbNow, options: oNow } = latest.current;
-      if (!r || (!r.ok && r.error !== 'cancelled')) {
-        (oNow.onFallback ?? o.onFallback)?.();
+      // `'error' in r` (not `r.error`) so this also narrows in apps compiled without strictNullChecks.
+      const cancelled = !!r && 'error' in r && r.error === 'cancelled';
+      if (!r || !('text' in r) || !r.ok) {
+        if (!cancelled) (oNow.onFallback ?? o.onFallback)?.();
         return;
       }
-      if (!r.ok) return; // cancelled
       const parseOpts: ParseJoinCodeOptions = {};
       if (oNow.maxLength !== undefined) parseOpts.maxLength = oNow.maxLength;
       if (oNow.hosts !== undefined) parseOpts.hosts = oNow.hosts;

@@ -67,14 +67,40 @@ export function createLazySocket<S>(
   const managerReconnect = new Set<Listener>();
 
   const run = (op: Op, key?: Pending['key']) => { if (real) op(real); else pending.push({ op, key }); };
-  /** Before loading, `off(ev, fn)` just drops the matching queued `on`, so effect re-runs don't pile up. */
-  const cancelQueued = (kind: 'on' | 'io', ev: string | undefined, fn: Listener | undefined): boolean => {
-    if (real) return false;
-    if (ev === undefined || fn === undefined) return false;
-    const i = pending.findIndex((p) => p.key && p.key.kind === kind && p.key.ev === ev && p.key.fn === fn);
-    if (i < 0) return false;
-    pending.splice(i, 1);
-    return true;
+  /**
+   * Before loading, `off(ev, fn)` just drops the matching queued `on`, so effect re-runs don't pile up;
+   * `off(ev)` drops every queued `on` for that event and `off()` every queued `on`.
+   */
+  const cancelQueued = (kind: 'on' | 'io', ev: string | undefined, fn: Listener | undefined) => {
+    for (let i = pending.length - 1; i >= 0; i--) {
+      const k = pending[i]!.key;
+      if (k && k.kind === kind && (ev === undefined || k.ev === ev) && (fn === undefined || k.fn === fn)) pending.splice(i, 1);
+    }
+  };
+  /**
+   * Socket.IO's emitter decides by argument count: off() removes everything, off(ev) every listener of ev,
+   * off(ev, fn) one listener. Passing `undefined` explicitly would match nothing, so forward only what was given.
+   */
+  const offReal = (target: { off(ev?: string, fn?: Listener): unknown }, ev: string | undefined, fn: Listener | undefined) => {
+    if (ev === undefined) target.off();
+    else if (fn === undefined) target.off(ev);
+    else target.off(ev, fn);
+  };
+
+  // The helper's own listeners. An app's `off('connect')` or `off()` (remove all) would drop them too, so
+  // they are re-added after any such call (see api.off).
+  const onIdle = () => { if (wantConnected) suspended = true; };
+  const onConnect = () => {
+    if (!resuming) return;
+    resuming = false;
+    // Apps that rejoin on the manager's 'reconnect' (fired only by automatic reconnection) hear it too.
+    for (const fn of managerReconnect) { try { fn(0); } catch (e) { console.error(e); } }
+  };
+  const addInternal = (s: RealSocket) => {
+    s.off(IDLE_DISCONNECT_EVENT, onIdle);
+    s.off('connect', onConnect);
+    s.on(IDLE_DISCONNECT_EVENT, onIdle);
+    s.on('connect', onConnect);
   };
 
   const ensure = (): Promise<RealSocket> => {
@@ -83,13 +109,7 @@ export function createLazySocket<S>(
       // Test browsers say so in the handshake: the server drops their idle sockets after 2 min, not 15.
       const query = isAutomatedBrowser() ? { ...((ioOptions.query as Record<string, string>) || {}), mgTest: '1' } : ioOptions.query;
       const s = m.io({ ...ioOptions, ...(query ? { query } : {}), autoConnect: false }) as unknown as RealSocket;
-      s.on(IDLE_DISCONNECT_EVENT, () => { if (wantConnected) suspended = true; });
-      s.on('connect', () => {
-        if (!resuming) return;
-        resuming = false;
-        // Apps that rejoin on the manager's 'reconnect' (fired only by automatic reconnection) hear it too.
-        for (const fn of managerReconnect) { try { fn(0); } catch (e) { console.error(e); } }
-      });
+      addInternal(s);
       real = s;
       for (const p of pending.splice(0)) p.op(s);
       return s;
@@ -135,12 +155,18 @@ export function createLazySocket<S>(
       on(ev: string, fn: Listener) { if (ev === 'reconnect') managerReconnect.add(fn); run((s) => s.io.on(ev, fn), { kind: 'io', ev, fn }); return api.io; },
       off(ev: string, fn?: Listener) {
         if (ev === 'reconnect') { if (fn) managerReconnect.delete(fn); else managerReconnect.clear(); }
-        if (!cancelQueued('io', ev, fn)) run((s) => s.io.off(ev, fn));
+        if (real) offReal(real.io, ev, fn); else cancelQueued('io', ev, fn);
         return api.io;
       },
     },
     on(ev: string, fn: Listener) { run((s) => s.on(ev, fn), { kind: 'on', ev, fn }); return api; },
-    off(ev?: string, fn?: Listener) { if (!cancelQueued('on', ev, fn)) run((s) => s.off(ev, fn)); return api; },
+    off(ev?: string, fn?: Listener) {
+      if (!real) { cancelQueued('on', ev, fn); return api; }
+      offReal(real, ev, fn);
+      // off() / off('connect') / off('idle-disconnect') also removed the helper's own listeners: put them back.
+      if (fn === undefined && (ev === undefined || ev === 'connect' || ev === IDLE_DISCONNECT_EVENT)) addInternal(real);
+      return api;
+    },
     once(ev: string, fn: Listener) { run((s) => s.once(ev, fn)); return api; },
     emit(ev: string, ...args: unknown[]) { run((s) => s.emit(ev, ...args)); return api; },
     timeout(ms: number) { return { emit: (ev: string, ...args: unknown[]) => { run((s) => s.timeout(ms).emit(ev, ...args)); return api; } }; },

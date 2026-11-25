@@ -5,6 +5,8 @@
  *  - Navigations: network-first, but if the network has not answered within 800 ms (a Cloud Run cold start, a
  *    slow phone network) the cached index.html is served at once and the network answer still refreshes the
  *    cache in the background. A deploy is picked up immediately on a quick network; the app opens offline.
+ *    Only navigations to the app shell ('/', '/index.html' and extensionless SPA routes) refresh the cached shell;
+ *    a navigation to a separate page such as /pitch.html is network-first under its own URL and never replaces it.
  *  - Same-origin GET assets: hashed /assets/* cache-first (immutable), everything else stale-while-revalidate.
  *  - NEVER cached: non-GET, cross-origin, /api, /socket.io, auth/login/oauth/session paths, requests with
  *    credentials headers, Range requests, and responses that are not plain 200 OK or say no-store/private.
@@ -89,6 +91,21 @@ async function networkFirstNavigation(event, request) {
   return network;
 }
 
+// The SPA shell answers '/', '/index.html' and every extensionless route; '/x.html' etc. are separate documents.
+function isShellPath(pathname) {
+  return pathname === '/' || pathname === SHELL_URL || !/\.[a-z0-9]+$/i.test(pathname);
+}
+
+async function networkFirstPage(request) {
+  try {
+    const response = await fetch(request);
+    put(request, response.clone()).catch(() => {});
+    return response;
+  } catch (err) {
+    return (await caches.match(request)) || Response.error();
+  }
+}
+
 async function cacheFirst(request) {
   const cached = await caches.match(request);
   if (cached) return cached;
@@ -123,7 +140,7 @@ self.addEventListener('fetch', (event) => {
   if (request.cache === 'no-store') return;
 
   if (request.mode === 'navigate') {
-    event.respondWith(networkFirstNavigation(event, request));
+    event.respondWith(isShellPath(url.pathname) ? networkFirstNavigation(event, request) : networkFirstPage(request));
     return;
   }
   if (url.pathname.startsWith('/assets/')) {
