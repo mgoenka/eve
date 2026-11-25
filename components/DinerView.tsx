@@ -887,6 +887,12 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
           .catch(() => {});
       }
 
+      // Eve-posted restaurants only mark cards as Eve Originals: look them up alongside the plan, and never
+      // let a slow lookup hold the finished plan back for more than a moment.
+      const evePostedP: Promise<string[]> = listSpecials(useCity.split(',')[0])
+        .then((res) => (res.specials || []).map((s) => s.restaurantName.toLowerCase()))
+        .catch(() => []);
+
       let skeleton: Awaited<ReturnType<typeof planSkeleton>>;
       try {
         skeleton = await planSkeleton({
@@ -912,11 +918,8 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
       setGroundedSources(skeleton.groundedSources || []);
       setGroundedSearchUsed(!!skeleton.groundedSearchUsed);
 
-      let evePosted: string[] = [];
-      try {
-        const res = await listSpecials(useCity.split(',')[0]);
-        evePosted = (res.specials || []).map((s) => s.restaurantName.toLowerCase());
-      } catch {}
+      const evePosted = await Promise.race([evePostedP, new Promise<string[]>((r) => setTimeout(() => r([]), 2500))]);
+      if (cancelRef.current) return;
 
       const initialStops: ExperienceStop[] = (skeleton.stops || []).map((s) => ({
         ...s,
@@ -1182,7 +1185,7 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
         try {
           const result = await eveRefine({
             message: transcript,
-            previousPlan: { stops: stops.map((s) => ({ name: s.name, kind: s.kind, oneLineVibe: s.oneLineVibe })) },
+            previousPlan: { stops: stops.map((s) => ({ name: s.name, kind: s.kind, oneLineVibe: s.oneLineVibe, approxArrival: s.approxArrival })) },
             vibe,
             city,
             dietary,
@@ -1601,7 +1604,7 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
 
     try {
       const previousPlan = {
-        stops: stops.map((s) => ({ name: s.name, kind: s.kind, oneLineVibe: s.oneLineVibe })),
+        stops: stops.map((s) => ({ name: s.name, kind: s.kind, oneLineVibe: s.oneLineVibe, approxArrival: s.approxArrival })),
       };
       const result = await eveRefine({
         message: msg,

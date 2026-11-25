@@ -301,7 +301,7 @@ export interface EveRefineResponse {
 
 export async function eveRefine(input: {
   message: string;
-  previousPlan: { stops: Array<{ name: string; kind: string; oneLineVibe?: string }> };
+  previousPlan: { stops: Array<{ name: string; kind: string; oneLineVibe?: string; approxArrival?: string }> };
   vibe: string;
   city: string;
   dietary: string[];

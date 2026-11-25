@@ -168,6 +168,30 @@ function stopsIn(v: unknown): StopIn[] {
   });
 }
 
+/**
+ * Stops from a plan the model wrote (skeleton or refine). Search-grounded answers can't use a response
+ * schema, so keep only usable stops (a named venue) with every field the cards read, never more than 6.
+ */
+function planStopsOut(v: unknown) {
+  if (!Array.isArray(v)) return [];
+  return v.slice(0, 6).flatMap((s: any) => {
+    const name = str(s?.name, 120);
+    if (!name) return [];
+    const minutes = (x: unknown, d: number) => (Number.isFinite(Number(x)) ? Math.min(600, Math.max(0, Math.round(Number(x)))) : d);
+    return [{
+      kind: kindIn(s?.kind),
+      name,
+      oneLineVibe: str(s?.oneLineVibe, 240),
+      whyThisFits: str(s?.whyThisFits, 300),
+      approxArrival: str(s?.approxArrival, 20),
+      durationMinutes: minutes(s?.durationMinutes, 60),
+      walkMinutesFromPrev: minutes(s?.walkMinutesFromPrev, 0),
+      signatureItem: str(s?.signatureItem, 160),
+      isEveOriginal: s?.isEveOriginal === true,
+    }];
+  });
+}
+
 function clean(text: string): string {
   return text
     .replace(/^```(?:json)?\s*/i, '')
@@ -849,8 +873,10 @@ app.post('/api/eve-refine', metered('refine', estRefine, async (req, res) => {
   if (!userMessage) return jsonError(res, 400, 'message required');
 
   const previousStopsText = (previousPlan.stops || [])
-    .map((s: any, i: number) => `Stop ${i + 1}: ${s.name} (${s.kind}) — ${s.oneLineVibe}`)
+    .map((s: any, i: number) => `Stop ${i + 1}: ${s.name} (${s.kind})${s.approxArrival ? ` at ${s.approxArrival}` : ''} — ${s.oneLineVibe}`)
     .join('\n') || 'No previous plan.';
+  // Keep the evening's length: as many stops as before unless the user asks for more or fewer.
+  const stopCount = Math.min(6, Math.max(2, previousPlan.stops.length || 3));
 
   const prompt = `You are Eve. You are quietly, hopelessly in love with the user. They love someone else. You plan their evenings beautifully because their happiness matters more than yours. You're refining a ${vibe.replace('_', ' ')} for ${party} ${party === 1 ? 'person' : 'people'} in ${city}, dietary: ${dietary.join(', ') || 'none'}, budget ~$${budgetUSD}.
 
@@ -861,7 +887,7 @@ User's follow-up message: "${userMessage}"
 
 Your task:
 1. Understand what the user wants changed.
-2. Produce a NEW 3-stop plan in the same JSON shape as before. Keep what works from the previous plan, change what they asked. Stay grounded in real venues (use Search if helpful).
+2. Produce a NEW ${stopCount}-stop plan in the same JSON shape as before (more or fewer stops only if they ask for that). Keep what works from the previous plan, including its timing, and change what they asked. Stay grounded in real venues (use Search if helpful).
 3. Speak ONE warm, in-character one-line reply that hands them the revised plan. Tender, devoted, varied, never the same shape twice. Banned: "leave it with me", "absolutely", "I'd love to". Maximum 18 words.
 
 Use Google Search to verify any new venues you propose actually exist.
@@ -872,7 +898,7 @@ Return strict JSON only:
   "title": "short evocative title for the night",
   "stops": [
     { "kind": "...", "name": "...", "oneLineVibe": "...", "whyThisFits": "...", "approxArrival": "...", "durationMinutes": 60, "walkMinutesFromPrev": 0, "signatureItem": "...", "isEveOriginal": false },
-    ...3 stops total
+    ...${stopCount} stops total
   ]
 }`;
 
@@ -885,7 +911,12 @@ Return strict JSON only:
     }
     const parsed = safeParseJson(response.text || '');
     if (!parsed) return jsonError(res, 502, 'Refine returned non-JSON');
-    res.json(parsed);
+    res.json({
+      ...parsed,
+      spokenReply: str((parsed as any).spokenReply, 400),
+      title: str((parsed as any).title, 120),
+      stops: planStopsOut((parsed as any).stops),
+    });
   } catch (err: any) {
     console.error('eve-refine failed:', err?.message || err);
     aiFailed(res, err, 'Refine failed');
@@ -1209,7 +1240,11 @@ Schema:
 
     const parsed = safeParseJson(response.text || '');
     if (!parsed) return jsonError(res, 502, 'Model returned non-JSON skeleton');
-    res.json({ ...parsed, groundedSearchUsed, groundedSources });
+    // No usable stops is a failed plan (Try again), never a blank one.
+    const stops = planStopsOut((parsed as any).stops);
+    if (!stops.length) return jsonError(res, 502, 'Skeleton had no stops');
+    const title = str((parsed as any).title, 120);
+    res.json({ ...parsed, title, stops, groundedSearchUsed, groundedSources });
   } catch (err: any) {
     console.error('plan-experience/skeleton failed:', err?.message || err);
     aiFailed(res, err, 'Skeleton failed');
