@@ -301,12 +301,14 @@ export interface EveRefineResponse {
 
 export async function eveRefine(input: {
   message: string;
-  previousPlan: { stops: Array<{ name: string; kind: string; oneLineVibe?: string; approxArrival?: string }> };
+  previousPlan: { stops: Array<{ name: string; kind: string; oneLineVibe?: string; approxArrival?: string; signatureItem?: string; durationMinutes?: number; walkMinutesFromPrev?: number }> };
   vibe: string;
   city: string;
   dietary: string[];
   party: number;
   budgetUSD: number;
+  /** A tweak chip: keep the evening's stops, order, area and vibe; swap or adjust only what the change needs. */
+  adjust?: boolean;
 }): Promise<EveRefineResponse> {
   return call('/api/eve-refine', input, { timeoutMs: 75_000, retries: 0, ai: true });
 }

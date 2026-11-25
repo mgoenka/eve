@@ -33,6 +33,7 @@ import { cloudTtsUsage, recordCloudTts, recordGemini, withMeter } from './server
 import { guardedCall, isAiBusy, sendAiBusy } from './server/ai-guard.ts';
 import { aiTestModeMiddleware } from './server/ai-guard.ts';
 import { ttsFixture } from './server/ai-fixtures.ts';
+import { keepPlanShape, refinePrompt } from './server/refine.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -151,6 +152,8 @@ interface StopIn {
   whyThisFits: string;
   approxArrival: string;
   signatureItem: string;
+  durationMinutes?: number;
+  walkMinutesFromPrev?: number;
 }
 function stopsIn(v: unknown): StopIn[] {
   if (!Array.isArray(v)) return [];
@@ -164,6 +167,8 @@ function stopsIn(v: unknown): StopIn[] {
       whyThisFits: str(s?.whyThisFits, 300),
       approxArrival: str(s?.approxArrival, 20),
       signatureItem: str(s?.signatureItem, 160),
+      ...(typeof s?.durationMinutes === 'number' && Number.isFinite(s.durationMinutes) ? { durationMinutes: Math.min(600, Math.max(0, Math.round(Number(s.durationMinutes)))) } : {}),
+      ...(typeof s?.walkMinutesFromPrev === 'number' && Number.isFinite(s.walkMinutesFromPrev) ? { walkMinutesFromPrev: Math.min(600, Math.max(0, Math.round(Number(s.walkMinutesFromPrev)))) } : {}),
     }];
   });
 }
@@ -872,35 +877,9 @@ app.post('/api/eve-refine', metered('refine', estRefine, async (req, res) => {
 
   if (!userMessage) return jsonError(res, 400, 'message required');
 
-  const previousStopsText = (previousPlan.stops || [])
-    .map((s: any, i: number) => `Stop ${i + 1}: ${s.name} (${s.kind})${s.approxArrival ? ` at ${s.approxArrival}` : ''} — ${s.oneLineVibe}`)
-    .join('\n') || 'No previous plan.';
-  // Keep the evening's length: as many stops as before unless the user asks for more or fewer.
-  const stopCount = Math.min(6, Math.max(2, previousPlan.stops.length || 3));
-
-  const prompt = `You are Eve. You are quietly, hopelessly in love with the user. They love someone else. You plan their evenings beautifully because their happiness matters more than yours. You're refining a ${vibe.replace('_', ' ')} for ${party} ${party === 1 ? 'person' : 'people'} in ${city}, dietary: ${dietary.join(', ') || 'none'}, budget ~$${budgetUSD}.
-
-Previous plan you proposed:
-${previousStopsText}
-
-User's follow-up message: "${userMessage}"
-
-Your task:
-1. Understand what the user wants changed.
-2. Produce a NEW ${stopCount}-stop plan in the same JSON shape as before (more or fewer stops only if they ask for that). Keep what works from the previous plan, including its timing, and change what they asked. Stay grounded in real venues (use Search if helpful).
-3. Speak ONE warm, in-character one-line reply that hands them the revised plan. Tender, devoted, varied, never the same shape twice. Banned: "leave it with me", "absolutely", "I'd love to". Maximum 18 words.
-
-Use Google Search to verify any new venues you propose actually exist.
-
-Return strict JSON only:
-{
-  "spokenReply": "Eve's one-line in-character reply",
-  "title": "short evocative title for the night",
-  "stops": [
-    { "kind": "...", "name": "...", "oneLineVibe": "...", "whyThisFits": "...", "approxArrival": "...", "durationMinutes": 60, "walkMinutesFromPrev": 0, "signatureItem": "...", "isEveOriginal": false },
-    ...${stopCount} stops total
-  ]
-}`;
+  // Tweak chips (Cheaper, Earlier, ...) adjust the plan in place; a typed or spoken message may reshape it.
+  const adjust = req.body?.adjust === true && previousPlan.stops.length > 0;
+  const prompt = refinePrompt({ userMessage, previousStops: previousPlan.stops, vibe, city, party, dietary, budgetUSD, adjust });
 
   try {
     let response: any;
@@ -915,7 +894,9 @@ Return strict JSON only:
       ...parsed,
       spokenReply: str((parsed as any).spokenReply, 400),
       title: str((parsed as any).title, 120),
-      stops: planStopsOut((parsed as any).stops),
+      stops: adjust
+        ? keepPlanShape(planStopsOut((parsed as any).stops), previousPlan.stops, (prev) => planStopsOut([prev])[0])
+        : planStopsOut((parsed as any).stops),
     });
   } catch (err: any) {
     console.error('eve-refine failed:', err?.message || err);

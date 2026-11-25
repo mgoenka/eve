@@ -10,7 +10,8 @@
     "build": "vite build && node scripts/build-server.mjs && node scripts/check-no-secrets.mjs",
     "start": "node dist-server/server.mjs",
     "preview": "vite preview",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "node --test server/refine.test.ts"
   },
   "dependencies": {
     "@google-cloud/firestore": "^9.4.1",

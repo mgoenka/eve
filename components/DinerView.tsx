@@ -1595,16 +1595,17 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
     buildPlan({ vibe: useVibe, freeText: useFreeText });
   }, [buildPlan, vibe, freeText]);
 
-  const sendChat = useCallback(async () => {
-    const msg = chatInput.trim();
+  // Ask Eve (typed) and the tweak chips change the current evening; they never re-plan it from scratch.
+  // A chip (adjust) keeps the stops' number, order, kinds, area and vibe and only swaps or adjusts stops.
+  const refineEvening = useCallback(async (msg: string, opts: { adjust?: boolean; budgetPerPerson?: number; shown?: string } = {}) => {
     if (!msg || refining) return;
-    setChatInput('');
-    setChatHistory((h) => [...h, { role: 'user', text: msg }]);
+    setChatHistory((h) => [...h, { role: 'user', text: opts.shown || msg }]);
     setRefining(true);
+    const perPerson = opts.budgetPerPerson ?? budgetPerPerson;
 
     try {
       const previousPlan = {
-        stops: stops.map((s) => ({ name: s.name, kind: s.kind, oneLineVibe: s.oneLineVibe, approxArrival: s.approxArrival })),
+        stops: stops.map((s) => ({ name: s.name, kind: s.kind, oneLineVibe: s.oneLineVibe, approxArrival: s.approxArrival, signatureItem: s.signatureItem, durationMinutes: s.durationMinutes, walkMinutesFromPrev: s.walkMinutesFromPrev })),
       };
       const result = await eveRefine({
         message: msg,
@@ -1613,7 +1614,8 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
         city,
         dietary,
         party,
-        budgetUSD: budgetPerPerson * party,
+        budgetUSD: perPerson * party,
+        adjust: !!opts.adjust,
       });
 
       setChatHistory((h) => [...h, { role: 'eve', text: result.spokenReply, ai: true }]);
@@ -1659,12 +1661,19 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
         ...h,
         { role: 'eve', text: 'Sorry, I lost my train of thought. Try that again?' },
       ]);
-      // Put the message back so one tap on Send retries it.
-      setChatInput((cur) => cur || msg);
+      // Put a typed message back so one tap on Send retries it (a chip is just tapped again).
+      if (!opts.adjust) setChatInput((cur) => cur || msg);
     } finally {
       setRefining(false);
     }
-  }, [chatInput, refining, stops, vibe, city, dietary, party, budgetPerPerson, planTitle, speakAsEve]);
+  }, [refining, stops, vibe, city, dietary, party, budgetPerPerson, planTitle, speakAsEve]);
+
+  const sendChat = useCallback(() => {
+    const msg = chatInput.trim();
+    if (!msg || refining) return;
+    setChatInput('');
+    void refineEvening(msg);
+  }, [chatInput, refining, refineEvening]);
 
   // Walks through the evening: highlights each stop in sequence as Eve
   // speaks the corresponding story beat. The mic stays open the entire time
@@ -2714,18 +2723,29 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
             { label: 'More casual', icon: ArrowDownRight, suffix: ' Make every stop more casual and easygoing.' },
             { label: 'Earlier', icon: ClockIcon, suffix: ' Shift the entire evening earlier — start by 6 PM.' },
             { label: 'Vegan only', icon: Leaf, suffix: ' Strictly vegan across all stops.' },
-            { label: 'Cheaper', icon: Coins, suffix: ' Cut the budget roughly in half.' },
+            { label: 'Cheaper', icon: Coins, suffix: '' },
           ].map((chip) => {
             const Icon = chip.icon;
             return (
               <button
                 key={chip.label}
+                disabled={refining}
                 onClick={() => {
-                  const newFreeText = (freeText || '') + chip.suffix;
-                  setFreeText(newFreeText);
-                  setTimeout(() => buildPlan({ freeText: newFreeText }), 0);
+                  // A tweak adjusts this evening (same stops, order, area and vibe). The form keeps the ask,
+                  // so a later "Plan my evening" plans with it too.
+                  if (chip.label === 'Cheaper') {
+                    const half = Math.max(20, Math.round(budgetPerPerson / 2 / 10) * 10);
+                    setBudgetPerPerson(half);
+                    void refineEvening(
+                      `Make it cheaper: about half the budget, around $${half} a person ($${half * party} in all). Keep every stop that is already inexpensive; swap each pricier one for a cheaper real venue of the same kind nearby, or a cheaper order at the same place.`,
+                      { adjust: true, budgetPerPerson: half, shown: chip.label },
+                    );
+                    return;
+                  }
+                  setFreeText((freeText || '') + chip.suffix);
+                  void refineEvening(chip.suffix.trim(), { adjust: true, shown: chip.label });
                 }}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.10] border border-white/10 hover:border-eve-gold/40 text-xs font-medium text-eve-cream/80 hover:text-eve-cream transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.10] border border-white/10 hover:border-eve-gold/40 text-xs font-medium text-eve-cream/80 hover:text-eve-cream transition-colors disabled:opacity-50"
               >
                 <Icon size={11} />
                 {chip.label}
