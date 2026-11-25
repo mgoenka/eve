@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanStory, cleanStoryStrict, storyJsonSchema, storyPrompt } from './evePrompts.ts';
+import { cleanStory, cleanStoryStrict, isEcho, narrationPrompt, storyJsonSchema, storyPrompt } from './evePrompts.ts';
 
 const stop = (n: number) => ({ name: `Venue ${n}`, kind: 'dinner', oneLineVibe: 'warm' });
 const base = { opening: 'o', atStop1: 'a1', transition1to2: 't12', atStop2: 'a2', closing: 'c', moodArc: 'm', weatherCue: 'w' };
@@ -29,4 +29,17 @@ test('later stops are kept, never more than the plan has', () => {
   assert.deepEqual(s!.laterStops, ['a4', 'a5']);
   // On-device answers must carry every later beat.
   assert.equal(cleanStoryStrict({ ...base, transition2to3: 't', atStop3: 'a3', laterStops: ['a4'] }, 5), null);
+});
+
+test('the mic hearing Eve back is an echo; the user talking over her is not', () => {
+  const line = 'You walk into Lucca Osteria and the candlelight finds you first.';
+  assert.equal(isEcho('walk into Lucca Osteria and the candlelight', line), true);
+  assert.equal(isEcho('swap the second stop for live music', line), false);
+  assert.equal(isEcho('no', line), false);
+});
+
+test('the narration is in Eve\'s voice for the vibe', () => {
+  const p = narrationPrompt({ title: 'T', vibe: 'friends', stops: [{ kind: 'dinner', name: 'Venue 1', approxArrival: '7:00 PM', oneLineVibe: 'loud', whyThisFits: 'fun' }] });
+  assert.match(p, /You are Eve/);
+  assert.match(p, /playful/);
 });

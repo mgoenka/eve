@@ -67,6 +67,7 @@ import { clearSnapshot, useSnapshot } from '../services/persist';
 import { DINER_SNAPSHOT_KEY, DINER_SNAPSHOT_V, readDinerSnapshot } from '../services/dinerSnapshot';
 import type { DinerSnapshot } from '../services/dinerSnapshot';
 import { getPicture, pictureKey, putPicture } from '../services/stopPictures';
+import { isEcho } from '../lib/evePrompts';
 import { StopCard } from './StopCard';
 import { EveLogo } from './EveLogo';
 import { useOpenRules, useOpenSettings } from './RulesContext';
@@ -368,6 +369,13 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
   const conversationActiveRef = useRef(false);
   const userMutedRef = useRef(true);
   const eveSpeakingRef = useRef(false);
+  // Every new line (or any stop) bumps this; a line whose voice arrives after a newer one started never plays,
+  // and a loop (intro, walkthrough) whose line was cut off stops instead of talking over what came next.
+  const speechSeqRef = useRef(0);
+  // What Eve is saying (or just said): the mic ignores hearing her own voice back from the speakers.
+  const eveLineRef = useRef<{ text: string; endedAt: number }>({ text: '', endedAt: 0 });
+  const skipResultsRef = useRef(0);
+  const walkRunRef = useRef(0);
 
   // Form is expanded by default. Users can collapse it to "just talk to Eve".
   const [formExpanded, setFormExpanded] = useState(restored ? restored.form.formExpanded : true);
@@ -524,6 +532,7 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
   // Eve audio. Otherwise the user keeps hearing what was already playing.
   useEffect(() => {
     if (!muted) return;
+    speechSeqRef.current++;
     try {
       eveAudioRef.current?.pause();
     } catch {}
@@ -562,13 +571,23 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
     let blocked = false;
     rec.onstart = () => {
       blocked = false;
+      skipResultsRef.current = 0;
       carry = voiceTranscriptRef.current.trim();
     };
     rec.onresult = (e: any) => {
       let transcript = carry ? carry + ' ' : '';
-      for (let i = 0; i < e.results.length; i++) {
-        transcript += e.results[i][0].transcript + ' ';
+      let heard = '';
+      for (let i = skipResultsRef.current; i < e.results.length; i++) {
+        heard += e.results[i][0].transcript + ' ';
       }
+      // Eve's own voice coming back through the speakers is not the user talking: drop it (once those
+      // words are final they're skipped for good) so she never cuts herself off or "refines" her own plan.
+      const line = eveLineRef.current;
+      if (line.text && (eveSpeakingRef.current || Date.now() - line.endedAt < 2500) && isEcho(heard, line.text)) {
+        if (e.results[e.results.length - 1]?.isFinal) skipResultsRef.current = e.results.length;
+        return;
+      }
+      transcript += heard;
       const trimmed = transcript.trim();
       const fullText = (baseTextRef.current ? baseTextRef.current + ' ' : '') + trimmed;
       setVoiceTranscript(trimmed);
@@ -582,6 +601,7 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
       if (eveSpeakingRef.current && trimmed.length > 3) {
         console.log('[Eve] barge-in detected:', trimmed.slice(0, 60));
         const a = eveAudioRef.current;
+        speechSeqRef.current++;
         try {
           a?.pause();
         } catch {}
@@ -648,6 +668,7 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
   // Stop ALL Eve-related audio sources before starting a new one. Prevents
   // overlapping audio (e.g. walkthrough playing on top of plan narration).
   const stopAllAudio = useCallback(() => {
+    speechSeqRef.current++;
     try {
       const a = eveAudioRef.current;
       if (a) {
@@ -672,38 +693,52 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
       console.log('[Eve] speakAsEve:', text.slice(0, 70));
       if (!text || mutedRef.current) return;
       stopAllAudio();
+      const my = speechSeqRef.current;
       setEveSpeaking(true);
+      eveLineRef.current = { text, endedAt: 0 };
+      let started = false;
       try {
         // Eve's voice is on only after the user tapped Activate: their choice, so not gated as speculative.
         const audio = await synthesize(text, 'eve', { userAsked: true });
         const a = eveAudioRef.current;
-        if (!a) return;
+        if (!a || speechSeqRef.current !== my || mutedRef.current) return;
         a.src = `data:${audio.audioMime || 'audio/mpeg'};base64,${audio.audioData}`;
         a.currentTime = 0;
         try {
           await a.play();
+          started = true;
         } catch (err) {
           console.error('[Eve] play() rejected:', err);
         }
       } catch (err) {
         console.error('[Eve] synth failed:', err);
+      } finally {
+        // No voice came (failed or cut off): Eve isn't speaking, so the halo and the mic button stop waiting on her.
+        if (!started && speechSeqRef.current === my) {
+          setEveSpeaking(false);
+          eveSpeakingRef.current = false;
+          eveLineRef.current.endedAt = Date.now();
+        }
       }
     },
     [muted, stopAllAudio]
   );
 
-  // Plays a line and resolves only when audio finishes (or 12s timeout).
+  // Plays a line and resolves when the audio finishes (or is cut off). Resolves false when a newer line,
+  // a barge-in or a stop took over, so a loop of lines stops instead of talking over what came next.
   const speakAsEveAndWait = useCallback(
-    async (text: string) => {
+    async (text: string): Promise<boolean> => {
       console.log('[Eve] speakAsEveAndWait:', text.slice(0, 70));
-      if (!text || mutedRef.current) return;
+      if (!text || mutedRef.current) return !mutedRef.current;
       stopAllAudio();
+      const my = speechSeqRef.current;
       setEveSpeaking(true);
+      eveLineRef.current = { text, endedAt: 0 };
       try {
         // Eve's voice is on only after the user tapped Activate: their choice, so not gated as speculative.
         const audio = await synthesize(text, 'eve', { userAsked: true });
         const a = eveAudioRef.current;
-        if (!a) return;
+        if (!a || speechSeqRef.current !== my || mutedRef.current) return false;
         a.src = `data:${audio.audioMime || 'audio/mpeg'};base64,${audio.audioData}`;
         a.currentTime = 0;
         await new Promise<void>((resolve) => {
@@ -724,17 +759,31 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
           };
           a.addEventListener('ended', finish, { once: true });
           a.addEventListener('pause', onPause);
-          a.play().catch((err) => {
-            console.error('[Eve] play() rejected (wait):', err);
-            finish();
-          });
-          setTimeout(finish, 18000);
+          // Safety net for audio that never reports its end: the clip's own length (a long story beat
+          // runs past 18s and used to be cut off by the next one), or 30s when the length isn't known.
+          let guard = setTimeout(finish, 30000);
+          a.play()
+            .then(() => {
+              if (Number.isFinite(a.duration) && a.duration > 0) {
+                clearTimeout(guard);
+                guard = setTimeout(finish, a.duration * 1000 + 2500);
+              }
+            })
+            .catch((err) => {
+              console.error('[Eve] play() rejected (wait):', err);
+              finish();
+            });
         });
       } catch (err) {
         console.error('[Eve] synth failed (wait):', err);
       } finally {
-        setEveSpeaking(false);
+        if (speechSeqRef.current === my) {
+          setEveSpeaking(false);
+          eveSpeakingRef.current = false;
+          eveLineRef.current.endedAt = Date.now();
+        }
       }
+      return speechSeqRef.current === my;
     },
     [muted, stopAllAudio]
   );
@@ -944,12 +993,12 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
           if (lines.length === 0) return;
           setEveIntroText(lines[0] || '');
 
+          // "Almost there" lines are for while she plans: once the evening is on screen (or something
+          // else took the floor) she stops, so the walkthrough never fights a leftover intro line.
           for (const line of lines) {
-            if (cancelRef.current) return;
+            if (cancelRef.current || phaseRef.current !== 'forging') return;
             setEveIntroText(line);
-            try {
-              await speakAsEveAndWait(line);
-            } catch {}
+            if (!(await speakAsEveAndWait(line).catch(() => true))) return;
             if (cancelRef.current) return;
             await new Promise((r) => setTimeout(r, 220));
           }
@@ -966,9 +1015,7 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
           ) {
             const line = fillers[i++];
             setEveIntroText(line);
-            try {
-              await speakAsEveAndWait(line);
-            } catch {}
+            if (!(await speakAsEveAndWait(line).catch(() => true))) return;
             if (cancelRef.current) return;
             await new Promise((r) => setTimeout(r, 320));
           }
@@ -1474,6 +1521,26 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
     }, 400);
   }, [processTranscript]);
 
+  // Deactivate (header): Eve goes quiet AND the mic really turns off, and the conversation ends, so nothing
+  // the user says afterwards is heard or acted on. (The muted effect silences her audio and the walkthrough.)
+  const deactivateEve = useCallback(() => {
+    mutedRef.current = true;
+    userMutedRef.current = true;
+    setMuted(true);
+    setUserMuted(true);
+    voiceListeningRef.current = false;
+    try {
+      recognitionRef.current?.stop();
+    } catch {}
+    setVoiceListening(false);
+    if (silenceTimerRef.current) clearInterval(silenceTimerRef.current);
+    silenceTimerRef.current = null;
+    setVoiceTranscript('');
+    voiceTranscriptRef.current = '';
+    setConversationActive(false);
+    conversationActiveRef.current = false;
+  }, []);
+
   // Mic toggle behavior:
   // 1. If user is NOT in a conversation yet → start one (activate conversation, open mic).
   // 2. If user IS in conversation:
@@ -1543,8 +1610,8 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
       return;
     }
 
-    // Case 4: in conversation, user is muted → unmute and resume listening
-    if (userMutedRef.current) {
+    // Case 4: in conversation, mic is off (the user muted it, or the browser ended it) → listen again
+    if (userMutedRef.current || !voiceListeningRef.current) {
       setUserMuted(false);
       userMutedRef.current = false;
       baseTextRef.current = '';
@@ -1648,6 +1715,9 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
     opts: { adjust?: boolean; budgetPerPerson?: number; dietary?: DietaryPreference[]; shown?: string; voice?: boolean } = {}
   ) => {
     if (!msg || refining) return;
+    // A change while Eve walks through the evening: stop the walk, so her reply isn't cut off by the next beat.
+    walkingCancelRef.current = true;
+    setWalkingIdx(-1);
     setChatHistory((h) => [...h, { role: 'user', text: opts.shown || msg }]);
     setRefining(true);
     const perPerson = opts.budgetPerPerson ?? budgetPerPerson;
@@ -1771,13 +1841,14 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
     console.log('[Eve] startWalkthrough invoked, story present:', !!story);
     if (!story) return;
     walkingCancelRef.current = false;
+    const run = ++walkRunRef.current;
     stopAllAudio();
 
     // Keep the mic listening through the whole walkthrough so true barge-in
     // is possible. If the recognizer isn't already running, start it.
     try {
       const rec = recognitionRef.current;
-      if (rec && !voiceListeningRef.current) {
+      if (rec && !voiceListeningRef.current && !userMutedRef.current) {
         baseTextRef.current = '';
         setVoiceTranscript('');
         voiceTranscriptRef.current = '';
@@ -1794,12 +1865,12 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
     const beats = storyBeats(story, stops.length);
 
     for (let b = 0; b < beats.length; b++) {
-      if (walkingCancelRef.current) break;
+      if (walkingCancelRef.current || walkRunRef.current !== run) break;
       setWalkingIdx(b);
-      await speakAsEveAndWait(beats[b].text);
+      if (!(await speakAsEveAndWait(beats[b].text))) break;
       await new Promise((r) => setTimeout(r, 250));
     }
-    if (!walkingCancelRef.current) setWalkingIdx(-1);
+    if (walkRunRef.current === run) setWalkingIdx(-1);
   }, [story, stops.length, speakAsEveAndWait, stopAllAudio]);
 
   // Auto-trigger the walkthrough once the plan is fully loaded. Eve walks
@@ -1811,9 +1882,12 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
     if (!story) return;
     if (stops.length < 2) return;
     if (!stops.every((s) => s.status !== 'generating')) return;
-    autoWalkedRef.current = true;
+    // Marked walked only when it really starts: a picture landing in the next 900ms re-runs this effect
+    // and clears the timer, and marking it earlier meant the walkthrough then never started at all.
     console.log('[Eve] auto-walk: scheduling startWalkthrough in 900ms');
     const t = setTimeout(() => {
+      if (autoWalkedRef.current) return;
+      autoWalkedRef.current = true;
       console.log('[Eve] auto-walk: firing startWalkthrough now');
       walkingCancelRef.current = false;
       startWalkthrough();
@@ -1823,6 +1897,8 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
 
   const stopWalkthrough = useCallback(() => {
     walkingCancelRef.current = true;
+    speechSeqRef.current++; // a beat still being voiced never starts after Stop
+
     setWalkingIdx(-1);
     if (eveAudioRef.current) {
       try {
@@ -1887,7 +1963,8 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
       audioRef.current.pause();
       setPlaying(false);
     } else {
-      // Stop any other Eve audio first
+      // Stop any other Eve audio first (and any line still being voiced)
+      speechSeqRef.current++;
       try {
         eveAudioRef.current?.pause();
       } catch {}
@@ -1950,12 +2027,7 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
               </button>
             ) : (
               <button
-                onClick={() => {
-                  mutedRef.current = true;
-                  userMutedRef.current = true;
-                  setMuted(true);
-                  setUserMuted(true);
-                }}
+                onClick={deactivateEve}
                 className="p-2 md:p-2.5 h-10 min-w-10 flex items-center justify-center bg-eve-ink-soft rounded-xl border border-white/[0.08] hover:bg-mg-surface-2 transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink"
                 title="Mute Eve and turn off mic"
                 aria-label="Deactivate Eve"
@@ -2055,9 +2127,7 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
                     ? 'Cut in'
                     : voiceListening
                       ? 'Listening…'
-                      : userMuted
-                        ? 'Tap to talk'
-                        : 'Listening…'}
+                      : 'Tap to talk'}
               </button>
             )}
             <button
@@ -2507,7 +2577,10 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
                 userMutedRef.current = false;
                 setMuted(false);
                 setUserMuted(false);
-                playGreetingOnce(true);
+                // An evening is already on screen: no "what evening shall we make?" hello. Eve walks
+                // through it instead (the auto-walk, or the button when she already walked it).
+                greetingPlayedRef.current = true;
+                setEveGreeted(true);
               }}
               className="inline-flex items-center gap-1.5 px-3 md:px-3.5 h-10 rounded-xl bg-eve-gold text-eve-ink hover:bg-yellow-300 transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink shadow-[0_0_18px_rgba(245,197,66,0.28)] text-xs font-bold uppercase tracking-wider"
               title="Turn on Eve's voice"
@@ -2518,12 +2591,7 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
             </button>
           ) : (
             <button
-              onClick={() => {
-                mutedRef.current = true;
-                userMutedRef.current = true;
-                setMuted(true);
-                setUserMuted(true);
-              }}
+              onClick={deactivateEve}
               className="p-2 md:p-2.5 h-10 min-w-10 flex items-center justify-center bg-eve-ink-soft rounded-xl border border-white/[0.08] hover:bg-mg-surface-2 transition-all outline-none focus-visible:ring-2 focus-visible:ring-eve-gold focus-visible:ring-offset-2 focus-visible:ring-offset-eve-ink"
               title="Mute Eve"
               aria-label="Mute Eve"

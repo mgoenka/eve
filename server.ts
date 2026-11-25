@@ -907,7 +907,7 @@ app.post('/api/eve-refine', metered('refine', estRefine, async (req, res) => {
     if (!parsed) return jsonError(res, 502, 'Refine returned non-JSON');
     res.json({
       ...parsed,
-      spokenReply: str((parsed as any).spokenReply, 400),
+      spokenReply: cleanSpokenLine(str((parsed as any).spokenReply, 400)),
       title: str((parsed as any).title, 120),
       stops: normalizeArrivals(
         adjust
@@ -2226,7 +2226,7 @@ app.post('/api/tts', metered('tts', estTts, async (req, res) => {
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&apos;');
     const cadenced = escaped
-      .replace(/\.\.\./g, '<break time="220ms"/>')
+      .replace(/\.\.\.|…/g, '<break time="220ms"/>')
       .replace(/—/g, '<break time="140ms"/>')
       .replace(/\.\s+/g, '.<break time="180ms"/> ')
       .replace(/\?\s+/g, '?<break time="180ms"/> ');
