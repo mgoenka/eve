@@ -1,4 +1,4 @@
-// Synced from app-platform/server-kit/pulse/index.ts. Do not edit here. VERSION 45d88cf 2026-11-25T19:44:37Z
+// Synced from app-platform/server-kit/pulse/index.ts. Do not edit here. VERSION 425e7a4 2026-11-25T19:59:05Z
 /**
  * Pulse: anonymous, cookie-free usage counts for every app and the website.
  *
@@ -397,17 +397,19 @@ export function pulseRouter<R>(express: ExpressLike<R>, opts: PulseRouterOptions
       res.set("Access-Control-Allow-Origin", origin);
       res.set("Vary", "Origin");
     }
-    const target = appFor(req);
-    const body = await readBody(req);
-    res.status(204).end();
-    if (!target || body == null || isBotUa(req.get("user-agent"))) return;
-    if (!global.hit("all") || !perIp.hit(ipKey(req.ip))) return;
-    const hit = parseHit(body, target.host);
-    if (!hit) return;
+    // Answer only after the count is saved: Cloud Run stops giving the instance CPU once the response is sent.
     try {
+      const target = appFor(req);
+      const body = await readBody(req);
+      if (!target || body == null || isBotUa(req.get("user-agent"))) return;
+      if (!global.hit("all") || !perIp.hit(ipKey(req.ip))) return;
+      const hit = parseHit(body, target.host);
+      if (!hit) return;
       await store.record(target.app, hit);
     } catch (err) {
-      console.error(`[pulse] ${target.app}: record failed`, (err as Error)?.message);
+      console.error(`[pulse] record failed`, (err as Error)?.message);
+    } finally {
+      res.status(204).end();
     }
   });
   return Object.assign(router as object, { store }) as R & { store: PulseStore };
