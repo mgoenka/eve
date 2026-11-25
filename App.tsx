@@ -70,9 +70,9 @@ const APP_RULES: RuleSection[] = [
           title: 'What Eve costs in credits',
           icon: '🧾',
           items: [
-            'Each painted picture costs about 40 credits (a stop card about 55, with the web research behind it). Cards and portraits she has already painted are free.',
-            'The plan itself costs about 25 credits (it searches the web for real venues); her lines, story and replies about 2 to 5 each; her voice about 1 to 3 per line and about 12 for the full narration.',
-            'A plan with its first painted stop is usually about 100 credits; each extra Show picture about 55. A restaurant content pack (4 pictures) is about 170.',
+            'Each painted picture costs about 40 credits (a stop card about 45). Cards and portraits she has already painted are free.',
+            'The plan itself costs about 35 to 50 credits (she checks the venues are real with up to 3 Google searches, each billed); a change to the plan the same; her lines, story and other replies about 2 to 5 each; her voice about 1 to 3 per line and about 12 for the full narration.',
+            'A plan with its first painted stop is usually about 100 credits; each extra Show picture about 45. A restaurant content pack (4 pictures) is about 170.',
             'If you run out mid-plan, the plan still shows: get more credits, then tap Show picture or Repaint on a card.',
           ],
         },
@@ -83,7 +83,7 @@ const APP_RULES: RuleSection[] = [
     icon: '🍽️',
     items: [
       'Tap the shop icon. Enter your restaurant and city; cuisine, voice and signature dishes are optional.',
-      'Eve suggests tonight’s special from recent reviews or trends. Different dish asks for another idea.',
+      'Eve suggests tonight’s special from what she knows of the restaurant’s reviews and current trends (no live search). Different dish asks for another idea.',
       'Generate tonight’s look makes an Instagram post, a Reel storyboard with voiceover, a menu card, an email and an SMS. It uses 4 of the hour’s paintings. Tap Cancel to stop while Eve is making it.',
       'Publish to Eve diners features your special to people planning evenings nearby. After you publish, Eve shows how many specials you featured this week and how many evenings she planned at your restaurant.',
     ],

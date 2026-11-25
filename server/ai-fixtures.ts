@@ -34,7 +34,6 @@ registerAiFixture(({ prompt }) => {
     };
   }
   if (prompt.includes('"signatureDishes": "comma-separated')) return { cuisine: 'fusion', signatureDishes: 'Test Dish, Test Dish Two, Test Dish Three' };
-  if (prompt.includes('which of these reservation platforms')) return { opentable: true, resy: true, tock: true };
   if (prompt.includes('What city, neighborhood, or area is at coordinates')) return 'Test City, TX';
   return undefined;
 });

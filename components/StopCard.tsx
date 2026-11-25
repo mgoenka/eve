@@ -76,9 +76,9 @@ export function StopCard({ stop, index, city, whenISO, startTime, party, highlig
       })
     : [];
 
-  // Check actual availability on each platform via the server
-  // (Gemini + Google Search). Filter out platforms that don't list the
-  // venue. Falls back to all-three on error so the user always has a path.
+  // Platform availability from the server (/api/reservations/check). It makes no AI call now (a
+  // grounded lookup cost a Google Search query each time) and keeps every platform's search link;
+  // a platform it reports as false is filtered out. All three stay on error.
   const [availability, setAvailability] = useState<AvailabilityMap | null>(stop.availability || null);
   // Speculative: re-checked once the Sparks balance is known; skipped (all three links stay) when it could spend
   // Sparks the user didn't choose to spend.

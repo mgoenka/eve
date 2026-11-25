@@ -72,7 +72,7 @@ The restaurant side replaces 3-4 disconnected SaaS tools (Hootsuite + Canva + Co
 │       stop-image            TEXT+IMAGE per stop card                  │
 │   /api/eve-story          → 7-beat narrative arc                      │
 │   /api/eve-outro          → Vibe-specific send-off                    │
-│   /api/eve-refine         → Conversational plan refinement            │
+│   /api/eve-refine         → Plan refinement (Search-grounded)         │
 │   /api/eve-avatar         → Gemini 2.5 Flash Image, mood portrait     │
 │   /api/reverse-geocode    → lat/lng → city                            │
 │   /api/tts                → Cloud TTS Neural2-F with SSML prosody     │
@@ -80,7 +80,7 @@ The restaurant side replaces 3-4 disconnected SaaS tools (Hootsuite + Canva + Co
 │   /api/agent/run          → ADK-pattern agent runtime                 │
 │                                                                        │
 │  Restaurant endpoints:                                                 │
-│   /api/suggest-special    → Search-mined reviews → today's dish       │
+│   /api/suggest-special    → Known reviews + trends → today's dish     │
 │   /api/content-pack       → Hero image + 3 Reel scenes + copy + TTS   │
 │   /api/post-special       → adds to dining index                      │
 └──────────────────────────────────────────────────────────────────────┘
@@ -117,7 +117,7 @@ Full technical deep-dive (sequence diagram, conversation FSM, engineering invari
 
 These hold for every request, regardless of input shape:
 
-- **No hallucinated venues.** All restaurant + venue names are produced by Gemini Flash with the `googleSearch` tool enabled. The skeleton response carries `groundedSources[]` URLs as proof.
+- **No hallucinated venues.** Plan venues come from Gemini Flash with the `googleSearch` tool enabled: the plan skeleton (`/api/plan-experience/skeleton`) and plan changes (`/api/eve-refine`), each prompt capped at 3 searches (Gemini 3 bills Google Search per query). The skeleton response carries `groundedSources[]` URLs as proof. Nothing else is grounded: stop-image venue details and the restaurant special suggestions are ungrounded, and reservation links (`/api/reservations/check`) are plain booking search URLs with no AI call.
 - **Audio races never overlap.** Every speak path calls `stopAllAudio()` first. `speakAsEveAndWait` resolves on either `ended` or `pause` events so barge-in releases the for-loop within ~200 ms.
 - **No stale closures in the silence watcher.** Refs (`voiceListeningRef`, `voiceTranscriptRef`, `conversationActiveRef`, `userMutedRef`, `eveSpeakingRef`, `phaseRef`) drive the watch loop, not React state.
 - **JSON parsing is multi-strategy.** `extractJson()` tries direct parse, then markdown-fence strip, then last-balanced-brace scan. Returns null only if all three fail.

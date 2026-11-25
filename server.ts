@@ -11,6 +11,7 @@ import { AgentRuntime, buildEveBrainAgent } from './agent';
 import * as firestore from './lib/firestore';
 import * as stripeLib from './lib/stripe';
 import * as instagramLib from './lib/instagram';
+import { openTableUrl, resyUrl, tockUrl } from './lib/reservations';
 import { TtlCache, cacheKey } from './lib/ttlCache';
 import {
   cleanIntro,
@@ -324,10 +325,19 @@ async function generateText(opts: {
   return response;
 }
 
-/** Search-grounded text call (venue research, live lookups). */
+/**
+ * Google Search grounding is billed per search query on Gemini 3 ($14 / 1,000), so it is kept only where Eve's
+ * promise needs it (real venues: the plan skeleton and refine) and every grounded prompt caps the searches.
+ */
+const MAX_SEARCHES = 3;
+/** Searches a capped grounded call typically runs (credit estimates are typical, not maximum). */
+const TYPICAL_SEARCHES = 2;
+const SEARCH_CAP_NOTE = `\n\nSearch budget: use Google Search at most ${MAX_SEARCHES} times in total. Prefer a few broad searches (e.g. "best cocktail bars in <neighborhood>") over one search per venue.`;
+
+/** Search-grounded text call (refine: swapped venues must be real). The prompt gets the search cap. */
 function generateGrounded(contents: string, maxOutputTokens: number, temperature: number) {
   return generateText({
-    contents,
+    contents: contents + SEARCH_CAP_NOTE,
     maxOutputTokens,
     timeoutMs: GROUNDED_TIMEOUT_MS,
     config: { temperature, tools: [{ googleSearch: {} }] },
@@ -477,13 +487,16 @@ function refundImages(req: express.Request, n = 1) {
 // a failed action (4xx/5xx answer or a throw) is not charged. Requests that don't pay skip all of this.
 const credits = createCredits({ packageName: 'com.mohitgoenka.eve' });
 
-/** Typical cost of one call in credits (estimates only; the charge uses the real usage). */
-const est = (model: string, input: number, output: number, grounded = 0) =>
-  costOfCall({ model, usage: { promptTokenCount: input, candidatesTokenCount: output }, groundedRequests: grounded }).credits;
+/**
+ * Typical cost of one call in credits (estimates only; the charge uses the real usage). `searches`: Google Search
+ * queries a grounded call may run (Gemini 3 bills each; grounded prompts ask for at most MAX_SEARCHES).
+ */
+const est = (model: string, input: number, output: number, searches = 0) =>
+  costOfCall({ model, usage: { promptTokenCount: input, candidatesTokenCount: output }, groundedRequests: searches ? 1 : 0, searchQueries: searches }).credits;
 // One 1024px image (1,290 image tokens) from a ~500-token prompt.
 const estImage = () => est(IMAGE_MODEL, 500, 1290);
-// Venue research: short grounded prompt + one paragraph + thinking.
-const estResearch = () => est(TEXT_MODEL, 300, 700, 1);
+// Venue details for a stop image: short ungrounded prompt + one paragraph + thinking.
+const estResearch = () => est(TEXT_MODEL, 300, 700);
 const estTtsChars = (voice: string, chars: number) => {
   const u = cloudTtsUsage(voice, chars);
   return costOfCall({ model: u.model, usage: u.usage }).credits;
@@ -494,15 +507,14 @@ const body = (req: express.Request): any => (req.body && typeof req.body === 'ob
 const estIntro: Estimate = () => est(TEXT_MODEL, 700, 800);
 const estOutro: Estimate = () => est(TEXT_MODEL, 350, 650);
 const estStory: Estimate = () => est(TEXT_MODEL, 900, 900);
-const estRefine: Estimate = () => est(TEXT_MODEL, 800, 1300, 1);
+const estRefine: Estimate = () => est(TEXT_MODEL, 800, 1300, TYPICAL_SEARCHES);
 const estParseIntent: Estimate = () => est(TEXT_MODEL, 900, 750);
 const estGeocode: Estimate = () => est(TEXT_MODEL, 80, 620);
 const estSkeleton: Estimate = (req) => {
   const b = body(req);
-  return !b.fresh && skeletonCache.get(skeletonInput(b).key) ? 1 : est(TEXT_MODEL, 1200, 2100, 1);
+  return !b.fresh && skeletonCache.get(skeletonInput(b).key) ? 1 : est(TEXT_MODEL, 1200, 2100, TYPICAL_SEARCHES);
 };
 const estNarration: Estimate = () => est(TEXT_MODEL, 500, 800);
-const estReservations: Estimate = () => est(TEXT_MODEL, 200, 630, 1);
 const AVATAR_MOODS = new Set(['devoted', 'listening', 'speaking', 'thinking', 'longing']);
 const estAvatar: Estimate = (req) => {
   const mood = str(body(req).mood, 20);
@@ -524,7 +536,7 @@ const estSuggest: Estimate = (req) => {
   const cuisine = str(b.cuisine, 40);
   const dishes = str(b.signatureDishes, 400);
   if (!b.fresh && suggestCache.get(cacheKey(str(b.restaurantName, 120), str(b.city, 120), cuisine, dishes))) return 1;
-  return est(TEXT_MODEL, 700, 1100, 1) + (cuisine && dishes ? 0 : est(TEXT_MODEL, 150, 700, 1));
+  return est(TEXT_MODEL, 700, 1100) + (cuisine && dishes ? 0 : est(TEXT_MODEL, 150, 700));
 };
 const estTts: Estimate = (req) => {
   const b = body(req);
@@ -537,7 +549,7 @@ const estTts: Estimate = (req) => {
 const estAgent: Estimate = (req) => {
   const plan = Array.isArray(body(req).plan) ? body(req).plan.slice(0, 6) : [];
   const per = (st: any) =>
-    st?.tool === 'placesSearch' ? est(TEXT_MODEL, 120, 700, 1)
+    st?.tool === 'placesSearch' ? est(TEXT_MODEL, 120, 700, 1) // agent.ts placesSearch: one grounded lookup
       : st?.tool === 'sceneCard' ? estImage()
         : st?.tool === 'voiceLine' ? estTtsChars('en-US-Chirp3-HD-Aoede', str(st?.input?.text, 400).length)
           : 0;
@@ -1239,7 +1251,8 @@ Schema:
       response = await generateText({
         contents:
           prompt +
-          '\n\nIMPORTANT: Use Google Search to verify each venue you propose actually exists in the area, with the correct cuisine and dietary fit. Only output venues you have confirmed via search. After Search, return ONLY the JSON described above, nothing else.',
+          '\n\nIMPORTANT: Use Google Search to verify each venue you propose actually exists in the area, with the correct cuisine and dietary fit. Only output venues you have confirmed via search. After Search, return ONLY the JSON described above, nothing else.' +
+          SEARCH_CAP_NOTE,
         maxOutputTokens: 4096,
         timeoutMs: GROUNDED_TIMEOUT_MS,
         config: {
@@ -1295,17 +1308,18 @@ async function researchVenueDetails(
   const detailsKey = cacheKey(name, city, kind);
   const cachedDetails = venueDetailsCache.get(detailsKey);
   if (cachedDetails !== undefined) return cachedDetails;
-  const prompt = `Search the web for "${name}" in "${city}". In ONE paragraph (max 55 words), describe what the place actually looks like and what to expect — concrete sensory cues only:
+  // Ungrounded (Google Search grounding bills per query): this only flavors the stop's image prompt.
+  const prompt = `From what you know about "${name}" in "${city}" (no live lookup), in ONE paragraph (max 55 words), describe what the place looks like and what to expect — concrete sensory cues only:
 - Interior design / decor / lighting style
 - One signature dish OR signature visual element they are known for (depending on stop kind: ${kind})
 - The ambient mood (loud / quiet / intimate / lively)
 
 Constraints:
-- Use ONLY details verifiable from real reviews, official photos, or food media.
-- If you cannot confirm details, give general cues for that kind of place in ${city} and prefix with "Generally:".
+- Use only details you are confident about from reviews, official photos, or food media you know.
+- If you don't know this place well, give general cues for that kind of place in ${city} and prefix with "Generally:".
 - Output ONLY the paragraph. No headings, no commentary, no preamble.`;
   try {
-    const response = await generateGrounded(prompt, 1024, 0.4);
+    const response = await generateText({ contents: prompt, maxOutputTokens: 1024, config: { temperature: 0.4 } });
     const details = ((response.text || '').trim() || '').slice(0, 600);
     if (details) venueDetailsCache.set(detailsKey, details);
     return details;
@@ -1678,16 +1692,16 @@ app.post('/api/suggest-special', metered('suggest-special', estSuggest, async (r
     }
   }
 
-  // Infer cuisine + signature dishes if missing, via Search
+  // Infer cuisine + signature dishes if missing (ungrounded: restaurant-side copy, no per-search charge)
   if (!cuisine || !signatureDishes) {
     try {
-      const inferPrompt = `Search the web for "${restaurantName}" in "${city}". Return strict JSON only:
+      const inferPrompt = `From what you know about the restaurant "${restaurantName}" in "${city}" (no live lookup), return strict JSON only:
 {
   "cuisine": "one-word cuisine type (e.g. indian, italian, thai, japanese, mexican, chinese, american, mediterranean, fusion, cafe)",
   "signatureDishes": "comma-separated list of 3-5 dishes the restaurant is most known for, based on what reviewers and the menu emphasize"
 }
-If you cannot find the restaurant, infer plausibly from the name and return your best guess.`;
-      const inferResp = await generateGrounded(inferPrompt, 1024, 0.3);
+If you don't know the restaurant, infer plausibly from the name and return your best guess.`;
+      const inferResp = await generateText({ contents: inferPrompt, maxOutputTokens: 1024, config: { temperature: 0.3 } });
       const inferred = safeParseJson<{ cuisine?: string; signatureDishes?: string }>(inferResp.text || '');
       if (!cuisine && inferred?.cuisine) cuisine = inferred.cuisine.trim().toLowerCase();
       if (!signatureDishes && inferred?.signatureDishes) signatureDishes = inferred.signatureDishes.trim();
@@ -1699,11 +1713,13 @@ If you cannot find the restaurant, infer plausibly from the name and return your
 
   const prompt = `You are a culinary intelligence agent. The restaurant: ${restaurantName} in ${city}, cuisine ${cuisine}. Signature dishes: ${signatureDishes || 'not provided'}.
 
-Step 1: Search for RECENT reviews (last 30-90 days) of "${restaurantName}" in "${city}" — Google, Yelp, TripAdvisor, food blogs, Instagram. Look for specific dish praise.
+Work from what you already know (no live lookup).
 
-Step 2: If you found specific dish-level praise (a dish the reviewers actually named and complimented), set mode = "from_reviews" and feature that dish. Cite the praise in rationale.
+Step 1: Recall what reviews of "${restaurantName}" in "${city}" (Google, Yelp, TripAdvisor, food blogs, Instagram) say about specific dishes.
 
-Step 3: If no specific dish praise was found, set mode = "from_trending". Search what's trending in ${cuisine} cuisine right now (seasonal, viral, recent food media). Pick a dish that is realistic for this restaurant given their signatures. Also include 2-3 real ${city}-area restaurants known for this trending dish.
+Step 2: If you know of specific dish-level praise (a dish reviewers named and complimented), set mode = "from_reviews" and feature that dish. Summarize the praise in rationale.
+
+Step 3: Otherwise set mode = "from_trending". Pick a dish trending in ${cuisine} cuisine (seasonal, viral, recent food media) that is realistic for this restaurant given their signatures. Also include 2-3 ${city}-area restaurants known for this trending dish, only ones you are confident exist.
 
 OUTPUT FORMAT — VERY IMPORTANT:
 - Return ONE JSON object and NOTHING ELSE.
@@ -1729,21 +1745,14 @@ Schema:
 
 Constraints:
 - Do not invent specific reviewer names; use "diners said" or "reviewers noted".
-- If you cannot verify reviews, use mode = "from_trending".
+- If you don't know this restaurant's reviews, use mode = "from_trending".
 - Output JSON ONLY.`;
 
   try {
-    let response: any;
-    let usedSearch = false;
-    try {
-      response = await generateGrounded(prompt, 3072, 0.6);
-      usedSearch = true;
-    } catch {
-      response = await generateText({ contents: prompt, maxOutputTokens: 3072, config: { temperature: 0.6 } });
-    }
+    const response = await generateText({ contents: prompt, maxOutputTokens: 3072, config: { temperature: 0.6 } });
     const parsed = safeParseJson(response.text || '');
     if (!parsed) return jsonError(res, 502, 'Suggest returned non-JSON');
-    const body = { ...parsed, usedSearch };
+    const body = { ...parsed, usedSearch: false };
     suggestCache.set(suggestKey, body);
     res.json(body);
   } catch (err: any) {
@@ -2114,56 +2123,29 @@ app.post('/api/instagram/publish', async (req, res) => {
   }
 });
 
-// ---------- Reservation availability check ----------
+// ---------- Reservation links ----------
 //
-// Given a restaurant name + city, returns which of OpenTable / Resy / Tock
-// actually have the venue listed. Uses Gemini Flash with Google Search
-// grounding so the answer is real-time. Cached in-process for 12 hours.
-const RESERVATION_CACHE = new TtlCache<{ opentable: boolean; resy: boolean; tock: boolean }>({
-  maxEntries: 1000,
-  ttlMs: 12 * 60 * 60 * 1000,
-});
-
-app.post('/api/reservations/check', metered('reservations', estReservations, async (req, res) => {
-  if (!ai) {
-    // Without Gemini, optimistically allow all platforms.
-    return res.json({ opentable: true, resy: true, tock: true, source: 'fallback' });
-  }
+// Booking search links for a restaurant, with no AI call (a grounded lookup of which platform lists the venue cost
+// a Google Search query each time). Every platform stays offered (the stop card shows all three search links) and
+// the answer carries the search URLs: Google Maps for the venue + city, OpenTable, Resy and Tock.
+app.post('/api/reservations/check', (req, res) => {
   const restaurantName: string = str(req.body?.restaurantName, 120);
   const city: string = str(req.body?.city, 120);
   if (!restaurantName) return jsonError(res, 400, 'restaurantName required');
-
-  const reservationKey = cacheKey(restaurantName, city);
-  const cached = RESERVATION_CACHE.get(reservationKey);
-  if (cached) return res.json({ ...cached, source: 'cache' });
-
-  const prompt = `For the restaurant "${restaurantName}" in ${city || 'the United States'}, which of these reservation platforms actually list it for booking? Answer based on real Google Search results, not assumptions. If the restaurant takes walk-ins only or uses its own website (no platform), all three should be false.
-
-Return STRICT JSON only, no prose, no markdown:
-{
-  "opentable": true_or_false,
-  "resy": true_or_false,
-  "tock": true_or_false
-}
-
-First character of your response is { and last is }.`;
-
-  try {
-    const response = await generateGrounded(prompt, 1024, 0.1);
-    const parsed = safeParseJson(response.text || '');
-    const value = {
-      opentable: !!parsed?.opentable,
-      resy: !!parsed?.resy,
-      tock: !!parsed?.tock,
-    };
-    RESERVATION_CACHE.set(reservationKey, value);
-    res.json({ ...value, source: 'live' });
-  } catch (err: any) {
-    console.warn('[reservations] check failed:', err?.message || err);
-    // On error, allow all so the user still has a path to book.
-    res.json({ opentable: true, resy: true, tock: true, source: 'error_fallback' });
-  }
-}));
+  const input = { restaurantName, city };
+  res.json({
+    opentable: true,
+    resy: true,
+    tock: true,
+    source: 'links',
+    links: {
+      maps: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${restaurantName} ${city}`.trim())}`,
+      opentable: openTableUrl(input),
+      resy: resyUrl(input),
+      tock: tockUrl(input),
+    },
+  });
+});
 
 // ---------- Sitemap (SEO for city pages) ----------
 
