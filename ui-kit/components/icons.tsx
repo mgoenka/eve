@@ -33,3 +33,9 @@ export const PlusIcon = (p: P) => (<Svg {...p}><path d="M5 12h14" /><path d="M12
 export const MinusIcon = (p: P) => (<Svg {...p}><path d="M5 12h14" /></Svg>);
 export const QrCodeIcon = (p: P) => (<Svg {...p}><rect width="5" height="5" x="3" y="3" rx="1" /><rect width="5" height="5" x="16" y="3" rx="1" /><rect width="5" height="5" x="3" y="16" rx="1" /><path d="M21 16h-3a2 2 0 0 0-2 2v3" /><path d="M21 21v.01" /><path d="M12 7v3a2 2 0 0 1-2 2H7" /><path d="M3 12h.01" /><path d="M12 3h.01" /><path d="M12 16v.01" /><path d="M16 12h1" /><path d="M21 12v.01" /><path d="M12 21v-1" /></Svg>);
 export const InstallIcon = (p: P) => (<Svg {...p}><rect width="14" height="20" x="5" y="2" rx="2" /><path d="M12 7v7" /><path d="m9 11 3 3 3-3" /><path d="M10 18h4" /></Svg>);
+export const EyeIcon = (p: P) => (<Svg {...p}><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" /><circle cx="12" cy="12" r="3" /></Svg>);
+export const KeyIcon = (p: P) => (<Svg {...p}><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z" /><circle cx="16.5" cy="7.5" r=".5" fill="currentColor" /></Svg>);
+export const LinkIcon = (p: P) => (<Svg {...p}><path d="M9 17H7A5 5 0 0 1 7 7h2" /><path d="M15 7h2a5 5 0 1 1 0 10h-2" /><line x1="8" x2="16" y1="12" y2="12" /></Svg>);
+export const CloudIcon = (p: P) => (<Svg {...p}><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" /></Svg>);
+export const CloudOffIcon = (p: P) => (<Svg {...p}><path d="M10.94 5.274A7 7 0 0 1 15.71 10h1.79a4.5 4.5 0 0 1 4.222 6.057" /><path d="M18.796 18.81A4.5 4.5 0 0 1 17.5 19H9A7 7 0 0 1 5.79 5.78" /><path d="m2 2 20 20" /></Svg>);
+export const UploadIcon = (p: P) => (<Svg {...p}><path d="M12 3v12" /><path d="m17 8-5-5-5 5" /><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /></Svg>);

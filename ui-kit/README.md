@@ -435,6 +435,12 @@ Props: `value`, `size` (200), `ecc` `L|M|Q|H` ('M'), `margin` (2 modules), `colo
 `PlusIcon`, `MinusIcon`, `QrCodeIcon`, `InstallIcon` — inline SVG, `size` prop (18), `currentColor`.
 Apps can keep lucide-react for everything else.
 
+### `BackupModal`, `BackupButton`, `useBackupEntry` (+ `utils/backup.ts`)
+Scorer's backup and sync for any app: cloud backup under a private recovery key, a one-use link code / QR to pair
+another device, and Export / Import to a JSON file. Engine: `createBackup` (your own records) or `createKeyBackup`
+(existing localStorage keys). Server side: `server-kit/backup` (`scripts/sync-backup.sh`). Full guide: the
+app-platform README, "Backup and sync".
+
 ## 6. Hooks
 
 | hook | what |

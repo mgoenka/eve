@@ -178,7 +178,8 @@
 @utility bottom-safe { bottom: max(1rem, env(safe-area-inset-bottom)); }
 @utility h-screen-safe { height: 100dvh; }
 @utility min-h-screen-safe { min-height: 100dvh; }
-@utility font-header { font-family: var(--font-display); }
+/* Page titles ("Mohit's / Bingo!") use the app font in bold so they match the card headings and buttons; Syne stays for .font-display. */
+@utility font-header { font-family: var(--font-sans); font-weight: 700; letter-spacing: -0.02em; }
 @utility drop-shadow-glow { filter: drop-shadow(0 0 12px rgb(245 197 66 / 0.4)); }
 
 /* The shared page backdrop (same as the apps' existing .site-theme). */

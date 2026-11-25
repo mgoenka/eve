@@ -1,4 +1,5 @@
 import express from 'express';
+import { backupRouter } from './server/backup/index.ts';
 import helmet from 'helmet';
 import crypto from 'crypto';
 import compression from 'compression';
@@ -598,6 +599,9 @@ function metered(action: string, estimate: Estimate, handler: AiHandler): expres
 // Web wallet cookie (only while web credits are on), before every /api route that may call
 // credits.identify. Mounted before the /api origin guard: the balance GET may arrive without
 // Origin/Referer; it changes nothing but creating a wallet. The kit rate-limits the credits endpoints.
+// Recent evenings: private-key backup and device linking (server-kit/backup), with its own JSON parser.
+app.use('/api/backup', backupRouter(express, { app: 'eve', allowedHosts: ['eve.mohitgoenka.com'], projectId: 'public-mohit-260610' }));
+
 app.use('/api', (req, res, next) => void credits.middleware(req, res, next));
 app.get('/api/credits/balance', (req, res) => credits.handlers.balance(req, res));
 // JSON bodies for purchase/checkout/confirm: the 8kb strict parser above (TINY_JSON_PATHS).

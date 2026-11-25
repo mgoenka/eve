@@ -61,6 +61,8 @@ import {
   sanitizeEvening,
 } from '../services/savedEvenings';
 import type { SavedEvening } from '../services/savedEvenings';
+import { BackupButton, BackupModal, useBackupEntry } from '../ui-kit/components/BackupModal';
+import { backup } from '../lib/backup';
 import { clearSnapshot, useSnapshot } from '../services/persist';
 import { DINER_SNAPSHOT_KEY, DINER_SNAPSHOT_V, readDinerSnapshot } from '../services/dinerSnapshot';
 import type { DinerSnapshot } from '../services/dinerSnapshot';
@@ -335,6 +337,7 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
 
   // Recent evenings (this device) + the visitor's hourly picture budget.
   const [recentEvenings, setRecentEvenings] = useState<SavedEvening[]>(() => loadEvenings());
+  const backupEntry = useBackupEntry(backup);
   const [imageLimit, setImageLimit] = useState<ImageLimit | null>(null);
   const eveningIdRef = useRef<string>(restoredEvening?.id || '');
   useEffect(() => {
@@ -1903,6 +1906,7 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
           right={
             <>
             <CreditsChip />
+            <BackupButton backup={backup} onClick={backupEntry.show} pressed={backupEntry.open} />
             {muted ? (
               <button
                 onClick={() => {
@@ -2435,6 +2439,7 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
             </span>
           </div>
         </footer>
+        <BackupModal open={backupEntry.open} onClose={backupEntry.close} backup={backup} what="Your recent evenings and restaurant profile" noun="evenings" {...(backupEntry.initialCode ? { initialCode: backupEntry.initialCode } : {})} />
       </div>
     );
   }

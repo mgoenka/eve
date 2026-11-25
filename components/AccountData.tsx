@@ -3,6 +3,7 @@ import { Trash2, Check } from 'lucide-react';
 import { AppHeader, Button, FetchError, LocalAiSetting, Modal, fetchJson, useConfirm } from '../ui-kit';
 import { EveLogo } from './EveLogo';
 import { useOpenRules } from './RulesContext';
+import { backup } from '../lib/backup';
 
 // "Delete my account and data" (Google Play account-deletion policy).
 // Eve has no sign-in: the server keeps only what this device published
@@ -45,7 +46,7 @@ export function AccountDataSection({ compact = false, onDeleted }: { compact?: b
       message: (
         <>
           Eve permanently deletes the specials you published to Eve diners from this device, your Instagram connection,
-          and on this device your recent evenings and restaurant profile. This can’t be undone.
+          the cloud backup of your recent evenings, and on this device your recent evenings and restaurant profile. This can’t be undone.
         </>
       ),
     });
@@ -53,6 +54,8 @@ export function AccountDataSection({ compact = false, onDeleted }: { compact?: b
     setDeleting(true);
     setError('');
     try {
+      // The cloud backup of recent evenings (if any) goes first, so a failure leaves everything as it was.
+      await backup.eraseCloud();
       const r = await fetchJson<DeleteResult>('/api/account/delete', {
         method: 'POST',
         body: { confirm: 'delete' },

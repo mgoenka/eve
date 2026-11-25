@@ -53,7 +53,10 @@ export { LazyShareSheet } from './components/LazyShareSheet';
 export { LocalAiSetting } from './components/LocalAiSetting';
 export type { ShareSheetProps } from './components/ShareSheet';
 export { ResultsCard } from './components/ResultsCard';
+export { BackupModal, BackupButton, useBackupEntry, useBackupStatus } from './components/BackupModal';
+export type { BackupModalProps } from './components/BackupModal';
 export type { ResultsCardProps } from './components/ResultsCard';
+export { SCORER_FEED_URL, reportToScorer } from './utils/scorerFeed';
 export { scoreCardAccent } from './utils/scoreCard';
 export type { QRCodeProps } from './components/QRCode';
 // Static QRCode (pulls the encoder into the importing chunk): import { QRCode } from './ui-kit/components/QRCode'
@@ -149,3 +152,7 @@ export { webCreditsProvider, CREDITS_CHECKOUT_URL, CREDITS_CONFIRM_URL } from '.
 export type { NativeBridge, NativeBilling, NativeProduct, NativePurchase } from './utils/creditsPlay';
 export { runLocalFirst, canRunLocally, localPrompt, localJson, parseLooseJson, prepareLocalAi, refreshLocalAi, getLocalAiInfo, subscribeLocalAi, localAiEnabled, enableLocalAiSetting, localAiSettingEnabled } from './utils/localAi';
 export type { LocalAiInfo, LocalAiState, LocalAiEngine, LocalPromptOptions, RunLocalFirstOptions } from './utils/localAi';
+export { createBackup, createKeyBackup, backupKeys, backupLabel } from './utils/backup';
+export type { Backup, BackupOptions, BackupStatus, BackupKeySpec, BackupKeysOptions } from './utils/backup';
+export { formatKey, normalizeKey, normalizeLinkCode } from './utils/backupProtocol';
+export type { SyncRecord, BackupFile } from './utils/backupProtocol';

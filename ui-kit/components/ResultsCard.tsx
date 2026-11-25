@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react';
 import type { ScoreCardData, ScoreCardFormat } from '../utils/scoreCard';
 import { SCORE_CARD_SIZES, drawScoreCard, scoreCardAccent, scoreVideoDuration } from '../utils/scoreCard';
 import { cx } from '../utils/cx';
+import { reportToScorer } from '../utils/scorerFeed';
 
 export interface ResultsCardProps {
   /** The same data the share sheet uses: the final screen is the share card itself. */
@@ -11,6 +12,8 @@ export interface ResultsCardProps {
   format?: ScoreCardFormat;
   /** Play the reveal animation once when it mounts (skipped with reduced motion). Default true. */
   animate?: boolean;
+  /** Send the result to Mohit's Scorer when Mohit played (see utils/scorerFeed). Default true. */
+  report?: boolean;
   className?: string;
 }
 
@@ -23,33 +26,42 @@ const reducedMotion = () =>
  * named highlight stats), with the reveal animation. Sized to fit: full width on phones, at most ~68vh tall.
  * Screen readers get the same content as text.
  */
-export function ResultsCard({ data, format = 'post', animate = true, className }: ResultsCardProps) {
+export function ResultsCard({ data, format = 'post', animate = true, report = true, className }: ResultsCardProps) {
   const ref = useRef<HTMLCanvasElement>(null);
   const { w, h } = SCORE_CARD_SIZES[format];
+  // Re-renders often hand over an equal but new data object (a sync, a socket tick): only a real change replays the reveal.
+  const key = JSON.stringify(data);
+  const stable = useRef(data);
+  if (JSON.stringify(stable.current) !== key) stable.current = data;
+  const shown = stable.current;
+
+  useEffect(() => {
+    if (report) reportToScorer(shown);
+  }, [shown, report]);
 
   useEffect(() => {
     const canvas = ref.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
     if (!animate || reducedMotion()) {
-      drawScoreCard(ctx, data, format, Infinity);
+      drawScoreCard(ctx, shown, format, Infinity);
       return;
     }
     let raf = 0;
-    const total = scoreVideoDuration(data) - 1.5;
+    const total = scoreVideoDuration(shown) - 1.5;
     const t0 = performance.now();
     const tick = () => {
       const t = (performance.now() - t0) / 1000;
       if (t >= total || document.hidden) {
-        drawScoreCard(ctx, data, format, Infinity);
+        drawScoreCard(ctx, shown, format, Infinity);
         return;
       }
-      drawScoreCard(ctx, data, format, t);
+      drawScoreCard(ctx, shown, format, t);
       raf = requestAnimationFrame(tick);
     };
     tick();
     return () => cancelAnimationFrame(raf);
-  }, [data, format, animate]);
+  }, [shown, format, animate]);
 
   const accent = scoreCardAccent(data);
   const summary = [
