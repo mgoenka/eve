@@ -556,8 +556,16 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
     rec.continuous = true;
     rec.interimResults = true;
     rec.lang = 'en-US';
+    // Phones (and Chrome after a pause) end the session on their own mid-sentence. While Eve still
+    // wants to listen, start again and keep the words heard so far, so the whole sentence goes through.
+    let carry = '';
+    let blocked = false;
+    rec.onstart = () => {
+      blocked = false;
+      carry = voiceTranscriptRef.current.trim();
+    };
     rec.onresult = (e: any) => {
-      let transcript = '';
+      let transcript = carry ? carry + ' ' : '';
       for (let i = 0; i < e.results.length; i++) {
         transcript += e.results[i][0].transcript + ' ';
       }
@@ -584,10 +592,24 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
         setWalkingIdx(-1);
       }
     };
-    rec.onend = () => setVoiceListening(false);
-    rec.onerror = () => setVoiceListening(false);
+    rec.onend = () => {
+      if (voiceListeningRef.current && !userMutedRef.current && !blocked) {
+        voiceTranscriptRef.current = voiceTranscriptRef.current.trim();
+        try {
+          rec.start();
+          return;
+        } catch {}
+      }
+      setVoiceListening(false);
+    };
+    rec.onerror = (e: any) => {
+      if (e?.error === 'no-speech' || e?.error === 'aborted') return; // onend decides
+      blocked = true;
+      setVoiceListening(false);
+    };
     recognitionRef.current = rec;
     return () => {
+      rec.onend = null; // leaving the page: don't start again
       try {
         rec.stop();
       } catch {}
@@ -1216,6 +1238,7 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
     const rec = recognitionRef.current;
     if (!rec) return;
     if (voiceListening) {
+      voiceListeningRef.current = false;
       try {
         rec.stop();
       } catch {}
@@ -1224,6 +1247,7 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
     }
     baseTextRef.current = freeText;
     setVoiceTranscript('');
+    voiceTranscriptRef.current = '';
     try {
       rec.start();
       setVoiceListening(true);
