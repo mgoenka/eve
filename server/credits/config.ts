@@ -90,17 +90,14 @@ export type PackId = (typeof PACKS)[number]['id'] | typeof CUSTOM_PACK_ID;
 /**
  * Website only: buyers pick their own amount ("Choose your amount"). Play can only sell products created in
  * advance, so the Android apps keep the fixed packs. The price follows one curve through the fixed packs (so a
- * custom 2,000 costs exactly the $4.99 pack), more Sparks per dollar as amounts grow, with a small-amount anchor
- * that still clears Stripe's $0.30 fixed fee and its $0.50 minimum charge.
+ * custom 2,000 costs exactly the $4.99 pack), more Sparks per dollar as amounts grow. The minimum is the $4.99
+ * pack (WEB_MIN_PACK_USD): below it Stripe's fixed $0.30 + 7.9% takes 18–38% of the sale (Mohit, 2026-11-26).
  */
 export const CUSTOM_PACK_ID = 'sparks_custom';
-export const CUSTOM_MIN_CREDITS = 100;
+export const CUSTOM_MIN_CREDITS = 2000;
 export const CUSTOM_MAX_CREDITS = 50_000;
-/** [Sparks, US$] anchors; prices between anchors are linear, rounded up to the cent. */
+/** [Sparks, US$] anchors; prices between anchors are linear, rounded up to the cent. Starts at the $4.99 pack. */
 export const CUSTOM_CURVE: ReadonlyArray<readonly [number, number]> = [
-  [100, 0.59],
-  [300, 0.99],
-  [1000, 2.99],
   [2000, 4.99],
   [4500, 9.99],
   [10_000, 19.99],
