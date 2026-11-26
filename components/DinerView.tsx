@@ -28,6 +28,7 @@ import {
   Pencil,
   History,
   X,
+  CalendarPlus,
 } from 'lucide-react';
 import {
   LOADING_MESSAGES,
@@ -68,6 +69,7 @@ import { DINER_SNAPSHOT_KEY, DINER_SNAPSHOT_V, readDinerSnapshot } from '../serv
 import type { DinerSnapshot } from '../services/dinerSnapshot';
 import { getPicture, pictureKey, putPicture } from '../services/stopPictures';
 import { isEcho } from '../lib/evePrompts';
+import { eveningIcs } from '../lib/ics';
 import { StopCard } from './StopCard';
 import { EveLogo } from './EveLogo';
 import { useOpenRules, useOpenSettings } from './RulesContext';
@@ -1955,6 +1957,31 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
     }
   }, [city, vibe, party, dietary, budgetPerPerson, cuisinePref, whenISO, startTime, durationHours, planTitle, stops]);
 
+  // "Add to calendar": an .ics with one event per stop at its arrival time, on the plan's date (today when it has none).
+  const addToCalendar = useCallback(async () => {
+    const dateISO = /^\d{4}-\d{2}-\d{2}$/.test(whenISO || '') ? whenISO : todayISO();
+    const ics = eveningIcs({ title: planTitle || 'My evening', city, dateISO, stops });
+    const name = `${(planTitle || 'eve-evening').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'eve-evening'}.ics`;
+    const file = new File([ics], name, { type: 'text/calendar' });
+    // The Android app's web view can't save a blob download: hand the file to the share sheet there.
+    if (isNativeApp() && navigator.canShare?.({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: planTitle || 'My evening on Eve' });
+        return;
+      } catch {
+        /* cancelled or unsupported: fall back to a download */
+      }
+    }
+    const href = URL.createObjectURL(file);
+    const a = document.createElement('a');
+    a.href = href;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 30_000);
+  }, [whenISO, planTitle, city, stops]);
+
   useEffect(() => {
     if (!narrationAudio || !audioRef.current) return;
     audioRef.current.src = `data:${narrationMime};base64,${narrationAudio}`;
@@ -2633,6 +2660,18 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
               >
                 <Sparkles size={11} />
                 A friend planned this. Plan your own evening.
+              </button>
+            </div>
+          )}
+          {phase === 'ready' && stops.length > 0 && (
+            <div className="mt-3 flex justify-center">
+              <button
+                type="button"
+                onClick={() => void addToCalendar()}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.10] border border-white/10 hover:border-eve-gold/40 text-xs font-medium text-eve-cream/80 hover:text-eve-cream transition-colors"
+              >
+                <CalendarPlus size={11} />
+                Add to calendar
               </button>
             </div>
           )}

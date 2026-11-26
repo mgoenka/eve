@@ -49,6 +49,7 @@ const APP_RULES: RuleSection[] = [
       'After any change, stops Eve kept keep their pictures, and her story and narration are rewritten for the new evening.',
       'Planning the same evening twice in a row gets you a fresh set of ideas.',
       'Share sends a link with the whole plan, so friends see the same evening. The link never carries what you typed in the request box. A friend who opens it can tap Plan your own evening to start fresh. The pencil takes you back to the form.',
+      'Add to calendar saves the evening as a calendar file: one event per stop at its arrival time, on the evening’s date (today if it has none). It is made on your device; nothing is sent.',
       'Your last six evenings are saved on this device under Your recent evenings. Tap one to reopen it (pictures already painted on this device come back without a new painting), or the x to remove it.',
     ],
   },
