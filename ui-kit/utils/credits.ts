@@ -321,9 +321,7 @@ export async function speculativeAiAllowedAsync(timeoutMs?: number): Promise<boo
 
 export function speculativeAiAllowed(): boolean {
   const s = state;
-  // Never spend a visitor's free starter Sparks on something they didn't ask for: while the starter is only
-  // previewed (starterPending) the shown 100 isn't granted yet, and the first metered call would claim it.
-  const granted = () => !s.starterPending && (s.balance ?? 0) >= 50;
+  // Never spend a player's Sparks (free starter or bought) on something they didn't ask for.
   if (isNativeApp()) {
     if (!creditsEnabled() || !s.loaded) return false;
     return s.owner;

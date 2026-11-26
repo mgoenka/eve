@@ -14,6 +14,19 @@ export interface MgKitOptions {
   sw?: boolean | MgSwOptions;
   /** Inject <link rel="preload"> for Syne + DM Sans. Default true. */
   preloadFonts?: boolean;
+  /** Anonymous usage counts (mg-pulse.js). false turns it off; endpoint sends beacons elsewhere. Default on. */
+  pulse?: boolean | { endpoint?: string };
+  /** JSON-LD from index.html's tags, plus robots.txt / sitemap.xml when public/ has none. false turns it off. */
+  seo?: false | MgSeoOptions;
+}
+export interface MgSeoOptions {
+  /** schema.org type. Default 'WebApplication'. */
+  type?: 'VideoGame' | 'WebApplication';
+  /** applicationCategory, e.g. 'GameApplication', 'UtilitiesApplication'. */
+  category?: string;
+  /** Google Play package, if the app is on Play (adds sameAs and "Android"). */
+  play?: string;
+  genre?: string;
 }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export declare function mgKit(options?: MgKitOptions): any[];
