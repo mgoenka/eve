@@ -24,7 +24,7 @@ export function GuestOutro({ hostHref, hostLabel = 'Host your own game', moreApp
   const native = isNativeApp();
   const href = hostHref ?? (typeof location !== 'undefined' ? location.origin + '/' : '/');
   const app = currentApp();
-  const play = !native && isAndroidWeb() && app?.play ? `https://play.google.com/store/apps/details?id=${app.play}` : null;
+  const play = !native && isAndroidWeb() && app?.play && !app.playPending ? `https://play.google.com/store/apps/details?id=${app.play}` : null;
   return (
     <section aria-label="What's next" className={cx('mx-auto flex w-full max-w-md flex-col items-center gap-3', className)}>
       {!native ? (
@@ -33,7 +33,7 @@ export function GuestOutro({ hostHref, hostLabel = 'Host your own game', moreApp
         </a>
       ) : null}
       {play ? (
-        <a href={play} target="_blank" rel="noopener noreferrer" className="text-xs text-mg-subtle hover:text-mg-gold hover:underline">
+        <a href={play} target="_blank" rel="noopener noreferrer" className="text-xs text-mg-muted hover:text-mg-gold hover:underline">
           Also on Google Play
         </a>
       ) : null}

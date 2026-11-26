@@ -298,7 +298,32 @@ export interface AiFetchJsonOptions extends FetchJsonOptions {
   /** Open the "Get Sparks" sheet on 402 (default: true for ai 'action', false for 'background'). */
   creditsSheet?: boolean;
   /** Toast "Lots of people are using this right now…" on HTTP 503 ai_busy (default: as creditsSheet). Pass false when the app shows its own message. */
-  toastOnBusy?: boolean;
+  toastOnBusy?: boolean;  /** Android: after a 402, wait while the sheet is open and run the call again once enough Sparks are bought (default true). */
+  retryAfterPurchase?: boolean;
+}
+
+/**
+ * Resolves true once the balance covers `needed` after a purchase (sheet still open or just closed by it),
+ * false when the sheet closes without enough Sparks or after 10 minutes.
+ */
+function waitForTopUp(needed: number, timeoutMs = 10 * 60_000): Promise<boolean> {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v: boolean) => {
+      if (done) return;
+      done = true;
+      clearTimeout(t);
+      unsub();
+      resolve(v);
+    };
+    const check = () => {
+      const s = state;
+      if (s.owner || ((s.balance ?? 0) >= needed && s.buying === null)) finish(true);
+      else if (!s.sheetOpen && s.buying === null) finish(false);
+    };
+    const t = setTimeout(() => finish(false), timeoutMs);
+    const unsub = subscribeCredits(check);
+  });
 }
 
 /** JSON `error` code of the server's HTTP 503 when Gemini is overloaded (server/ai-guard.ts sendAiBusy). */
@@ -384,7 +409,7 @@ export function speculativeAiAllowed(): boolean {
  * When credits are off (the website today) it is exactly fetchJson.
  */
 export async function aiFetchJson<T = unknown>(url: string, options: AiFetchJsonOptions = {}): Promise<T> {
-  const { ai = 'action', creditsSheet = ai !== 'background', toastOnBusy = creditsSheet && ai !== 'background', ...fetchOptions } = options;
+  const { ai = 'action', creditsSheet = ai !== 'background', toastOnBusy = creditsSheet && ai !== 'background', retryAfterPurchase = true, ...fetchOptions } = options;
   let retryHeader: string | null = null;
   const userHook = fetchOptions.onResponse;
   const metered = creditsEnabled();
@@ -426,7 +451,17 @@ export async function aiFetchJson<T = unknown>(url: string, options: AiFetchJson
     if (metered && isInsufficientCredits(err)) {
       const body = (err as FetchError).body as { balance?: unknown; needed?: unknown };
       if (typeof body.balance === 'number') setState({ balance: body.balance });
-      if (creditsSheet) openCreditsSheet('insufficient', typeof body.needed === 'number' ? body.needed : null);
+      const needed = typeof body.needed === 'number' ? body.needed : null;
+      if (creditsSheet) {
+        openCreditsSheet('insufficient', needed);
+        // Android: the purchase happens in place, so once the Sparks arrive the action the player asked for
+        // runs again by itself (the caller's spinner just keeps going). Closing the sheet without buying
+        // ends the wait. The website leaves for Stripe, so there the player taps again after coming back.
+        if (retryAfterPurchase && isNativeApp() && (await waitForTopUp(Math.max(1, needed ?? 1)))) {
+          closeCreditsSheet();
+          return await call();
+        }
+      }
     }
     throw err;
   }

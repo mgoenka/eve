@@ -1,4 +1,4 @@
-// Synced from app-platform/server-kit/pulse/index.ts. Do not edit here. VERSION 0d61898 2026-11-26T14:00:10Z
+// Synced from app-platform/server-kit/pulse/index.ts. Do not edit here. VERSION 9644162 2026-11-26T18:46:48Z
 /**
  * Pulse: anonymous, cookie-free usage counts for every app and the website.
  *
@@ -34,6 +34,10 @@ export type PulseEvent = (typeof EVENTS)[number];
 export const PLATFORMS = ["web", "android", "tv"] as const;
 export const FORMS = ["phone", "tablet", "desktop"] as const;
 /** At most this many beacons per device per day are counted (a stuck loop can't inflate anything). */
+/** Scrambled device records are deleted after this long without use (privacy policy, section 14). */
+export const DEVICE_TTL_MS = 395 * 24 * 3600_000; // 13 months
+/** Party-game fingerprints only dedupe screens of one game: keep them two days. */
+export const GAME_TTL_MS = 2 * 24 * 3600_000;
 export const DAILY_CAP = 400;
 const MAX_BODY = 1024;
 
@@ -238,10 +242,11 @@ export function createFirestoreStore(projectId = PULSE_PROJECT): PulseStore {
         const dev = snap.exists ? (snap.data() as Device) : null;
         const p = plan(hit, dev, now, !gameSnap?.exists);
         if (!p) return "capped" as const;
-        if (gameRef && !gameSnap?.exists) tx.set(gameRef, { at: now });
+        // expireAt: Firestore TTL policies (collection groups "devices" and "games") delete these on their own.
+        if (gameRef && !gameSnap?.exists) tx.set(gameRef, { at: now, expireAt: new Date(Number(now) + GAME_TTL_MS) });
         const counted = ["sessions", "games", "uses", "seconds", "days"];
         const devDoc = Object.fromEntries(Object.entries(p.device).map(([k, v]) => [k, counted.includes(k) ? FieldValue.increment(v as number) : v]));
-        tx.set(devRef, devDoc, { merge: true });
+        tx.set(devRef, { ...devDoc, expireAt: new Date(Number(now) + DEVICE_TTL_MS) }, { merge: true });
         // set + merge with nested maps keeps keys like "America/Chicago" as they are (update() would split on dots).
         tx.set(appRef.collection("days").doc(p.day), inc(p.mine ? { mine: p.dayCounts } : { ...p.dayCounts, ...p.dims }), { merge: true });
         tx.set(appRef, { ...inc(p.mine ? { mine: p.totals } : p.totals), ...(p.mine ? {} : { lastAt: now }) }, { merge: true });

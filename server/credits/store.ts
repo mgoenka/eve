@@ -505,7 +505,8 @@ export class MemoryCreditStore implements CreditStore {
     const accountKey = await this.resolveAccount(rec.account);
     const acc = this.accounts.get(accountKey);
     if (!acc) return null;
-    if (delta <= 0) return { reversed: 0, balance: acc.balance, account: accountKey };
+    // delta < 0 gives Sparks back (a dispute Mohit won: fraction 0 restores what the dispute took).
+    if (delta === 0) return { reversed: 0, balance: acc.balance, account: accountKey };
     rec.reversedCredits = target;
     acc.balance -= delta;
     acc.ledger.push({ type: 'reversal', credits: -delta, balanceAfter: acc.balance, at: now.toISOString(), reason, productId: rec.productId, provider: rec.provider, ...(rec.orderId ? { orderId: rec.orderId } : {}) });

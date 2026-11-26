@@ -56,6 +56,8 @@ export { ResultsCard } from './components/ResultsCard';
 export { MoreApps } from './components/MoreApps';
 export type { MoreAppsProps } from './components/MoreApps';
 export { GuestOutro } from './components/GuestOutro';
+export { DailyReminderPrompt } from './components/DailyReminderPrompt';
+export type { DailyReminderPromptProps } from './components/DailyReminderPrompt';
 export type { GuestOutroProps } from './components/GuestOutro';
 export { APPS, currentApp, appLink, siblingApps, isAndroidWeb } from './utils/apps';
 export type { CatalogApp, AppKind } from './utils/apps';
@@ -121,6 +123,8 @@ export {
   requestPushToken,
   scheduleDailyReminder,
   cancelReminder,
+  dailyRemindersAvailable,
+  requestNotificationPermission,
   SHORTCUT_EVENT,
   NOTIFICATION_EVENT,
 } from './utils/nativeShell';

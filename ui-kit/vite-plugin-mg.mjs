@@ -135,7 +135,7 @@ function seoJsonLd(html, o) {
 }
 
 /**
- * @param {{ sw?: boolean | { swSrc?: string, swDest?: string, include?: RegExp, exclude?: RegExp[], extra?: string[], lazyMaxBytes?: number }, preloadFonts?: boolean, pulse?: boolean | { endpoint?: string }, seo?: false | { type?: 'VideoGame' | 'WebApplication', category?: string, play?: string, genre?: string } }} [options]
+ * @param {{ sw?: boolean | { swSrc?: string, swDest?: string, include?: RegExp, exclude?: RegExp[], extra?: string[], lazyMaxBytes?: number }, preloadFonts?: boolean, pulse?: boolean | { endpoint?: string }, seo?: false | { type?: 'VideoGame' | 'WebApplication', category?: string, play?: string, genre?: string, prerender?: boolean } }} [options]
  * @returns {any[]}
  */
 export function mgKit(options = {}) {
@@ -193,10 +193,33 @@ export function mgKit(options = {}) {
         order: 'post',
         /** @param {string} html @param {any} ctx */
         handler(html, ctx) {
-          if (options.seo === false || !ctx.bundle || /application\/ld\+json/.test(html)) return;
-          const ld = seoJsonLd(html, options.seo || {});
-          if (!ld) return;
-          return [{ tag: 'script', attrs: { type: 'application/ld+json' }, children: JSON.stringify(ld).replace(/</g, '\\u003c'), injectTo: 'head' }];
+          if (options.seo === false || !ctx.bundle) return;
+          const o = options.seo || {};
+          /** @type {any[]} */
+          const tags = [];
+          if (!/application\/ld\+json/.test(html)) {
+            const ld = seoJsonLd(html, o);
+            if (ld) tags.push({ tag: 'script', attrs: { type: 'application/ld+json' }, children: JSON.stringify(ld).replace(/</g, '\\u003c'), injectTo: 'head' });
+          }
+          // Crawlable first page: the app's name and description inside an empty #root. React replaces it on
+          // mount, so people only see it as a brief loading line; search engines and link previews read it.
+          let out = html;
+          if (o.prerender !== false && /<div id="root"><\/div>/.test(html)) {
+            const esc = (/** @type {string} */ s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            const title = metaContent(html, 'og:title') || decodeEntities((html.match(/<title>([^<]*)<\/title>/i) || [])[1] || '');
+            const name = title.split(/\s[—–|-]\s/)[0].trim() || title;
+            const desc = metaContent(html, 'description') || metaContent(html, 'og:description');
+            if (name) {
+              const block =
+                '<div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:24px;text-align:center;font-family:system-ui,sans-serif;color:#8a8f9c">' +
+                '<h1 style="margin:0;font-size:22px;font-weight:600;color:#f5c542">' + esc(name) + '</h1>' +
+                (desc ? '<p style="margin:0;max-width:32rem;font-size:14px;line-height:1.5">' + esc(desc) + '</p>' : '') +
+                '</div>';
+              out = html.replace('<div id="root"></div>', () => '<div id="root">' + block + '</div>');
+            }
+          }
+          if (out === html && !tags.length) return;
+          return { html: out, tags };
         },
       },
       closeBundle() {

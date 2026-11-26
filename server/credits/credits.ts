@@ -878,6 +878,17 @@ export function createCredits(options: CreditsOptions) {
         const out = await fulfillSession(s);
         return out.status === 200 ? `credited ${String(out.body.credited)}` : String(out.body.error);
       }
+      case 'charge.dispute.closed': {
+        // Won disputes (status "won"): Stripe returns the money, so the Sparks the dispute took come back.
+        // Needs the charge.dispute.closed event enabled on the webhook endpoint in the Stripe Dashboard.
+        if (obj.status !== 'won') return 'ignored (dispute not won)';
+        const pi = typeof obj.payment_intent === 'string' ? obj.payment_intent : '';
+        if (!pi) return 'ignored (no payment intent)';
+        const r = await store.reversePurchase({ secondaryKey: `stripe:${pi}` }, 0, 'dispute_won', now());
+        if (!r) return 'ignored (unknown purchase)';
+        if (r.reversed < 0) console.log(`[credits] ${app}: +${-r.reversed} (dispute won) for ${mask(r.account.replace(/^web:/, ''))}, balance ${r.balance}`);
+        return `dispute won restored ${-r.reversed}`;
+      }
       case 'charge.refunded':
       case 'charge.dispute.created': {
         const pi = typeof obj.payment_intent === 'string' ? obj.payment_intent : '';

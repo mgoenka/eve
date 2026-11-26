@@ -463,7 +463,8 @@ export class FirestoreCreditStore implements CreditStore {
       }
       const target = Math.min(rec.credits, Math.max(0, Math.round(rec.credits * Math.min(1, Math.max(0, fraction)))));
       const delta = target - (rec.reversedCredits ?? 0);
-      if (delta <= 0) return { reversed: 0, balance: doc.balance, account: accRefNow.id };
+      // delta < 0 gives Sparks back (a dispute Mohit won: fraction 0 restores what the dispute took).
+      if (delta === 0) return { reversed: 0, balance: doc.balance, account: accRefNow.id };
       const balance = doc.balance - delta;
       const at = now.toISOString();
       tx.update(accRefNow, { balance, updatedAt: at });

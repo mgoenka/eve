@@ -50,7 +50,7 @@ export function MoreApps({ title = "More from Mohit's Creations", count = 3, kin
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm font-semibold text-mg-text">Mohit's {a.name}</span>
-                  <span className="block truncate text-xs text-mg-subtle">{a.blurb}</span>
+                  <span className="block truncate text-xs text-mg-muted">{a.blurb}</span>
                 </span>
                 <span aria-hidden="true" className="text-mg-gold">
                   ›

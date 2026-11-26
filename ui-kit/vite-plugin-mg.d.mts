@@ -27,6 +27,8 @@ export interface MgSeoOptions {
   /** Google Play package, if the app is on Play (adds sameAs and "Android"). */
   play?: string;
   genre?: string;
+  /** Put the app's name and description inside an empty #root at build (replaced on mount). Default true. */
+  prerender?: boolean;
 }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export declare function mgKit(options?: MgKitOptions): any[];

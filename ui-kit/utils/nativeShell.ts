@@ -286,6 +286,25 @@ export async function requestPushToken(): Promise<string | null> {
   return getPushToken();
 }
 
+/** True when this build can schedule local daily reminders (the Android app). False on the website. */
+export function dailyRemindersAvailable(): boolean {
+  const n = notifications();
+  return !!n && typeof n.scheduleDaily === 'function';
+}
+
+/** Asks for the notification permission (Android 13+ system prompt). Call from a user gesture. */
+export async function requestNotificationPermission(): Promise<boolean> {
+  const n = notifications();
+  if (!n || typeof n.request !== 'function') return false;
+  let p: Promise<'granted' | 'denied'> | undefined;
+  try {
+    p = n.request();
+  } catch {
+    return false;
+  }
+  return (await settle(p, 120_000, 'denied' as const)) === 'granted';
+}
+
 /** Schedules (or replaces) a local daily reminder. False without the bridge or when the shell refuses. */
 export async function scheduleDailyReminder(o: NativeDailyReminder): Promise<boolean> {
   const n = notifications();
