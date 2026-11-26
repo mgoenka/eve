@@ -32,6 +32,11 @@ export const STARTER_CREDITS = 100;
  * Sparks; clearing app data / cookies in a loop does not mint free AI. Later wallets from the address start at 0.
  */
 export const STARTER_PER_IP = 5;
+/**
+ * Android wallets per address: phone carriers put many people behind one IPv4 address (CGNAT), and Android
+ * users installed the app from Play, so they get a looser per-address limit (the global daily cap still applies).
+ */
+export const STARTER_PER_IP_ANDROID = 30;
 export const STARTER_WINDOW_MS = 24 * 60 * 60_000;
 
 /**

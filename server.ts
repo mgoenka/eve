@@ -39,7 +39,10 @@ import { aiFixturesActive, aiTestModeMiddleware } from './server/ai-guard.ts';
 import { normalizeArrivals } from './server/planTimes.ts';
 import { ttsFixture } from './server/ai-fixtures.ts';
 import { keepPlanShape, refinePrompt } from './server/refine.ts';
-import { saveSpecial } from './server/specials.ts';
+import fs from 'fs';
+import { withPreview, isAssetMiss, queryString, escapeHtml } from './server/seo/index.ts';
+import { CITIES, findCity } from './data/cities';
+import { SPECIAL_CAPTION_MAX, SPECIAL_NAME_MAX, brandIdFor, cleanSpecialText, saveSpecial, specialsPromptBlock } from './server/specials.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -1178,17 +1181,12 @@ app.post('/api/plan-experience/skeleton', metered('plan', estSkeleton, async (re
     whenLine = `Date: this plan is for ${dayLabel}. Consider day-of-week vibe (Tuesdays are quiet, Saturdays are busy) and pick venues that will plausibly be open and good that night.`;
   }
 
-  // Specials posted in this area (newest first).
+  // Specials posted in this area (newest first). Only verified ones (posted from the device that connected the
+  // restaurant's Instagram) may anchor a plan; anyone can post the rest, so they stay out of the prompt.
   const allSpecials = (await firestore.listSpecials(200)).filter((s) =>
     (s.city || '').toLowerCase().includes(city.toLowerCase().split(',')[0].trim())
   );
-  const specialsHints = allSpecials
-    .slice(0, 5)
-    .map(
-      (s) =>
-        `- ${s.restaurantName} (${s.cuisine}) is offering "${s.dishName}" tonight: ${s.caption.slice(0, 120)}`
-    )
-    .join('\n');
+  const specialsHints = specialsPromptBlock(allSpecials.filter((s) => s.verified === true).slice(0, 5));
 
   const prompt = `You are Eve, an AI evening concierge. Plan a complete multi-stop evening experience for the user.
 
@@ -1203,7 +1201,7 @@ ${whenLine}
 ${startTimeLine}
 ${durationLine}
 
-${specialsHints ? `Restaurants currently posted on Eve in this area you should consider as the dinner anchor when they fit:\n${specialsHints}\n` : ''}
+${specialsHints ? `${specialsHints}\n` : ''}
 
 Plan exactly ${stopCount} stops that flow naturally for this vibe. The first stop is always the dinner anchor. Subsequent stops should escalate the experience: dessert, drinks, a walk, a view, live music, an activity, etc. — whatever fits the vibe and the timing.
 
@@ -1212,7 +1210,7 @@ CRITICAL RULES:
 - Honor dietary preferences strictly for any food/drink stops.
 - Stay within budget.
 - For each venue, use a plausible, specific name appropriate to the city. Do NOT make up addresses or hours.
-- If an Eve-posted restaurant fits the dinner anchor naturally, USE IT and set isEveOriginal: true. Otherwise generate a plausible specific name and set isEveOriginal: false.
+- If a restaurant from <restaurant_data> fits the dinner anchor naturally, USE IT and set isEveOriginal: true. Otherwise generate a plausible specific name and set isEveOriginal: false.
 - Use distinct stop kinds — never repeat the same kind twice in one plan unless the duration is long enough to justify it.
 - approxArrival must be a real wall-clock time string like "7:30 PM", aligned with the start time and progressive across stops.
 - The sum of (durationMinutes + walkMinutesFromPrev) across all stops should approximately equal ${Math.round(durationHours * 60)} minutes.
@@ -1764,12 +1762,31 @@ Constraints:
   }
 }));
 
+// Posting to the public dining index needs no sign-in, so it is held tight: 3 specials a day per IP and per
+// device (owner key), names and captions capped, and links / hidden characters stripped. The per-IP count is
+// per instance; the per-device count is read from the index itself.
+const SPECIALS_PER_DAY = 3;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const specialIpBuckets = new Map<string, { count: number; resetAt: number }>();
+function takeSpecialIpSlot(req: express.Request): boolean {
+  const now = Date.now();
+  pruneBuckets(specialIpBuckets, now);
+  const key = clientIp(req);
+  const b = specialIpBuckets.get(key);
+  if (!b || b.resetAt <= now) {
+    specialIpBuckets.set(key, { count: 1, resetAt: now + DAY_MS });
+    return true;
+  }
+  b.count += 1;
+  return b.count <= SPECIALS_PER_DAY;
+}
+
 app.post('/api/post-special', async (req, res) => {
-  const restaurantName: string = str(req.body?.restaurantName, 120);
-  const city: string = str(req.body?.city, 120);
-  const cuisine: string = str(req.body?.cuisine, 40) || 'fusion';
-  const dishName: string = str(req.body?.dishName, 120);
-  const caption: string = str(req.body?.caption, 2200);
+  const restaurantName: string = cleanSpecialText(req.body?.restaurantName, SPECIAL_NAME_MAX);
+  const city: string = cleanSpecialText(req.body?.city, 120);
+  const cuisine: string = cleanSpecialText(req.body?.cuisine, 40) || 'fusion';
+  const dishName: string = cleanSpecialText(req.body?.dishName, SPECIAL_NAME_MAX);
+  const caption: string = cleanSpecialText(req.body?.caption, SPECIAL_CAPTION_MAX);
   // Only a real base64 PNG/JPEG/WebP (<= ~4.5 MB) is stored with a special.
   const rawImage = req.body?.imageData;
   const rawMime = req.body?.imageMime;
@@ -1786,12 +1803,25 @@ app.post('/api/post-special', async (req, res) => {
   if (!restaurantName || !dishName || !city) {
     return jsonError(res, 400, 'restaurantName, dishName, city required');
   }
+  const tooMany = () => {
+    res.set('Retry-After', String(DAY_MS / 1000));
+    jsonError(res, 429, `You can post ${SPECIALS_PER_DAY} specials a day. Try again tomorrow.`);
+  };
   try {
     // Linked to this device so "Delete my account and data" can remove it.
     const ownerKeyHash = sha256(ownerKeyFor(req, res));
+    if (!aiFixturesActive()) {
+      const sinceISO = new Date(Date.now() - DAY_MS).toISOString();
+      if ((await firestore.countOwnedSpecialsSince(ownerKeyHash, sinceISO)) >= SPECIALS_PER_DAY) return tooMany();
+      if (!takeSpecialIpSlot(req)) return tooMany();
+    }
+    // Verified: posted from the device that connected this restaurant's Instagram. Only verified specials
+    // can be a diner's dinner anchor (see the skeleton prompt).
+    const brand = await firestore.getBrand(brandIdFor(restaurantName, city)).catch(() => null);
+    const verified = !!(brand?.instagramBusinessAccountId && brand.ownerKeyHash && safeEqual(brand.ownerKeyHash, ownerKeyHash));
     // Free AI test mode (smoke tests, automated browsers) never writes to the real dining index.
     const result = await saveSpecial(
-      { ownerKeyHash, restaurantName, city, cuisine, dishName, caption, imageData, imageMime, postedAtISO: new Date().toISOString() },
+      { ownerKeyHash, restaurantName, city, cuisine, dishName, caption, imageData, imageMime, verified, postedAtISO: new Date().toISOString() },
       firestore.addSpecial,
     );
     res.json(result);
@@ -1836,13 +1866,18 @@ app.get('/api/restaurant/metrics/:name', async (req, res) => {
 
 // ---------- Stripe checkout + webhook ----------
 
+// Subscriptions are switched off until they're fully wired: checkout carries no brandId and nothing reads
+// subscriptionStatus, so even with STRIPE_PRICE_* set a payment would unlock nothing. Checkout refuses while
+// this is false (the pricing page shows "Coming soon"); turn it on with SUBSCRIPTIONS_ENABLED in PricingPage.tsx.
+const SUBSCRIPTIONS_ENABLED = false;
+
 app.post('/api/stripe/create-checkout-session', async (req, res) => {
   // Google Play payments policy: no web checkout from inside the Android app
   // (the app hides every pricing/checkout entry point; this is the backstop).
   if ((req.get('user-agent') || '').includes('MohitGoenkaApp/')) {
     return jsonError(res, 403, 'Plans aren\u2019t available in the app.');
   }
-  if (!stripeLib.isStripeConfigured()) {
+  if (!SUBSCRIPTIONS_ENABLED || !stripeLib.isStripeConfigured()) {
     return jsonError(
       res,
       503,
@@ -2150,17 +2185,75 @@ app.post('/api/reservations/check', (req, res) => {
   });
 });
 
+// ---------- Page titles and link previews (server-rendered head) ----------
+
+const SITE_ORIGIN = 'https://eve.mohitgoenka.com';
+let indexHtmlCache: string | null = null;
+/** dist/index.html, read once (null before a build). */
+function indexHtml(): string | null {
+  if (indexHtmlCache) return indexHtmlCache;
+  try {
+    indexHtmlCache = fs.readFileSync(path.join(__dirname, 'dist', 'index.html'), 'utf8');
+  } catch {
+    return null;
+  }
+  return indexHtmlCache;
+}
+
+function withCanonical(html: string, url: string): string {
+  return html.replace(/<link rel="canonical" href="[^"]*"\s*\/?>/i, () => `<link rel="canonical" href="${escapeHtml(url)}" />`);
+}
+
+/** A shared evening (?e=, base64url JSON with a city and stops) as preview text, or null when it doesn't parse. */
+function sharedEveningPreview(raw: string): { title: string; description: string } | null {
+  if (!raw || raw.length > 12_000) return null;
+  try {
+    const e = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
+    const cityName = typeof e?.city === 'string' ? e.city.split(',')[0].trim() : '';
+    const stops: string[] = Array.isArray(e?.stops)
+      ? e.stops.map((s: any) => (typeof s?.name === 'string' ? s.name.trim() : '')).filter(Boolean).slice(0, 6)
+      : [];
+    if (!cityName || !stops.length) return null;
+    return { title: `An evening in ${cityName}`, description: `${stops.join(' · ')}. Planned by Eve.` };
+  } catch {
+    return null;
+  }
+}
+
+/** index.html with this page's own title, description and canonical (city pages, restaurants, shared evenings). */
+function pageHtml(html: string, req: express.Request): string {
+  const slug = req.path.replace(/^\/+|\/+$/g, '');
+  const city = findCity(slug);
+  if (city) {
+    const url = `${SITE_ORIGIN}/${city.slug}`;
+    return withCanonical(withPreview(html, { title: city.title, description: city.description, url }), url);
+  }
+  if (slug === 'restaurant') {
+    const url = `${SITE_ORIGIN}/restaurant`;
+    return withCanonical(
+      withPreview(html, {
+        title: 'Eve for Restaurants — Daily AI Content Packs',
+        description: 'Tell Eve your restaurant and city. She writes tonight’s special, Instagram post, reel, menu card, email and SMS in your voice, and puts it in front of diners planning their evening.',
+        url,
+      }),
+      url,
+    );
+  }
+  if (slug === '') {
+    const shared = sharedEveningPreview(queryString(req.query?.e));
+    if (shared) return withPreview(html, shared);
+  }
+  return html;
+}
+
 // ---------- Sitemap (SEO for city pages) ----------
 
+// Each listed page is served with its own <title>, description and canonical (pageHtml above). No lastmod:
+// the pages don't carry a real change date. /pricing is left out while subscriptions are switched off.
 app.get('/sitemap.xml', (_req, res) => {
-  const base = 'https://eve.mohitgoenka.com';
-  const slugs = ['', 'restaurant', 'pricing', 'sf', 'nyc', 'austin', 'la', 'seattle', 'chicago'];
-  const today = new Date().toISOString().slice(0, 10);
+  const slugs = ['', 'restaurant', ...CITIES.map((c) => c.slug)];
   const urls = slugs
-    .map(
-      (s) =>
-        `<url><loc>${base}/${s}</loc><lastmod>${today}</lastmod><changefreq>weekly</changefreq><priority>${s === '' ? '1.0' : '0.8'}</priority></url>`
-    )
+    .map((s) => `<url><loc>${SITE_ORIGIN}/${s}</loc><changefreq>weekly</changefreq><priority>${s === '' ? '1.0' : '0.8'}</priority></url>`)
     .join('');
   res.set('Content-Type', 'application/xml');
   res.send(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls}</urlset>`);
@@ -2311,9 +2404,12 @@ app.use(
     },
   })
 );
-app.get('/{*splat}', (_req, res) => {
+app.get('/{*splat}', (req, res) => {
+  if (isAssetMiss(req.path)) return res.status(404).end();
   res.setHeader('Cache-Control', 'no-cache');
-  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+  const html = indexHtml();
+  if (!html) return res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+  res.type('html').send(pageHtml(html, req));
 });
 
 // Anything unexpected (bad JSON, oversized body, thrown errors): a generic

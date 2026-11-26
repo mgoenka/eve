@@ -417,14 +417,16 @@ export class MemoryCreditStore implements CreditStore {
     const acc = this.accounts.get(key);
     if (!acc) throw new Error('settle on missing account');
     acc.holds.delete(holdId);
-    if (charge.owner) acc.totals.ownerSpent = (acc.totals.ownerSpent ?? 0) + charge.credits;
+    // Never below zero: when the real cost tops the hold, the part the balance can't cover is on us.
+    const credits = charge.owner ? charge.credits : Math.min(charge.credits, Math.max(0, acc.balance));
+    if (charge.owner) acc.totals.ownerSpent = (acc.totals.ownerSpent ?? 0) + credits;
     else {
-      acc.balance -= charge.credits;
-      acc.totals.spent += charge.credits;
+      acc.balance -= credits;
+      acc.totals.spent += credits;
     }
     acc.ledger.push({
       type: 'charge',
-      credits: -charge.credits,
+      credits: -credits,
       balanceAfter: acc.balance,
       at: now.toISOString(),
       action: charge.action,

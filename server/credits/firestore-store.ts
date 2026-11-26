@@ -316,16 +316,18 @@ export class FirestoreCreditStore implements CreditStore {
       const doc = snap.data() as AccountDoc;
       const holds = FirestoreCreditStore.live(doc.holds, now.getTime());
       delete holds[holdId];
-      const balance = charge.owner ? doc.balance : doc.balance - charge.credits;
+      // Never below zero: when the real cost tops the hold, the part the balance can't cover is on us.
+      const credits = charge.owner ? charge.credits : Math.min(charge.credits, Math.max(0, doc.balance));
+      const balance = charge.owner ? doc.balance : doc.balance - credits;
       tx.update(
         account,
         charge.owner
           ? { holds, 'totals.ownerSpent': (doc.totals?.ownerSpent ?? 0) + charge.credits, updatedAt: now.toISOString() }
-          : { balance, holds, 'totals.spent': (doc.totals?.spent ?? 0) + charge.credits, updatedAt: now.toISOString() },
+          : { balance, holds, 'totals.spent': (doc.totals?.spent ?? 0) + credits, updatedAt: now.toISOString() },
       );
       const e: LedgerEntry = {
         type: 'charge',
-        credits: -charge.credits,
+        credits: -credits,
         balanceAfter: balance,
         at: now.toISOString(),
         action: charge.action,

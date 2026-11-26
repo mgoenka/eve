@@ -24,6 +24,11 @@ const DINER_FEATURES = [
   'Cancel anytime',
 ];
 
+// Subscriptions are off until they're fully wired: checkout carries no brand id and nothing reads
+// subscriptionStatus yet, so a payment would unlock nothing. The buttons show "Coming soon" and the server
+// refuses checkout (SUBSCRIPTIONS_ENABLED in server.ts). Turn both on together once that's built.
+const SUBSCRIPTIONS_ENABLED = false;
+
 interface Props {
   onBack: () => void;
 }
@@ -44,6 +49,7 @@ export function PricingPage({ onBack }: Props) {
     setError(null);
     setLoadingTier(tier);
     try {
+      if (!SUBSCRIPTIONS_ENABLED) throw new Error('Plans are coming soon. Everything in Eve is free for now.');
       const res = await fetch('/api/stripe/create-checkout-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -143,8 +149,8 @@ export function PricingPage({ onBack }: Props) {
             </ul>
             <button
               onClick={() => startCheckout('diner')}
-              disabled={loadingTier !== null}
-              className="w-full inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl font-bold text-base bg-eve-ink-soft text-eve-gold border border-eve-gold/25 hover:bg-mg-surface-2 hover:border-eve-gold/45 disabled:opacity-50 disabled:cursor-wait transition-all shadow-lg shadow-eve-gold/15"
+              disabled={!SUBSCRIPTIONS_ENABLED || loadingTier !== null}
+              className={`w-full inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl font-bold text-base bg-eve-ink-soft text-eve-gold border border-eve-gold/25 hover:bg-mg-surface-2 hover:border-eve-gold/45 disabled:opacity-50 ${SUBSCRIPTIONS_ENABLED ? 'disabled:cursor-wait' : 'disabled:cursor-not-allowed'} transition-all shadow-lg shadow-eve-gold/15`}
             >
               {loadingTier === 'diner' ? (
                 <>
@@ -154,7 +160,7 @@ export function PricingPage({ onBack }: Props) {
               ) : (
                 <>
                   <Sparkles size={16} />
-                  Start Diner Premium
+                  {SUBSCRIPTIONS_ENABLED ? 'Start Diner Premium' : 'Coming soon'}
                 </>
               )}
             </button>
@@ -185,8 +191,8 @@ export function PricingPage({ onBack }: Props) {
             </ul>
             <button
               onClick={() => startCheckout('restaurant')}
-              disabled={loadingTier !== null}
-              className="w-full inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl font-bold text-base bg-eve-gold text-eve-ink hover:bg-yellow-300 disabled:opacity-50 disabled:cursor-wait transition-all shadow-[0_0_28px_rgba(245,197,66,0.42)]"
+              disabled={!SUBSCRIPTIONS_ENABLED || loadingTier !== null}
+              className={`w-full inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl font-bold text-base bg-eve-gold text-eve-ink hover:bg-yellow-300 disabled:opacity-50 ${SUBSCRIPTIONS_ENABLED ? 'disabled:cursor-wait' : 'disabled:cursor-not-allowed'} transition-all shadow-[0_0_28px_rgba(245,197,66,0.42)]`}
             >
               {loadingTier === 'restaurant' ? (
                 <>
@@ -196,7 +202,7 @@ export function PricingPage({ onBack }: Props) {
               ) : (
                 <>
                   <Sparkles size={16} />
-                  Start Restaurant Pro
+                  {SUBSCRIPTIONS_ENABLED ? 'Start Restaurant Pro' : 'Coming soon'}
                 </>
               )}
             </button>

@@ -48,7 +48,7 @@ const APP_RULES: RuleSection[] = [
       'A tweak chip adjusts the evening you have, it never starts over: the same number of stops in the same order, in the same area and vibe. Eve keeps the stops that already fit and swaps the rest for nearby places of the same kind. Earlier moves the whole evening an hour earlier and keeps the places (the start time on the form moves too). Cheaper also halves the budget per person on the form, and Vegan only adds vegan to the dietary needs.',
       'After any change, stops Eve kept keep their pictures, and her story and narration are rewritten for the new evening.',
       'Planning the same evening twice in a row gets you a fresh set of ideas.',
-      'Share sends a link with the whole plan, so friends see the same evening. The pencil takes you back to the form.',
+      'Share sends a link with the whole plan, so friends see the same evening. The link never carries what you typed in the request box. A friend who opens it can tap Plan your own evening to start fresh. The pencil takes you back to the form.',
       'Your last six evenings are saved on this device under Your recent evenings. Tap one to reopen it (pictures already painted on this device come back without a new painting), or the x to remove it.',
     ],
   },
@@ -85,7 +85,7 @@ const APP_RULES: RuleSection[] = [
       'Tap the shop icon. Enter your restaurant and city; cuisine, voice and signature dishes are optional.',
       'Eve suggests tonight’s special from what she knows of the restaurant’s reviews and current trends (no live search). Different dish asks for another idea.',
       'Generate tonight’s look makes an Instagram post, a Reel storyboard with voiceover, a menu card, an email and an SMS. It uses 4 of the hour’s paintings. Tap Cancel to stop while Eve is making it.',
-      'Publish to Eve diners features your special to people planning evenings nearby. After you publish, Eve shows how many specials you featured this week and how many evenings she planned at your restaurant.',
+      'Publish to Eve diners features your special to people planning evenings nearby, up to 3 specials a day. Links are removed from captions. Eve only picks a posted special as an evening’s dinner when it was published from the device that connected the restaurant’s Instagram. After you publish, Eve shows how many specials you featured this week and how many evenings she planned at your restaurant.',
     ],
   },
   aiContentRuleSection(
@@ -109,6 +109,9 @@ const APP_RULES: RuleSection[] = [
     items: ['Press ? to open this guide and Esc to close it.'],
   },
 ];
+
+// The web page title on the planner (matches index.html; city pages use their own).
+const HOME_TITLE = 'Mohit\u2019s Eve \u2014 Plan a Night Out';
 
 type Route =
   | { kind: 'diner' }
@@ -189,8 +192,8 @@ export default function App() {
     else if (route.kind === 'data') document.title = 'Eve · Delete my account and data';
     else if (route.kind === 'city') {
       const c = findCity(route.slug);
-      document.title = c?.title || 'Eve · Yours, quietly';
-    } else document.title = 'Eve · Yours, quietly';
+      document.title = c?.title || HOME_TITLE;
+    } else document.title = HOME_TITLE;
   }, [route]);
 
   const navigate = (kind: 'diner' | 'restaurant' | 'pricing') => {

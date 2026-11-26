@@ -84,8 +84,58 @@ export function injectPrecache(outDir, opts = {}) {
   return { version, count: urls.length };
 }
 
+/** @param {string} html @param {string} re */
+function metaContent(html, re) {
+  const m = html.match(new RegExp(`<meta\\b[^>]*\\b(?:name|property)=["']${re}["'][^>]*>`, 'i'));
+  const c = m && m[0].match(/content=(?:"([^"]*)"|'([^']*)')/i);
+  return c ? decodeEntities(c[1] ?? c[2] ?? '') : '';
+}
+/** @param {string} s */
+function decodeEntities(s) {
+  return s.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+}
+/** @param {string} html */
+function canonicalOrigin(html) {
+  const m = html.match(/<link[^>]+rel=["']canonical["'][^>]*>/i);
+  const h = m && m[0].match(/href=(?:"([^"]+)"|'([^']+)')/i);
+  const href = (h && (h[1] || h[2])) || metaContent(html, 'og:url');
+  try {
+    return href ? new URL(href).origin : '';
+  } catch {
+    return '';
+  }
+}
+/** @param {string} html @param {{ type?: string, category?: string, play?: string, genre?: string }} o */
+function seoJsonLd(html, o) {
+  const origin = canonicalOrigin(html);
+  if (!origin) return null;
+  const title = metaContent(html, 'og:title') || decodeEntities((html.match(/<title>([^<]*)<\/title>/i) || [])[1] || '');
+  const description = metaContent(html, 'description') || metaContent(html, 'og:description');
+  const image = metaContent(html, 'og:image');
+  const type = o.type || 'WebApplication';
+  /** @type {Record<string, unknown>} */
+  const ld = {
+    '@context': 'https://schema.org',
+    '@type': type,
+    name: title.split(/\s[—–|-]\s/)[0].trim() || title,
+    url: origin + '/',
+    description,
+    ...(image ? { image } : {}),
+    applicationCategory: o.category || (type === 'VideoGame' ? 'GameApplication' : 'UtilitiesApplication'),
+    operatingSystem: o.play ? 'Web, Android' : 'Web',
+    ...(o.genre ? { genre: o.genre } : {}),
+    isAccessibleForFree: true,
+    offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+    author: { '@type': 'Person', name: 'Mohit Goenka', url: 'https://mohitgoenka.com/' },
+    publisher: { '@type': 'Organization', name: "Mohit's Creations", url: 'https://mohitgoenka.com/apps/' },
+    ...(o.play ? { sameAs: [`https://play.google.com/store/apps/details?id=${o.play}`] } : {}),
+  };
+  if (type === 'VideoGame') ld.gamePlatform = o.play ? ['Web browser', 'Android'] : ['Web browser'];
+  return ld;
+}
+
 /**
- * @param {{ sw?: boolean | { swSrc?: string, swDest?: string, include?: RegExp, exclude?: RegExp[], extra?: string[], lazyMaxBytes?: number }, preloadFonts?: boolean, pulse?: boolean | { endpoint?: string } }} [options]
+ * @param {{ sw?: boolean | { swSrc?: string, swDest?: string, include?: RegExp, exclude?: RegExp[], extra?: string[], lazyMaxBytes?: number }, preloadFonts?: boolean, pulse?: boolean | { endpoint?: string }, seo?: false | { type?: 'VideoGame' | 'WebApplication', category?: string, play?: string, genre?: string } }} [options]
  * @returns {any[]}
  */
 export function mgKit(options = {}) {
@@ -132,6 +182,32 @@ export function mgKit(options = {}) {
           if (endpoint) attrs['data-endpoint'] = endpoint;
           return [{ tag: 'script', attrs, injectTo: 'head' }];
         },
+      },
+    },
+    {
+      // Search basics from index.html's own tags: JSON-LD (schema.org VideoGame / WebApplication) and, when the
+      // app doesn't ship its own, robots.txt + a one-URL sitemap.xml for its canonical origin.
+      name: 'mg-kit:seo',
+      apply: 'build',
+      transformIndexHtml: {
+        order: 'post',
+        /** @param {string} html @param {any} ctx */
+        handler(html, ctx) {
+          if (options.seo === false || !ctx.bundle || /application\/ld\+json/.test(html)) return;
+          const ld = seoJsonLd(html, options.seo || {});
+          if (!ld) return;
+          return [{ tag: 'script', attrs: { type: 'application/ld+json' }, children: JSON.stringify(ld).replace(/</g, '\\u003c'), injectTo: 'head' }];
+        },
+      },
+      closeBundle() {
+        if (options.seo === false) return;
+        const index = join(outDir, 'index.html');
+        if (!existsSync(index)) return;
+        const origin = canonicalOrigin(readFileSync(index, 'utf8'));
+        if (!origin) return;
+        if (!existsSync(join(outDir, 'robots.txt'))) writeFileSync(join(outDir, 'robots.txt'), `User-agent: *\nAllow: /\n\nSitemap: ${origin}/sitemap.xml\n`);
+        if (!existsSync(join(outDir, 'sitemap.xml')))
+          writeFileSync(join(outDir, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>${origin}/</loc></url>\n</urlset>\n`);
       },
     },
     {

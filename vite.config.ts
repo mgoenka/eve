@@ -36,7 +36,13 @@ export default defineConfig({
       },
     },
   },
-  plugins: [react(), tailwindcss(), mgKit({ preloadFonts: false }), preloadFonts()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    // The synced vite-plugin-mg.d.mts doesn't declare `seo` yet (the .mjs reads it), hence the cast.
+    mgKit({ preloadFonts: false, seo: { type: 'WebApplication', category: 'LifestyleApplication', play: 'com.mohitgoenka.eve' } } as Parameters<typeof mgKit>[0]),
+    preloadFonts(),
+  ],
   build: {
     rolldownOptions: {
       output: {

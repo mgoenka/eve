@@ -19,6 +19,7 @@ import {
   STARTER_BUDGET_SHARDS,
   STARTER_CREDITS,
   STARTER_PER_IP,
+  STARTER_PER_IP_ANDROID,
   STARTER_WINDOW_MS,
   PLAY_VOIDED_SYNC_MS,
   starterDailyCap,
@@ -209,6 +210,9 @@ const clientIp = (req: ReqLike) => req.ip || req.socket?.remoteAddress || 'unkno
  * The key a client address is counted under: an IPv4 address as is (also IPv4-mapped IPv6), an IPv6 address by
  * its /64 (one home or phone gets a whole /64, so per-address limits must not be dodged by rotating the rest).
  */
+/** Starter grants allowed per address in STARTER_WINDOW_MS for this wallet's kind. */
+const perAddressOf = (w: { kind?: string }) => (w.kind === 'android' ? STARTER_PER_IP_ANDROID : STARTER_PER_IP);
+
 export function ipKey(ip: string): string {
   let a = ip.trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/%.*$/, '');
   const v4 = a.match(/^(?:::ffff:)?(\d{1,3}(?:\.\d{1,3}){3})$/);
@@ -421,7 +425,7 @@ export function createCredits(options: CreditsOptions) {
   /** What a balance read shows a wallet whose starter is still open (nothing is written). */
   async function starterPreview(w: Wallet): Promise<'granted' | 'paused' | 'address_limit'> {
     if (!(await budgetOpen(true))) return 'paused';
-    const ok = await store.claimStarter(addressKey(w.address ?? 'unknown', w.kind), STARTER_PER_IP, STARTER_WINDOW_MS, now(), true).catch(() => true);
+    const ok = await store.claimStarter(addressKey(w.address ?? 'unknown', w.kind), perAddressOf(w), STARTER_WINDOW_MS, now(), true).catch(() => true);
     return ok ? 'granted' : 'address_limit';
   }
 
@@ -455,7 +459,7 @@ export function createCredits(options: CreditsOptions) {
         w.key,
         meta(w),
         STARTER_CREDITS,
-        { addressKey: addressKey(w.address ?? 'unknown', w.kind), perAddress: STARTER_PER_IP, windowMs: STARTER_WINDOW_MS, day: budgetToday(), dailyCap, shards: STARTER_BUDGET_SHARDS },
+        { addressKey: addressKey(w.address ?? 'unknown', w.kind), perAddress: perAddressOf(w), windowMs: STARTER_WINDOW_MS, day: budgetToday(), dailyCap, shards: STARTER_BUDGET_SHARDS },
         now(),
       );
       if (outcome === 'paused') {

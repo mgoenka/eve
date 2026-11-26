@@ -326,12 +326,14 @@ export function speculativeAiAllowed(): boolean {
   const granted = () => !s.starterPending && (s.balance ?? 0) >= 50;
   if (isNativeApp()) {
     if (!creditsEnabled() || !s.loaded) return false;
-    return s.owner || s.paid || granted();
+    return s.owner;
   }
   if (!creditsEnabled()) return true; // not a metered page: AI is free here
   if (!s.loaded) return false;
   if (!s.enabled) return true; // web switch off: the website is free
-  return s.owner || s.paid || granted();
+  // Metered: background AI would spend the player's own Sparks on content they may never use, so it runs
+  // only for the owner (whose AI isn't deducted). Everyone else gets content when they ask for it.
+  return s.owner;
 }
 
 /**

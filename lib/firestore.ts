@@ -46,6 +46,8 @@ export interface PostedSpecialDoc {
   clickThroughs?: number;
   /** sha256 of the owner key in the publishing browser's httpOnly cookie (lets that device delete it). Never sent to clients. */
   ownerKeyHash?: string;
+  /** Posted from the device that connected this restaurant's Instagram (only these can be a plan's dinner anchor). */
+  verified?: boolean;
 }
 
 export interface RestaurantBrandDoc {
@@ -181,6 +183,21 @@ export async function addSpecial(s: PostedSpecialDoc): Promise<string> {
     const id = `mem_${Date.now()}`;
     pushMemorySpecial({ ...enriched, id });
     return id;
+  }
+}
+
+/** How many specials this device (owner key hash) posted since `sinceISO`, for the daily posting limit. */
+export async function countOwnedSpecialsSince(ownerKeyHash: string, sinceISO: string): Promise<number> {
+  const inMemory = memorySpecials.filter((s) => s.ownerKeyHash === ownerKeyHash && s.postedAtISO >= sinceISO).length;
+  const d = await getDb();
+  if (!d) return inMemory;
+  try {
+    // Equality only (no composite index needed); a device posts a handful at most.
+    const snap = await d.collection('specials').where('ownerKeyHash', '==', ownerKeyHash).select('postedAtISO').limit(200).get();
+    return inMemory + snap.docs.filter((doc) => String(doc.get('postedAtISO') || '') >= sinceISO).length;
+  } catch (err: any) {
+    console.warn('[firestore] countOwnedSpecialsSince failed:', err?.message || err);
+    return inMemory;
   }
 }
 

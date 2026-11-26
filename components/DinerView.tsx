@@ -71,7 +71,7 @@ import { isEcho } from '../lib/evePrompts';
 import { StopCard } from './StopCard';
 import { EveLogo } from './EveLogo';
 import { useOpenRules, useOpenSettings } from './RulesContext';
-import { AppFooter, AppHeader, COPYRIGHT, CreditsChip, IconButton, PRIVACY_URL, ReportContentButton, TERMS_URL, isNativeApp, shareOrCopy, speculativeAiAllowed, useToast } from '../ui-kit';
+import { AppFooter, AppHeader, COPYRIGHT, CreditsChip, IconButton, MoreApps, PRIVACY_URL, ReportContentButton, TERMS_URL, isNativeApp, shareOrCopy, speculativeAiAllowed, useToast } from '../ui-kit';
 
 interface Props {
   onSwitchToRestaurant: () => void;
@@ -335,6 +335,8 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
 
   const [locating, setLocating] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
+  // The plan on screen came from someone else's share link (?e=).
+  const [fromShare, setFromShare] = useState(false);
 
   // Recent evenings (this device) + the visitor's hourly picture budget.
   const [recentEvenings, setRecentEvenings] = useState<SavedEvening[]>(() => loadEvenings());
@@ -441,6 +443,7 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
       eveAudioRef.current.pause();
       eveAudioRef.current.src = '';
     }
+    setFromShare(false);
     if (typeof window !== 'undefined' && window.location.search) {
       const u = new URL(window.location.href);
       u.search = '';
@@ -1177,7 +1180,10 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
   // Opening a shared link that carries a finished plan shows it directly.
   useEffect(() => {
     const shared = readSharedEvening();
-    if (shared) restoreEvening(shared);
+    if (shared) {
+      restoreEvening(shared);
+      setFromShare(true);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1933,7 +1939,7 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
       budgetPerPerson,
       cuisinePref,
       whenISO,
-      freeText,
+      // The typed request stays on this device: share links never carry it.
       startTime,
       durationHours,
     }, { title: planTitle, stops });
@@ -1947,7 +1953,7 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
       setShareCopied(true);
       setTimeout(() => setShareCopied(false), 2400);
     }
-  }, [city, vibe, party, dietary, budgetPerPerson, cuisinePref, whenISO, freeText, startTime, durationHours, planTitle, stops]);
+  }, [city, vibe, party, dietary, budgetPerPerson, cuisinePref, whenISO, startTime, durationHours, planTitle, stops]);
 
   useEffect(() => {
     if (!narrationAudio || !audioRef.current) return;
@@ -2618,6 +2624,18 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
           <p className="mt-2 text-eve-cream/55 text-sm italic font-serif">
             {city} · {formatDate(whenISO)}
           </p>
+          {phase === 'ready' && fromShare && (
+            <div className="mt-3 flex justify-center">
+              <button
+                type="button"
+                onClick={reset}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.10] border border-white/10 hover:border-eve-gold/40 text-xs font-medium text-eve-cream/80 hover:text-eve-cream transition-colors"
+              >
+                <Sparkles size={11} />
+                A friend planned this. Plan your own evening.
+              </button>
+            </div>
+          )}
           {phase === 'ready' && stops.length > 0 && (
             <div className="mt-1 flex justify-center">
               <ReportContentButton
@@ -2982,6 +3000,8 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
             </button>
           </div>
         </div>
+
+        {phase === 'ready' && stops.length > 0 && <MoreApps className="mt-12" />}
       </main>
 
       <AppFooter className="py-6">
