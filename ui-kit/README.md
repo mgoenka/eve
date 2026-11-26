@@ -552,7 +552,7 @@ Use as Tailwind utilities (`bg-mg-surface`, `text-mg-gold`, `border-mg-border`, 
 | `mg-text` | `#fafaf9` | `text-[#fafaf9]`, `text-white` on dark |
 | `mg-text-2` | `#d4d4d8` | `text-[#d4d4d8]`, `#e4e4e7` |
 | `mg-muted` | `#a1a1aa` | `text-[#a1a1aa]` |
-| `mg-subtle` | `#71717a` | `text-[#71717a]` |
+| `mg-subtle` | `#83838c` | `text-[#83838c]` |
 | `mg-gold` | `#f5c542` | `#f5c542` (incl. `bg-[#f5c542]/20` → `bg-mg-gold/20`, `rgba(245,197,66,0.12)` → `bg-mg-gold/12`) |
 | `mg-gold-hover` | `#e6b73a` | `hover:bg-[#e6b73a]`, `#d4a83a` |
 | `mg-on-gold` | `#0a0a0b` | text on gold buttons |

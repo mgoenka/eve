@@ -291,7 +291,7 @@ export function drawScoreCard(ctx: CanvasRenderingContext2D, data: ScoreCardData
     const mid = ry + rowH / 2;
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'center';
-    ctx.fillStyle = isWin ? accent : '#71717a';
+    ctx.fillStyle = isWin ? accent : '#83838c';
     ctx.font = `bold ${Math.round(rowH * 0.36)}px ${SANS}`;
     if (ranks) ctx.fillText(isWin ? '\u{1F451}' : String(i + 1), rx + 78, mid + 2);
     // score

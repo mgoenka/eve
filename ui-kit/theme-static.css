@@ -47,7 +47,7 @@
   --color-mg-text: #fafaf9;
   --color-mg-text-2: #d4d4d8;
   --color-mg-muted: #a1a1aa;
-  --color-mg-subtle: #71717a;
+  --color-mg-subtle: #83838c; /* 5.0–5.3:1 on the dark surfaces (WCAG AA), was #71717a */
   /* accent */
   --color-mg-gold: #f5c542;
   --color-mg-gold-hover: #e6b73a;
