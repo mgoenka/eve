@@ -73,13 +73,15 @@ export const WEB_MIN_PACK_USD = 4.99;
 
 /**
  * Sparks packs: one table for every provider, round numbers, more Sparks per dollar as packs grow
- * (303 / 401 / 500 per $). On Play these are one-time consumable products with the same ids in every app;
+ * (303 / 334 / 401 / 450 / 500 per $). On Play these are one-time consumable products with the same ids in every app;
  * on the web they are Stripe prices (lookup key stripeLookupKey(id)). priceUsd = US list price.
  * Worst-case margin (revenue after fees ÷ AI cost): Play 30 % 2.3x / 1.75x / 1.4x; Stripe – / 2.15x / 1.8x.
  */
 export const PACKS = [
   { id: 'ai_credits_099', priceUsd: 0.99, credits: 300 },
+  { id: 'ai_credits_299', priceUsd: 2.99, credits: 1000 },
   { id: 'ai_credits_499', priceUsd: 4.99, credits: 2000 },
+  { id: 'ai_credits_999', priceUsd: 9.99, credits: 4500 },
   { id: 'ai_credits_1999', priceUsd: 19.99, credits: 10000 },
 ] as const;
 
@@ -98,7 +100,9 @@ export const CUSTOM_MAX_CREDITS = 50_000;
 export const CUSTOM_CURVE: ReadonlyArray<readonly [number, number]> = [
   [100, 0.59],
   [300, 0.99],
+  [1000, 2.99],
   [2000, 4.99],
+  [4500, 9.99],
   [10_000, 19.99],
   [50_000, 89.99],
 ];

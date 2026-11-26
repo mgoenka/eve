@@ -16,7 +16,9 @@ import { webCreditsProvider } from './creditsWeb';
  *  /api/credits/balance answer replaces these). Kept here for the rules text and the first paint. */
 export const AI_CREDIT_PACKS: ReadonlyArray<{ id: string; credits: number; priceUsd: number }> = [
   { id: 'ai_credits_099', credits: 300, priceUsd: 0.99 },
+  { id: 'ai_credits_299', credits: 1000, priceUsd: 2.99 },
   { id: 'ai_credits_499', credits: 2000, priceUsd: 4.99 },
+  { id: 'ai_credits_999', credits: 4500, priceUsd: 9.99 },
   { id: 'ai_credits_1999', credits: 10000, priceUsd: 19.99 },
 ];
 export const AI_STARTER_CREDITS = 100;
