@@ -116,10 +116,33 @@ function OwnerCodeForm() {
 function CustomAmountForm({ custom, disabled, busy }: { custom: CustomAmount; disabled: boolean; busy: boolean }) {
   const [sparks, setSparks] = useState('');
   const [usd, setUsd] = useState('');
+  /** Which box the buyer typed in last (the warning speaks in its unit). */
+  const [typed, setTyped] = useState<'sparks' | 'usd' | null>(null);
+  // Warn once typing pauses, so "1" on the way to "19.99" doesn't flash a warning.
+  const [settled, setSettled] = useState(true);
+  useEffect(() => {
+    setSettled(false);
+    const t = setTimeout(() => setSettled(true), 600);
+    return () => clearTimeout(t);
+  }, [sparks, usd]);
   const n = Number(sparks);
   const price = sparks ? customAmountPrice(custom, n) : null;
+  const minPrice = customAmountPrice(custom, custom.min) ?? 0;
+  const maxPrice = customAmountPrice(custom, custom.max) ?? 0;
+  const money = (v: number) => `$${v.toFixed(2)}`;
+  // Out of range: say why, in the unit they typed, instead of silently doing nothing.
+  const tooSmall =
+    settled && ((typed === 'usd' && usd !== '' && Number(usd) < minPrice) || (typed === 'sparks' && sparks !== '' && n < custom.min));
+  const tooBig = settled && typed === 'sparks' && sparks !== '' && n > custom.max;
+  const capped = typed === 'usd' && usd !== '' && Number(usd) > maxPrice;
+  const setAmount = (credits: number) => {
+    setSparks(String(credits));
+    setUsd((customAmountPrice(custom, credits) ?? 0).toFixed(2));
+    setTyped('sparks');
+  };
   const field =
-    'h-9 min-w-0 rounded-mg-sm border border-mg-border bg-mg-bg px-3 text-sm tabular-nums text-mg-text placeholder:text-mg-subtle focus:border-mg-gold focus:outline-none';
+    'h-9 min-w-0 rounded-mg-sm border bg-mg-bg px-3 text-sm tabular-nums text-mg-text placeholder:text-mg-subtle focus:outline-none';
+  const fieldTone = tooSmall || tooBig ? 'border-mg-warning/60 focus:border-mg-warning' : 'border-mg-border focus:border-mg-gold';
   return (
     <form
       className="mt-2 rounded-mg border border-mg-border bg-mg-surface px-4 py-3"
@@ -141,10 +164,12 @@ function CustomAmountForm({ custom, disabled, busy }: { custom: CustomAmount; di
           onChange={(e) => {
             const v = e.target.value.replace(/[^0-9]/g, '').slice(0, 6);
             setSparks(v);
+            setTyped('sparks');
             const p = v ? customAmountPrice(custom, Number(v)) : null;
             setUsd(p === null ? '' : p.toFixed(2));
           }}
-          className={cx(field, 'w-0 flex-[3]')}
+          aria-invalid={typed === 'sparks' && (tooSmall || tooBig) ? true : undefined}
+          className={cx(field, fieldTone, 'w-0 flex-[3]')}
         />
         <span aria-hidden="true" className="text-sm text-mg-subtle">
           =
@@ -164,10 +189,12 @@ function CustomAmountForm({ custom, disabled, busy }: { custom: CustomAmount; di
               const dot = raw.indexOf('.');
               const v = (dot < 0 ? raw : raw.slice(0, dot + 1) + raw.slice(dot + 1).replace(/\./g, '').slice(0, 2)).slice(0, 8);
               setUsd(v);
+              setTyped('usd');
               const c = v ? customAmountForBudget(custom, Number(v)) : null;
               setSparks(c === null ? '' : String(c));
             }}
-            className={cx(field, 'w-full pl-6')}
+            aria-invalid={typed === 'usd' && tooSmall ? true : undefined}
+            className={cx(field, fieldTone, 'w-full pl-6')}
           />
         </span>
         <Button
@@ -181,11 +208,30 @@ function CustomAmountForm({ custom, disabled, busy }: { custom: CustomAmount; di
           Buy
         </Button>
       </div>
-      <p className="mt-1.5 text-xs text-mg-subtle" aria-live="polite">
-        {price === null
-          ? `Any amount from ${fmt(custom.min)} to ${fmt(custom.max)} Sparks, or type what you want to spend.`
-          : `${fmt(n)} Sparks for $${price.toFixed(2)}. Bigger amounts get more Sparks per dollar.`}
-      </p>
+      {tooSmall || tooBig ? (
+        <p role="alert" className="mt-1.5 flex flex-wrap items-center gap-x-2 text-xs text-amber-200">
+          <span>
+            {tooSmall
+              ? `The smallest amount is ${money(minPrice)} (${fmt(custom.min)} Sparks).`
+              : `The most at once is ${fmt(custom.max)} Sparks (${money(maxPrice)}).`}
+          </span>
+          <button
+            type="button"
+            onClick={() => setAmount(tooSmall ? custom.min : custom.max)}
+            className="inline-flex min-h-8 items-center font-semibold text-mg-gold underline underline-offset-2 hover:text-mg-gold-hover"
+          >
+            {tooSmall ? `Use ${money(minPrice)}` : `Use ${fmt(custom.max)}`}
+          </button>
+        </p>
+      ) : (
+        <p className="mt-1.5 text-xs text-mg-subtle" aria-live="polite">
+          {price === null
+            ? `Any amount from ${fmt(custom.min)} to ${fmt(custom.max)} Sparks (${money(minPrice)} to ${money(maxPrice)}), or type what you want to spend.`
+            : capped
+              ? `${fmt(n)} Sparks for ${money(price)} is the most at once.`
+              : `${fmt(n)} Sparks for ${money(price)}. Bigger amounts get more Sparks per dollar.`}
+        </p>
+      )}
     </form>
   );
 }
