@@ -10,7 +10,7 @@ import { fetchJson, FetchError } from './fetchJson';
 import { isNativeApp } from './native';
 import { showToast } from './toastBus';
 import { getCreditsState } from './credits';
-import type { CreditsProvider, CreditsProviderEvents } from './credits';
+import type { CreditsProvider, CreditsProviderEvents, GiftCode } from './credits';
 
 export const CREDITS_CHECKOUT_URL = '/api/credits/checkout';
 export const CREDITS_CONFIRM_URL = '/api/credits/stripe/confirm';
@@ -50,7 +50,16 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function confirmReturn(sessionId: string) {
   for (let attempt = 0; attempt < 6; attempt++) {
     try {
-      const r = await fetchJson<{ ok?: boolean; credited?: number; balance?: number; otherWallet?: boolean; error?: string }>(CREDITS_CONFIRM_URL, {
+      const r = await fetchJson<{
+        ok?: boolean;
+        credited?: number;
+        balance?: number;
+        otherWallet?: boolean;
+        error?: string;
+        tip?: boolean;
+        gift?: GiftCode | true;
+        backupSaved?: boolean;
+      }>(CREDITS_CONFIRM_URL, {
         method: 'POST',
         body: { sessionId },
         timeoutMs: 15000,
@@ -63,10 +72,22 @@ async function confirmReturn(sessionId: string) {
         continue;
       }
       if (r?.otherWallet) {
-        showToast({ tone: 'info', message: 'Payment received. The Sparks went to the browser where you started the checkout.' });
+        showToast({
+          tone: 'info',
+          message: r.gift
+            ? 'Payment received. Your gift code is under “My gift codes” in the browser where you started the checkout.'
+            : 'Payment received. The Sparks went to the browser where you started the checkout.',
+        });
         events?.done();
       } else {
-        events?.credited({ credited: r?.credited ?? 0, ...(typeof r?.balance === 'number' ? { balance: r.balance } : {}) });
+        const gift = r?.gift && typeof r.gift === 'object' && typeof r.gift.code === 'string' ? r.gift : undefined;
+        events?.credited({
+          credited: r?.credited ?? 0,
+          ...(typeof r?.balance === 'number' ? { balance: r.balance } : {}),
+          ...(r?.tip ? { tip: true } : {}),
+          ...(gift ? { gift } : {}),
+          ...(r?.backupSaved ? { backupSaved: true } : {}),
+        });
       }
       return;
     } catch (err) {
@@ -94,11 +115,13 @@ export const webCreditsProvider: CreditsProvider = {
     return { ok: s.checkout !== false && Object.keys(prices).length > 0, prices };
   },
 
-  async purchase(packId, credits) {
+  async purchase(packId, credits, extras) {
     try {
+      // A tip is { tip: usd }; a gift adds { gift: true } to the usual pack / custom amount.
+      const what = extras?.tipUsd ? { tip: extras.tipUsd } : { packId, ...(typeof credits === 'number' ? { credits } : {}), ...(extras?.gift ? { gift: true } : {}) };
       const r = await fetchJson<{ url?: string }>(CREDITS_CHECKOUT_URL, {
         method: 'POST',
-        body: { packId, ...(typeof credits === 'number' ? { credits } : {}), returnUrl: cleanUrl().toString() },
+        body: { ...what, returnUrl: cleanUrl().toString() },
         timeoutMs: 20000,
         retries: 0,
       });

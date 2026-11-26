@@ -40,6 +40,18 @@ import {
   CUSTOM_MIN_CREDITS,
   CUSTOM_MAX_CREDITS,
   CUSTOM_CURVE,
+  GIFT_CODE_GROUPS,
+  GIFT_CODE_GROUP_LENGTH,
+  GIFT_TTL_MS,
+  formatGiftCode,
+  TIP_AMOUNTS_USD,
+  TIP_PACK_ID,
+  tipCredits,
+  tipPack,
+  tipPackByCredits,
+  BACKUP_CODE_GROUPS,
+  BACKUP_CODE_GROUP_LENGTH,
+  normalizeBackupCode,
 } from './config.ts';
 import type { PaymentProvider } from './config.ts';
 import { costOfCall, usageOf } from './pricing.ts';
@@ -50,7 +62,7 @@ import type { AccountMeta, CreditStore, StarterState } from './store.ts';
 import { GooglePlayApi, PlayApiError } from './play.ts';
 import type { PlayApi, VoidedPurchase } from './play.ts';
 import { SecretSource, StripeApiError, StripeRestApi, verifyStripeSignature } from './stripe.ts';
-import type { StripeApi, StripeCheckoutSession, StripeEvent } from './stripe.ts';
+import type { CheckoutKind, StripeApi, StripeCheckoutSession, StripeEvent } from './stripe.ts';
 
 // ---------------------------------------------------------------- types (framework-agnostic)
 
@@ -329,6 +341,12 @@ class Window {
 }
 
 const TOKEN_RE = /^[A-Za-z0-9._:\-]{20,4096}$/;
+
+/** `groups` groups of `len` characters from the unambiguous alphabet (no 0/O/1/I/L), joined by dashes. */
+const randomCode = (groups: number, len: number) =>
+  Array.from({ length: groups }, () => Array.from({ length: len }, () => LINK_CODE_ALPHABET[randomInt(LINK_CODE_ALPHABET.length)]).join('')).join('-');
+/** Backup codes are stored only as this hash (124 random bits: no salt or slow hash needed). */
+const backupHash = (code: string) => sha256('mg-credits-backup:' + normalizeBackupCode(code));
 /** The redeem field: `{ code }` (current clients) or `{ ownerCode }` (older ones). */
 const codeOf = (body: unknown): string | undefined => {
   const b = body as { code?: unknown; ownerCode?: unknown } | undefined;
@@ -397,6 +415,10 @@ export function createCredits(options: CreditsOptions) {
   const ownerIpLimit = new Window(5, 60 * 60_000);
   const ownerWalletLimit = new Window(5, 24 * 60 * 60_000);
   const linkCreateLimit = new Window(10, 60 * 60_000);
+  // Backup codes: wrong guesses count like owner / promo codes (5 per hour per address, 5 per day per wallet).
+  const backupIpLimit = new Window(5, 60 * 60_000);
+  const backupWalletLimit = new Window(5, 24 * 60 * 60_000);
+  const backupCreateLimit = new Window(10, 60 * 60_000);
   const secrets = options.secrets ?? new SecretSource();
 
   const meta = (w: Wallet): AccountMeta => ({ kind: w.kind, app: w.app, id: w.id });
@@ -639,6 +661,9 @@ export function createCredits(options: CreditsOptions) {
       body.taxNote = 'Taxes (like VAT) are added at checkout and shown before you pay.';
       // "Choose your amount": any whole number of Sparks in range, priced on one curve through the fixed packs.
       body.custom = { id: CUSTOM_PACK_ID, min: CUSTOM_MIN_CREDITS, max: CUSTOM_MAX_CREDITS, curve: CUSTOM_CURVE };
+      body.gifts = true; // "Give Sparks as a gift": the same packs and custom amounts, paid for a one-use code
+      body.tips = TIP_AMOUNTS_USD.map((usd) => ({ usd, credits: tipCredits(usd) })); // "Support Mohit's apps"
+      body.backup = s?.backup === true; // a wallet backup code is saved
     }
     return body as { enforced: true; balance: number; available: number } & Record<string, unknown>;
   }
@@ -651,7 +676,9 @@ export function createCredits(options: CreditsOptions) {
    */
   async function creditPurchase(p: CreditPurchaseInput) {
     // Custom web amounts (Stripe only) carry their Sparks in p.credits, checked against the curve.
-    const pack = p.packId === CUSTOM_PACK_ID && p.provider === 'stripe' ? customPack(p.credits) : packById(p.packId, p.provider);
+    // Tips (Stripe only) likewise: the Sparks included with that tip amount.
+    const pack =
+      p.provider === 'stripe' && p.packId === CUSTOM_PACK_ID ? customPack(p.credits) : p.provider === 'stripe' && p.packId === TIP_PACK_ID ? tipPackByCredits(p.credits) : packById(p.packId, p.provider);
     if (!pack) throw new Error('creditPurchase: unknown pack ' + String(p.packId));
     const credits = p.credits ?? pack.credits;
     if (!Number.isInteger(credits) || credits <= 0) throw new Error('creditPurchase: invalid credits');
@@ -671,6 +698,7 @@ export function createCredits(options: CreditsOptions) {
         credits,
         finalized: p.finalized ?? false,
         ...(typeof p.purchaseType === 'number' ? { purchaseType: p.purchaseType } : {}),
+        ...(pack.id === TIP_PACK_ID ? { tip: true } : {}),
       },
       now(),
     );
@@ -843,16 +871,40 @@ export function createCredits(options: CreditsOptions) {
   async function fulfillSession(s: StripeCheckoutSession): Promise<{ status: number; body: Record<string, unknown>; account?: string }> {
     const md = s.metadata ?? {};
     const walletId = typeof md.mg_wallet === 'string' ? md.mg_wallet : '';
-    const pack = md.mg_pack === CUSTOM_PACK_ID ? customPack(md.mg_credits) : packById(md.mg_pack, 'stripe');
-    if ((s.mode && s.mode !== 'payment') || !WEB_WALLET_RE.test(walletId) || !pack) return { status: 400, body: { error: 'invalid_session' } };
-    // Custom amounts: the price paid (before tax) must match the curve for the Sparks promised.
-    if (pack.id === CUSTOM_PACK_ID && typeof s.amount_subtotal === 'number' && s.amount_subtotal !== Math.round(pack.priceUsd * 100)) {
-      console.error(`[credits] ${app}: custom session ${mask(s.id)} paid ${s.amount_subtotal}¢ for ${pack.credits} Sparks (curve ${Math.round(pack.priceUsd * 100)}¢)`);
+    const gift = md.mg_gift === '1';
+    const tip = md.mg_tip === '1';
+    const pack = tip ? tipPackByCredits(md.mg_credits) : md.mg_pack === CUSTOM_PACK_ID ? customPack(md.mg_credits) : packById(md.mg_pack, 'stripe');
+    if ((s.mode && s.mode !== 'payment') || !WEB_WALLET_RE.test(walletId) || !pack || (gift && tip)) return { status: 400, body: { error: 'invalid_session' } };
+    // Inline prices (custom amounts, gifts, tips): the price paid (before tax) must match what the Sparks cost.
+    const inline = gift || tip || pack.id === CUSTOM_PACK_ID;
+    if (inline && typeof s.amount_subtotal === 'number' && s.amount_subtotal !== Math.round(pack.priceUsd * 100)) {
+      console.error(`[credits] ${app}: ${gift ? 'gift' : tip ? 'tip' : 'custom'} session ${mask(s.id)} paid ${s.amount_subtotal}¢ for ${pack.credits} Sparks (price ${Math.round(pack.priceUsd * 100)}¢)`);
       return { status: 400, body: { error: 'invalid_session' } };
     }
     if (s.payment_status !== 'paid') return { status: 202, body: { error: 'payment_pending' } };
     const promised = typeof md.mg_credits === 'string' && /^\d{1,7}$/.test(md.mg_credits) ? Number(md.mg_credits) : pack.credits;
     const pi = typeof s.payment_intent === 'string' ? s.payment_intent : null;
+    if (gift) {
+      // The buyer gets a one-use code, not the Sparks. Idempotent on the session id and payment intent.
+      const g = await store.createGift(
+        {
+          code: randomCode(GIFT_CODE_GROUPS, GIFT_CODE_GROUP_LENGTH),
+          credits: promised > 0 ? promised : pack.credits,
+          buyerKey: await store.resolveAccount(walletKey.web(walletId)),
+          provider: 'stripe',
+          purchaseKey: purchaseKeyOf('stripe', s.id),
+          secondaryKeys: pi && SECONDARY_RE.test(pi) ? [`stripe:${pi}`] : [],
+          orderId: pi && SECONDARY_RE.test(pi) ? pi : null,
+          productId: pack.id,
+          sessionId: s.id,
+          expiresAt: new Date(now().getTime() + GIFT_TTL_MS).toISOString(),
+          ...(s.livemode === false ? { purchaseType: 0 } : {}),
+        },
+        now(),
+      );
+      if (!g.duplicate) console.log(`[credits] ${app}: gift code ${g.code.slice(0, 4)}… (${g.credits} Sparks) for ${mask(walletId)}`);
+      return { status: 200, body: { ok: true, credited: 0, alreadyProcessed: g.duplicate, gift: { code: g.code, credits: g.credits, expiresAt: g.expiresAt } }, account: g.buyer };
+    }
     const applied = await creditPurchase({
       wallet: webWallet(walletId),
       provider: 'stripe',
@@ -864,7 +916,11 @@ export function createCredits(options: CreditsOptions) {
       finalized: true,
       ...(s.livemode === false ? { purchaseType: 0 } : {}),
     });
-    return { status: 200, body: { ok: true, credited: applied.credited, alreadyProcessed: applied.duplicate, balance: applied.balance }, account: applied.account };
+    return {
+      status: 200,
+      body: { ok: true, credited: applied.credited, alreadyProcessed: applied.duplicate, balance: applied.balance, ...(tip ? { tip: true } : {}) },
+      account: applied.account,
+    };
   }
 
   /** Apply one verified Stripe event. Throws on storage errors (Stripe retries the webhook). */
@@ -876,6 +932,7 @@ export function createCredits(options: CreditsOptions) {
         const s = obj as unknown as StripeCheckoutSession;
         if (!s.metadata || typeof s.metadata.mg_wallet !== 'string') return 'ignored (not a credits session)';
         const out = await fulfillSession(s);
+        if (out.status === 200 && out.body.gift) return `gift code ${out.body.alreadyProcessed ? 'already made' : 'made'}`;
         return out.status === 200 ? `credited ${String(out.body.credited)}` : String(out.body.error);
       }
       case 'charge.dispute.closed': {
@@ -884,6 +941,8 @@ export function createCredits(options: CreditsOptions) {
         if (obj.status !== 'won') return 'ignored (dispute not won)';
         const pi = typeof obj.payment_intent === 'string' ? obj.payment_intent : '';
         if (!pi) return 'ignored (no payment intent)';
+        const g = await store.voidGift({ secondaryKey: `stripe:${pi}` }, 'dispute_won', now(), true);
+        if (g) return `gift code ${g.outcome} (dispute won)`;
         const r = await store.reversePurchase({ secondaryKey: `stripe:${pi}` }, 0, 'dispute_won', now());
         if (!r) return 'ignored (unknown purchase)';
         if (r.reversed < 0) console.log(`[credits] ${app}: +${-r.reversed} (dispute won) for ${mask(r.account.replace(/^web:/, ''))}, balance ${r.balance}`);
@@ -900,6 +959,13 @@ export function createCredits(options: CreditsOptions) {
           fraction = amount > 0 && Number.isFinite(refunded) ? refunded / amount : 1;
         }
         const reason = event.type === 'charge.refunded' ? 'refund' : 'dispute';
+        // A gift credited nobody: its code is switched off if unused; a used one is logged (can't be taken back).
+        const g = await store.voidGift({ secondaryKey: `stripe:${pi}` }, reason, now());
+        if (g) {
+          if (g.outcome === 'used') console.warn(`[credits] ${app}: ${reason} of gift ${g.code.slice(0, 4)}…: the code was already used, its Sparks stay with the wallet that redeemed it`);
+          else if (g.outcome === 'voided') console.log(`[credits] ${app}: gift ${g.code.slice(0, 4)}… voided (${reason})`);
+          return `gift code ${g.outcome} (${reason})`;
+        }
         const r = await store.reversePurchase({ secondaryKey: `stripe:${pi}` }, fraction, reason, now());
         if (!r) return 'ignored (unknown purchase)';
         if (r.reversed) console.log(`[credits] ${app}: -${r.reversed} (${reason}) for ${mask(r.account.replace(/^web:/, ''))}, balance ${r.balance}`);
@@ -948,12 +1014,15 @@ export function createCredits(options: CreditsOptions) {
     const promo = normalizePromoCode(code);
     if (!PROMO_CODE_RE.test(promo)) return miss('wrong_code');
     await prepare();
-    const r = await store.redeemPromo(promo, wallet.key, meta(wallet), 0, now());
+    let r = await store.redeemPromo(promo, wallet.key, meta(wallet), 0, now());
+    // Gift codes typed without their dashes (or with spaces): "K7QM3XRAPW9DHT4N" -> "K7QM-3XRA-PW9D-HT4N".
+    const asGift = formatGiftCode(code);
+    if (r.ok === false && r.error === 'promo_unknown' && asGift && asGift !== promo) r = await store.redeemPromo(asGift, wallet.key, meta(wallet), 0, now());
     if (r.ok === false) {
-      console.warn(`[credits] ${app}: promo ${r.error === 'promo_unknown' ? 'unknown code' : `${promo} ${r.error}`} for ${wallet.kind} wallet ${mask(wallet.id)}`);
+      console.warn(`[credits] ${app}: promo ${r.error === 'promo_unknown' ? 'unknown code' : `${asGift ? asGift.slice(0, 4) + '…' : promo} ${r.error}`} for ${wallet.kind} wallet ${mask(wallet.id)}`);
       return miss(r.error === 'promo_unknown' ? 'wrong_code' : r.error);
     }
-    console.log(`[credits] ${app}: promo ${promo} +${r.credits} for ${wallet.kind} wallet ${mask(wallet.id)}`);
+    console.log(`[credits] ${app}: promo ${asGift ? asGift.slice(0, 4) + '… (gift)' : promo} +${r.credits} for ${wallet.kind} wallet ${mask(wallet.id)}`);
     return { status: 200, body: { ok: true, promo: true, credited: r.credits, balance: r.balance } };
   }
 
@@ -1002,6 +1071,66 @@ export function createCredits(options: CreditsOptions) {
     appendCookie(res, walletCookie(req, targetId));
     console.log(`[credits] ${app}: web wallet ${mask(wallet.id)} linked into ${mask(targetId)} (+${r.moved})`);
     return { status: 200, body: { ok: true, linked: true, moved: r.moved, balance: r.balance, owner: r.owner } };
+  }
+
+  /**
+   * Wallet backup code (web only). `create`: a new long-lived code for this browser's wallet (shown once, stored as a
+   * hash; replaces the previous one). `backupCode`: this browser joins the wallet the code belongs to (like a link
+   * code: its own Sparks move there and its cookie switches to that wallet), and the code is replaced by a new one,
+   * returned here (one use). Only wrong codes count toward the limit (5 per hour per address, 5 per day per wallet).
+   */
+  async function backupWeb(req: ReqLike, res: ResLike, body: { backupAction?: unknown; backupCode?: unknown }): Promise<{ status: number; body: Record<string, unknown> }> {
+    if (isNativeRequest(req)) return { status: 403, body: { error: 'web_only' } };
+    if (!(await webEnabled())) return { status: 403, body: { error: 'web_credits_off' } };
+    let wallet = walletFor(req);
+    if (body.backupAction === 'create') {
+      if (!wallet || wallet.kind !== 'web') return { status: 402, body: { error: 'wallet_required' } };
+      const wait = backupCreateLimit.hit(wallet.key);
+      if (wait) return { status: 429, body: { error: 'rate_limited', retryAfter: wait } };
+      await prepareWallet(wallet);
+      const target = await store.resolveAccount(wallet.key);
+      const code = randomCode(BACKUP_CODE_GROUPS, BACKUP_CODE_GROUP_LENGTH);
+      await store.setBackupCode(target, backupHash(code), now());
+      console.log(`[credits] ${app}: backup code saved for web wallet ${mask(wallet.id)}`);
+      return { status: 200, body: { ok: true, code } };
+    }
+    const ip = ipOf(req);
+    const wait = Math.max(backupIpLimit.peek(ip), wallet ? backupWalletLimit.peek(wallet.key) : 0);
+    if (wait) return { status: 429, body: { error: 'rate_limited', retryAfter: wait } };
+    const entered = typeof body.backupCode === 'string' ? normalizeBackupCode(body.backupCode.slice(0, 200)) : '';
+    if (entered.length !== BACKUP_CODE_GROUPS * BACKUP_CODE_GROUP_LENGTH) return { status: 400, body: { error: 'invalid' } };
+    const next = randomCode(BACKUP_CODE_GROUPS, BACKUP_CODE_GROUP_LENGTH);
+    const account = await store.useBackupCode(backupHash(entered), backupHash(next), now());
+    if (!account || !account.startsWith('web:')) {
+      backupIpLimit.hit(ip);
+      if (wallet) backupWalletLimit.hit(wallet.key);
+      return { status: 403, body: { error: 'wrong_backup_code' } };
+    }
+    if (!wallet || wallet.kind !== 'web') wallet = webWallet(randomBytes(24).toString('base64url'), clientIp(req));
+    const targetKey = await store.resolveAccount(account);
+    const group = await currentWeb(wallet);
+    let out: { balance: number; moved: number; owner: boolean };
+    if (group.key === targetKey) {
+      const st = await store.getAccount(targetKey, now());
+      out = { balance: st?.balance ?? 0, moved: 0, owner: st?.owner === true };
+    } else {
+      out = await store.mergeAccounts(group.key, targetKey, `${app} (backup code)`, now());
+      webLinks.set(group.key, { to: targetKey, until: Date.now() + 24 * 60 * 60_000 });
+      webLinks.delete(wallet.key);
+    }
+    const targetId = targetKey.slice('web:'.length);
+    appendCookie(res, walletCookie(req, targetId));
+    console.log(`[credits] ${app}: web wallet ${mask(wallet.id)} restored into ${mask(targetId)} with a backup code (+${out.moved})`);
+    return { status: 200, body: { ok: true, restored: true, moved: out.moved, balance: out.balance, owner: out.owner, code: next } };
+  }
+
+  /** "My gift codes" (web only): the gift codes this browser's wallet bought, newest first. */
+  async function giftsWeb(req: ReqLike): Promise<{ status: number; body: Record<string, unknown> }> {
+    if (isNativeRequest(req)) return { status: 403, body: { error: 'web_only' } };
+    const wallet = walletFor(req);
+    if (!wallet || wallet.kind !== 'web') return { status: 200, body: { gifts: [] } };
+    const current = await currentWeb(wallet);
+    return { status: 200, body: { gifts: await store.listGifts([wallet.key, current.key], now()) } };
   }
 
   // ---------------------------------------------------------------- HTTP glue (Express-compatible)
@@ -1117,6 +1246,18 @@ export function createCredits(options: CreditsOptions) {
           res.status(o.status).json(o.body);
           return;
         }
+        const xb = (req.body ?? {}) as { backupAction?: unknown; backupCode?: unknown; giftAction?: unknown };
+        if (xb.backupAction === 'create' || typeof xb.backupCode === 'string') {
+          // Wallet backup codes ride on this route too.
+          const o = await backupWeb(req, res, xb);
+          res.status(o.status).json(o.body);
+          return;
+        }
+        if (xb.giftAction === 'list') {
+          const o = await giftsWeb(req);
+          res.status(o.status).json(o.body);
+          return;
+        }
         const ownerCode = codeOf(req.body);
         if (ownerCode !== undefined && !isNativeRequest(req)) {
           // Owner / promo codes on the web ride on this route (same-origin, JSON). Works with the web switch off
@@ -1132,7 +1273,8 @@ export function createCredits(options: CreditsOptions) {
           return;
         }
         if (isNativeRequest(req)) {
-          res.status(403).json({ error: 'web_only' }); // Play Billing only inside the Android app
+          // Play Billing only inside the Android app: no web checkout there, so no gifts and no tips either (Play policy).
+          res.status(403).json({ error: 'web_only' });
           return;
         }
         if (!(await webEnabled())) {
@@ -1147,8 +1289,10 @@ export function createCredits(options: CreditsOptions) {
         const w2 = checkoutWalletLimit.hit(wallet.id);
         if (w2) return limited(res, w2);
         await prepareWallet(wallet); // the buyer's address: starter credits before the first purchase
-        const b = (req.body ?? {}) as { packId?: unknown; credits?: unknown; returnUrl?: unknown };
-        const pack = b.packId === CUSTOM_PACK_ID ? customPack(b.credits) : packById(b.packId, 'stripe');
+        const b = (req.body ?? {}) as { packId?: unknown; credits?: unknown; returnUrl?: unknown; gift?: unknown; tip?: unknown };
+        // A tip ({ tip: 5 | 10 | 20 }), a gift ({ gift: true } + the usual pack or custom amount), or Sparks.
+        const kind: CheckoutKind = b.tip !== undefined ? 'tip' : b.gift === true ? 'gift' : 'sparks';
+        const pack = kind === 'tip' ? tipPack(b.tip) : b.packId === CUSTOM_PACK_ID ? customPack(b.credits) : packById(b.packId, 'stripe');
         const returnUrl = safeReturnUrl(b.returnUrl);
         if (!pack || !returnUrl) {
           res.status(400).json({ error: 'invalid' });
@@ -1158,8 +1302,8 @@ export function createCredits(options: CreditsOptions) {
           res.status(503).json({ error: 'checkout_unavailable' });
           return;
         }
-        const s = await stripe().createCheckoutSession({ pack, walletId: wallet.id, app, returnUrl });
-        console.log(`[credits] ${app}: checkout ${pack.id}${pack.id === CUSTOM_PACK_ID ? ' ' + pack.credits : ''} for ${mask(wallet.id)}`);
+        const s = await stripe().createCheckoutSession({ pack, walletId: wallet.id, app, returnUrl, ...(kind !== 'sparks' ? { kind } : {}) });
+        console.log(`[credits] ${app}: checkout ${kind === 'sparks' ? '' : kind + ' '}${pack.id}${pack.id === CUSTOM_PACK_ID ? ' ' + pack.credits : ''} for ${mask(wallet.id)}`);
         res.status(200).json({ url: s.url });
       } catch (err) {
         if (sendError(res, err)) return;
@@ -1191,10 +1335,19 @@ export function createCredits(options: CreditsOptions) {
         }
         const out = await fulfillSession(session);
         const wallet = isNativeRequest(req) ? null : walletFor(req);
-        if (out.status === 200 && out.account && wallet?.key !== out.account) {
-          // Paid in another browser: credited to the wallet that started the checkout.
-          res.status(200).json({ ok: true, credited: out.body.credited, alreadyProcessed: out.body.alreadyProcessed, otherWallet: true });
-          return;
+        if (out.status === 200 && out.account) {
+          // The same wallet (or the linked group it is in now) as the one that started the checkout?
+          const current = wallet ? await currentWeb(wallet).catch(() => wallet) : null;
+          const buyer = await store.resolveAccount(out.account).catch(() => out.account!);
+          if (!current || (wallet!.key !== out.account && current.key !== buyer)) {
+            // Paid in another browser: credited to (or, for a gift, kept for) the wallet that started the checkout.
+            const kindOf = out.body.gift ? { gift: true } : out.body.tip ? { tip: true } : {};
+            res.status(200).json({ ok: true, credited: out.body.credited, alreadyProcessed: out.body.alreadyProcessed, otherWallet: true, ...kindOf });
+            return;
+          }
+          // The return screen nudges "Save a backup code" until the wallet has one.
+          const st = await store.getAccount(current.key, now()).catch(() => null);
+          if (st?.backup) out.body.backupSaved = true;
         }
         if (typeof out.body.balance === 'number') res.setHeader(BALANCE_HEADER, String(out.body.balance));
         res.status(out.status).json(out.body);

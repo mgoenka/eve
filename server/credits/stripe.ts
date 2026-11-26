@@ -12,6 +12,9 @@
 // tax_behavior "exclusive": the buyer pays tax on top of the US list price.
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { CUSTOM_PACK_ID, STRIPE_API_VERSION, STRIPE_SECRETS, STRIPE_TAX_CODE, TERMS_URL, stripeLookupKey } from './config.ts';
+
+/** What a checkout sells: Sparks for this browser (default), a one-use gift code, or a tip with Sparks as thanks. */
+export type CheckoutKind = 'sparks' | 'gift' | 'tip';
 import type { PackInfo } from './config.ts';
 
 export interface StripeCheckoutSession {
@@ -38,6 +41,8 @@ export interface CheckoutInput {
   app: string;
   /** Absolute https URL the buyer returns to (validated by the caller). */
   returnUrl: string;
+  /** Default 'sparks'. Gifts and tips are priced inline (no saved Stripe products needed). */
+  kind?: CheckoutKind;
 }
 
 /** A Stripe event as delivered to the webhook (only the fields we read). */
@@ -262,8 +267,9 @@ export class StripeRestApi implements StripeApi {
   }
 
   async createCheckoutSession(input: CheckoutInput): Promise<{ id: string; url: string }> {
-    // Fixed packs use their saved Price; a custom amount is priced inline (its product is made per checkout).
-    const price = input.pack.id === CUSTOM_PACK_ID ? customPriceData(input.pack) : await this.ensurePrice(input.pack);
+    // Fixed packs use their saved Price; a custom amount, a gift and a tip are priced inline (product made per checkout).
+    const kind = input.kind ?? 'sparks';
+    const price = kind !== 'sparks' ? customPriceData(input.pack, kind) : input.pack.id === CUSTOM_PACK_ID ? customPriceData(input.pack) : await this.ensurePrice(input.pack);
     const params = checkoutSessionParams(input, price);
     const { consent_collection: _c, custom_text: _t, ...withoutConsent } = params;
     let s: StripeCheckoutSession;
@@ -291,19 +297,49 @@ export class StripeRestApi implements StripeApi {
 }
 
 /** Checkout Session parameters (exported for tests): one pack, Managed Payments, Terms consent, return URLs. */
-/** Inline price for a custom amount: same product name, description, tax code and tax handling as the packs. */
-export function customPriceData(pack: PackInfo): Record<string, unknown> {
+/**
+ * Inline price for a custom amount (same product name, description, tax code and tax handling as the packs), a gift
+ * code or a tip. Store text: never "free".
+ */
+export function customPriceData(pack: PackInfo, kind: CheckoutKind = 'sparks'): Record<string, unknown> {
   const credits = pack.credits.toLocaleString('en-US');
+  const product =
+    kind === 'gift'
+      ? {
+          name: `Gift code: ${credits} Sparks`,
+          description: `A one-use gift code for ${credits} Sparks in Mohit's apps and games (mohitgoenka.com and his Android apps). Valid for 1 year.`,
+        }
+      : kind === 'tip'
+        ? {
+            name: `Support Mohit's apps (includes ${credits} Sparks)`,
+            description: `An optional tip that supports Mohit's apps and games, with ${credits} Sparks as thanks, kept in this browser as long as you use them at least once every 400 days.`,
+          }
+        : {
+            name: `${credits} Sparks`,
+            description: `${credits} Sparks for the magic features in Mohit's apps and games on mohitgoenka.com, kept in this browser as long as you use them at least once every 400 days.`,
+          };
   return {
     currency: 'usd',
     unit_amount: Math.round(pack.priceUsd * 100),
     tax_behavior: 'exclusive',
     product_data: {
-      name: `${credits} Sparks`,
-      description: `${credits} Sparks for the magic features in Mohit's apps and games on mohitgoenka.com, kept in this browser as long as you use them at least once every 400 days.`,
+      ...product,
       tax_code: STRIPE_TAX_CODE,
-      metadata: { mg_pack: pack.id, mg_credits: String(pack.credits) },
+      metadata: { mg_pack: pack.id, mg_credits: String(pack.credits), ...(kind !== 'sparks' ? { mg_kind: kind } : {}) },
     },
+  };
+}
+
+/** Session metadata (server-set, trusted once retrieved or signed). Gifts carry mg_gift=1, tips mg_tip=1. */
+export function sessionMetadata(input: CheckoutInput): Record<string, string> {
+  const kind = input.kind ?? 'sparks';
+  return {
+    mg_wallet: input.walletId,
+    mg_pack: input.pack.id,
+    mg_credits: String(input.pack.credits),
+    mg_app: input.app,
+    ...(kind === 'gift' ? { mg_gift: '1' } : {}),
+    ...(kind === 'tip' ? { mg_tip: '1' } : {}),
   };
 }
 
@@ -316,7 +352,7 @@ export function checkoutSessionParams(input: CheckoutInput, price: string | Reco
     custom_text: { terms_of_service_acceptance: { message: `I agree to the [Terms](${TERMS_URL}).` } },
     success_url: withParams(input.returnUrl, { mg_credits: 'paid', mg_session: '{CHECKOUT_SESSION_ID}' }),
     cancel_url: withParams(input.returnUrl, { mg_credits: 'cancel' }),
-    metadata: { mg_wallet: input.walletId, mg_pack: input.pack.id, mg_credits: input.pack.credits, mg_app: input.app },
+    metadata: sessionMetadata(input),
   };
 }
 
@@ -346,7 +382,7 @@ export class FakeStripeApi implements StripeApi {
       status: 'open',
       payment_status: 'unpaid',
       payment_intent: null,
-      metadata: { mg_wallet: input.walletId, mg_pack: input.pack.id, mg_credits: String(input.pack.credits), mg_app: input.app },
+      metadata: sessionMetadata(input),
       amount_subtotal: Math.round(input.pack.priceUsd * 100),
       livemode: false,
     });

@@ -32,8 +32,11 @@ export const INSUFFICIENT_CREDITS = 'insufficient_credits';
 
 /** What the provider reports back to the credits store. */
 export interface CreditsProviderEvents {
-  /** A purchase was credited by the server. */
-  credited(r: { credited: number; balance?: number }): void;
+  /**
+   * A purchase was credited by the server. Website extras: `tip` (a tip; its Sparks are the thank-you), `gift` (a gift
+   * purchase: nothing credited, here is the code), `backupSaved` (the wallet has a backup code).
+   */
+  credited(r: { credited: number; balance?: number; tip?: boolean; gift?: GiftCode; backupSaved?: boolean }): void;
   /** Payment pending at the provider (credits come later). */
   pending(): void;
   /** The purchase flow ended without credits (cancel, failure). */
@@ -50,12 +53,28 @@ export interface CreditsProvider {
   /** Localized prices by pack id. ok:false = purchases unavailable here right now. */
   loadPrices(packIds: string[]): Promise<{ ok: boolean; prices: Record<string, string> }>;
   /** Start buying a pack. The outcome comes back through the events given to start(). */
-  /** credits: a custom amount (website only, packId = the custom id). */
-  purchase(packId: string, credits?: number): Promise<void>;
+  /** credits: a custom amount (website only, packId = the custom id). extras: a gift or a tip (website only). */
+  purchase(packId: string, credits?: number, extras?: PurchaseExtras): Promise<void>;
   /** Called once: listen for purchases and recover unfinished ones. */
   start(events: CreditsProviderEvents): void;
   /** The sheet opened: re-check unfinished purchases. */
   resume?(): void;
+}
+
+/** Website only: buy as a gift code (`gift`), or a tip of `tipUsd` with Sparks as thanks. */
+export interface PurchaseExtras {
+  gift?: boolean;
+  tipUsd?: number;
+}
+
+/** A gift code bought on the website (one use, 1 year). */
+export interface GiftCode {
+  code: string;
+  credits: number;
+  expiresAt: string | null;
+  /** From "My gift codes": ready (unused), used, void (refunded) or expired. */
+  status?: 'ready' | 'used' | 'void' | 'expired';
+  createdAt?: string;
 }
 
 let webProvider: CreditsProvider | null | undefined;
@@ -122,6 +141,16 @@ export interface CreditsState {
   starterLimited: boolean;
   /** Website: buyers can pick their own amount, priced on this curve ([Sparks, US$] anchors). */
   custom: CustomAmount | null;
+  /** Website: Sparks can be bought as a gift code. */
+  gifts: boolean;
+  /** Website: "Support Mohit's apps" tip amounts, each with the Sparks it includes. */
+  tips: ReadonlyArray<{ usd: number; credits: number }>;
+  /** Website: this wallet has a saved backup code. */
+  backupSaved: boolean;
+  /** Website: the gift code just bought (shown at the top of the sheet after returning from checkout). */
+  giftReturn: GiftCode | null;
+  /** Open the sheet at a section (the "Save a backup code" nudge). */
+  sheetFocus: 'backup' | null;
 }
 
 export interface CustomAmount {
@@ -178,6 +207,11 @@ let state: CreditsState = {
   starterPaused: false,
   starterLimited: false,
   custom: null,
+  gifts: false,
+  tips: [],
+  backupSaved: false,
+  giftReturn: null,
+  sheetFocus: null,
 };
 const listeners = new Set<() => void>();
 function setState(patch: Partial<CreditsState>) {
@@ -221,6 +255,9 @@ async function loadBalance(): Promise<void> {
       starterPaused?: boolean;
       starterLimited?: boolean;
       custom?: CustomAmount;
+      gifts?: boolean;
+      tips?: Array<{ usd?: unknown; credits?: unknown }>;
+      backup?: boolean;
     }>(CREDITS_BALANCE_URL, {
       headers: creditsHeaders(),
       timeoutMs: 10000,
@@ -241,6 +278,12 @@ async function loadBalance(): Promise<void> {
         starterLimited: r.starterLimited === true,
         custom:
           r.custom && Number.isInteger(r.custom.min) && Number.isInteger(r.custom.max) && Array.isArray(r.custom.curve) && r.custom.curve.length >= 2 ? r.custom : null,
+        // Gifts and tips are website-only (never in the Android app: Play policy).
+        gifts: r.gifts === true && !isNativeApp(),
+        tips: Array.isArray(r.tips) && !isNativeApp()
+          ? r.tips.filter((t): t is { usd: number; credits: number } => typeof t.usd === 'number' && typeof t.credits === 'number' && t.usd > 0 && t.credits > 0)
+          : [],
+        backupSaved: r.backup === true,
       });
     } else if (r && r.enforced === false) {
       setState({ loaded: true, ...(state.enabled ? { enabled: false, sheetOpen: false } : {}) }); // web switch off
@@ -266,16 +309,16 @@ export function loadPrices(force = false): Promise<void> {
   return pricesPromise;
 }
 
-export function openCreditsSheet(reason: 'manual' | 'insufficient' = 'manual', needed: number | null = null): void {
+export function openCreditsSheet(reason: 'manual' | 'insufficient' = 'manual', needed: number | null = null, focus: CreditsState['sheetFocus'] = null): void {
   const provider = activeCreditsProvider();
   if (!provider) return;
-  setState({ sheetOpen: true, sheetReason: reason, needed });
+  setState({ sheetOpen: true, sheetReason: reason, needed, sheetFocus: focus });
   void loadPrices();
   void refreshCredits();
   provider.resume?.();
 }
 export function closeCreditsSheet(): void {
-  setState({ sheetOpen: false });
+  setState({ sheetOpen: false, giftReturn: null, sheetFocus: null });
 }
 
 /** HTTP 402 wallet_required: a web request without the wallet cookie (the balance call mints it). */
@@ -567,15 +610,96 @@ export async function linkThisDevice(code: string): Promise<boolean> {
   }
 }
 
-/** Buy a pack with the active provider. */
-export async function buyCredits(packId: string, credits?: number): Promise<void> {
+/** Key of a purchase in progress (CreditsState.buying): the pack id, "gift:<pack id>" or "tip:<usd>". */
+export const buyingKey = (packId: string, extras?: PurchaseExtras) => (extras?.tipUsd ? `tip:${extras.tipUsd}` : extras?.gift ? `gift:${packId}` : packId);
+
+/** Buy a pack with the active provider (website: also as a gift code, or a tip). */
+export async function buyCredits(packId: string, credits?: number, extras?: PurchaseExtras): Promise<void> {
   const provider = activeCreditsProvider();
   if (!provider) {
     showToast({ tone: 'error', message: 'Purchases are unavailable on this device right now.' });
     return;
   }
-  setState({ buying: packId });
-  await provider.purchase(packId, credits);
+  if ((extras?.gift || extras?.tipUsd) && provider.id !== 'web') return; // website only (Play policy)
+  setState({ buying: buyingKey(packId, extras) });
+  await provider.purchase(packId, credits, extras);
+}
+
+/** Website only: "Give Sparks as a gift": pay for a pack or a custom amount, get a one-use code to give away. */
+export function buyGiftCode(packId: string, credits?: number): Promise<void> {
+  return buyCredits(packId, credits, { gift: true });
+}
+
+/** Website only: "Support Mohit's apps" with a tip of `usd` (5, 10 or 20), Sparks included as thanks. */
+export function buyTip(usd: number): Promise<void> {
+  return buyCredits('sparks_tip', undefined, { tipUsd: usd });
+}
+
+/** Hide the gift code panel shown after returning from a gift checkout. */
+export function dismissGiftReturn(): void {
+  setState({ giftReturn: null });
+}
+
+/** Website only: "My gift codes": the gift codes this browser bought (null after an error toast). */
+export async function listGiftCodes(): Promise<GiftCode[] | null> {
+  try {
+    const r = await fetchJson<{ gifts?: GiftCode[] }>('/api/credits/checkout', { method: 'POST', body: { giftAction: 'list' }, headers: creditsHeaders(), timeoutMs: 15000, retries: 1 });
+    return Array.isArray(r.gifts) ? r.gifts.filter((g) => typeof g?.code === 'string') : [];
+  } catch {
+    showToast({ id: 'mg-credits-gifts', tone: 'error', message: 'Couldn’t load your gift codes right now.' });
+    return null;
+  }
+}
+
+const BACKUP_ERRORS: Record<string, string> = {
+  wrong_backup_code: 'That backup code didn’t work. Check it and try again.',
+  invalid: 'Enter the whole backup code (25 letters and numbers).',
+  rate_limited: 'Too many tries. Please wait a while.',
+  web_credits_off: 'Sparks aren’t on the website yet.',
+  wallet_required: 'Reload the page and try again.',
+};
+const backupErrorOf = (err: unknown) => {
+  const c = err instanceof FetchError ? (err.body as { error?: string } | null)?.error : undefined;
+  return (c && BACKUP_ERRORS[c]) || 'Couldn’t do that right now. Please try again.';
+};
+
+/**
+ * Website only: make (or replace) this browser's wallet backup code. It is shown once; the server keeps only a hash.
+ * Resolves the code, or null after an error toast.
+ */
+export async function createBackupCode(): Promise<string | null> {
+  try {
+    const r = await fetchJson<{ code?: string }>('/api/credits/checkout', { method: 'POST', body: { backupAction: 'create' }, headers: creditsHeaders(), timeoutMs: 15000, retries: 0 });
+    if (typeof r.code !== 'string') return null;
+    setState({ backupSaved: true });
+    return r.code;
+  } catch (err) {
+    showToast({ id: 'mg-credits-backup', tone: 'error', message: backupErrorOf(err) });
+    return null;
+  }
+}
+
+/**
+ * Website only: bring a wallet back with its backup code. This browser joins that wallet (its own Sparks move there
+ * too) and the code is replaced: resolves the NEW backup code (show it once), or null after an error toast.
+ */
+export async function restoreFromBackupCode(code: string): Promise<string | null> {
+  try {
+    const r = await fetchJson<{ code?: string; moved?: number; balance?: number; owner?: boolean }>('/api/credits/checkout', {
+      method: 'POST',
+      body: { backupCode: code },
+      headers: creditsHeaders(),
+      timeoutMs: 15000,
+      retries: 0,
+    });
+    setState({ ...(typeof r.balance === 'number' ? { balance: r.balance } : {}), ...(r.owner ? { owner: true } : {}), backupSaved: true });
+    showToast({ id: 'mg-credits-backup', tone: 'success', message: `Restored! Your ${(r.balance ?? 0).toLocaleString()} Sparks are in this browser now.` });
+    void refreshCredits();
+    return typeof r.code === 'string' ? r.code : null;
+  } catch (err) {
+    showToast({ id: 'mg-credits-backup', tone: 'error', message: backupErrorOf(err) });
+    return null;
+  }
 }
 
 let started = false;
@@ -585,10 +709,36 @@ export function initCredits(): void {
   if (started || !provider) return;
   started = true;
   provider.start({
-    credited: ({ credited, balance }) => {
-      setState({ pending: false, buying: null, ...(typeof balance === 'number' ? { balance } : {}), ...(credited > 0 ? { paid: true } : {}) });
+    credited: ({ credited, balance, tip, gift, backupSaved }) => {
+      setState({
+        pending: false,
+        buying: null,
+        ...(typeof balance === 'number' ? { balance } : {}),
+        ...(credited > 0 ? { paid: true } : {}),
+        ...(backupSaved ? { backupSaved: true } : {}),
+      });
+      // Website return screen: gently suggest a backup code until the wallet has one (paid Sparks live in a cookie).
+      const nudge = provider.id === 'web' && !backupSaved && !state.backupSaved;
+      if (gift) {
+        // A gift: nothing was credited here; show the code (Copy, Share) at the top of the sheet.
+        setState({ giftReturn: gift, sheetOpen: true, sheetReason: 'manual', needed: null, sheetFocus: null });
+        void loadPrices();
+        return;
+      }
       if (credited > 0) {
-        showToast({ id: 'mg-credits-added', tone: 'success', message: `+${credited.toLocaleString()} Sparks added. Thank you!` });
+        const added = `+${credited.toLocaleString()} Sparks added.`;
+        showToast({
+          id: 'mg-credits-added',
+          tone: 'success',
+          ...(nudge
+            ? {
+                title: tip ? `Thank you for supporting Mohit’s apps! ${added}` : `${added} Thank you!`,
+                message: 'Save a backup code so you don’t lose these Sparks.',
+                action: { label: 'Back up', onClick: () => openCreditsSheet('manual', null, 'backup') },
+                duration: 9000,
+              }
+            : { message: tip ? `Thank you for supporting Mohit’s apps! ${added}` : `${added} Thank you!` }),
+        });
         if (state.sheetReason === 'insufficient') closeCreditsSheet();
       }
     },

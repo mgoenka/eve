@@ -28,6 +28,8 @@
   var store;
   try { store = window.localStorage; store.setItem('mg_pulse_t', '1'); store.removeItem('mg_pulse_t'); } catch (e) { return; }
   var get = function (k) { try { return store.getItem(k); } catch (e) { return null; } };
+  // Do-not-count switch for our own tools (store screenshots, test drivers): localStorage mg_pulse_off = '1'.
+  if (get('mg_pulse_off') === '1' || window.__mgPulseOff) return;
   var set = function (k, v) { try { v == null ? store.removeItem(k) : store.setItem(k, v); } catch (e) {} };
 
   // #mg-me marks this browser (or this Android app) as Mohit's, so his own play is counted apart.

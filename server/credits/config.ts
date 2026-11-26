@@ -85,7 +85,7 @@ export const PACKS = [
   { id: 'ai_credits_1999', priceUsd: 19.99, credits: 10000 },
 ] as const;
 
-export type PackId = (typeof PACKS)[number]['id'] | typeof CUSTOM_PACK_ID;
+export type PackId = (typeof PACKS)[number]['id'] | typeof CUSTOM_PACK_ID | typeof TIP_PACK_ID;
 
 /**
  * Website only: buyers pick their own amount ("Choose your amount"). Play can only sell products created in
@@ -205,7 +205,56 @@ export const COLLECTIONS = {
   linkCodes: 'aiCreditLinkCodes', // doc id = sha256(link code): { account, expiresAt, usedAt? } (web browser linking)
   starterBudget: 'aiCreditStarterBudget', // doc id = UTC day "YYYY-MM-DD"; subcollection "shards" (doc id 0..9): { count }
   sync: 'aiCreditSync', // doc id e.g. "play-voided:<package>": { lastRunAt, checkpoint } (background syncs)
+  backupCodes: 'aiCreditBackupCodes', // doc id = sha256(backup code): { account, createdAt } (web wallet recovery, one per wallet)
 } as const;
+
+/**
+ * Gift Sparks (website only): the buyer pays for a pack or a custom amount (same prices and curve, $4.99 minimum)
+ * and gets a one-use code instead of the Sparks. The code is a promo code (aiCreditPromos, maxRedemptions 1) that
+ * expires after a year and is voided if the payment is refunded or disputed before it is used. Redeemed through
+ * the existing "Have a promo code?" field in any app (Android app wallet or browser wallet).
+ * Format: 4 groups of 4 from LINK_CODE_ALPHABET (no 0/O/1/I/L), e.g. "K7QM-3XRA-PW9D-HT4N" (~79 random bits).
+ */
+export const GIFT_CODE_GROUPS = 4;
+export const GIFT_CODE_GROUP_LENGTH = 4;
+export const GIFT_TTL_MS = 365 * 24 * 60 * 60_000;
+/** "K7QM3XRAPW9DHT4N" (typed without dashes) -> "K7QM-3XRA-PW9D-HT4N"; null when it isn't gift-code shaped. */
+export function formatGiftCode(raw: string): string | null {
+  const s = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (s.length !== GIFT_CODE_GROUPS * GIFT_CODE_GROUP_LENGTH || ![...s].every((c) => LINK_CODE_ALPHABET.includes(c))) return null;
+  return s.match(new RegExp(`.{${GIFT_CODE_GROUP_LENGTH}}`, 'g'))!.join('-');
+}
+
+/**
+ * Optional tip (website only, never in the Android app: Play policy): "Support Mohit's apps" for one of these US$
+ * amounts. The tipper gets Sparks as thanks: what the same money buys on the custom curve (tipCredits).
+ */
+export const TIP_PACK_ID = 'sparks_tip';
+export const TIP_AMOUNTS_USD = [5, 10, 20] as const;
+/** Sparks included with a tip of `usd` (the custom-curve amount for that price), or null for an amount not offered. */
+export function tipCredits(usd: number): number | null {
+  return (TIP_AMOUNTS_USD as readonly number[]).includes(usd) ? customCreditsForUsd(usd) : null;
+}
+/** The tip "pack" for an offered amount (Stripe only). */
+export function tipPack(usd: unknown): PackInfo | undefined {
+  const n = typeof usd === 'string' && /^\d{1,3}$/.test(usd) ? Number(usd) : usd;
+  const credits = typeof n === 'number' ? tipCredits(n) : null;
+  return credits === null ? undefined : { id: TIP_PACK_ID, priceUsd: n as number, credits, provider: 'stripe' };
+}
+/** The tip pack whose included Sparks are `credits` (fulfilment reads it back from the session metadata). */
+export function tipPackByCredits(credits: unknown): PackInfo | undefined {
+  const n = typeof credits === 'string' && /^\d{1,7}$/.test(credits) ? Number(credits) : credits;
+  return TIP_AMOUNTS_USD.map((usd) => tipPack(usd)!).find((p) => p.credits === n);
+}
+
+/**
+ * Wallet backup code (website): one long-lived recovery code per web wallet, shown once and stored only as a
+ * sha256 hash. Entering it in another browser moves that browser into the wallet (like linking) and replaces the
+ * code with a new one. 5 groups of 5 from LINK_CODE_ALPHABET (~124 random bits).
+ */
+export const BACKUP_CODE_GROUPS = 5;
+export const BACKUP_CODE_GROUP_LENGTH = 5;
+export const normalizeBackupCode = (raw: string): string => raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
 
 /** Promo codes are case-insensitive: stored and matched upper-case, spaces removed. Letters, digits, dashes. */
 /** Link codes ("use your Sparks on another device", web only): 6 characters, no 0/O/1/I/L, 10 minutes, one use. */

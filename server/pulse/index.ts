@@ -1,4 +1,4 @@
-// Synced from app-platform/server-kit/pulse/index.ts. Do not edit here. VERSION 9644162 2026-11-26T18:46:48Z
+// Synced from app-platform/server-kit/pulse/index.ts. Do not edit here. VERSION 89b3aca 2026-11-26T20:06:18Z
 /**
  * Pulse: anonymous, cookie-free usage counts for every app and the website.
  *
@@ -331,7 +331,12 @@ export interface PulseRouterOptions {
   store?: PulseStore;
   /** Beacons per IP per minute (default 60). */
   perMinute?: number;
+  /** Where GET /public reads the rounded totals (default: the pulse service). */
+  publicUrl?: string;
 }
+
+/** The pulse service's rounded public totals. */
+export const PUBLIC_URL = "https://pulse-4161275924.us-west1.run.app/api/public";
 
 const readBody = (req: Req): Promise<string | null> =>
   new Promise((resolve) => {
@@ -383,6 +388,25 @@ export function pulseRouter<R>(express: ExpressLike<R>, opts: PulseRouterOptions
   r.get("/status", (_req, res) => {
     res.set("Cache-Control", "no-store");
     res.json({ ok: true, store: store.kind });
+  });
+  // GET /public: this app's rounded public totals from the pulse service (cached 10 min), so the page can show
+  // "2,600 games played" without talking to another origin. Values below the public thresholds come back null.
+  let pub: { at: number; body: unknown } | null = null;
+  r.get("/public", async (_req, res) => {
+    res.set("Cache-Control", "public, max-age=300");
+    const empty = { app: null, total: null };
+    if (!opts.app) return res.json(empty);
+    if (!pub || Date.now() - pub.at > 10 * 60_000) {
+      try {
+        const ctrl = AbortSignal.timeout(4000);
+        const r2 = await fetch(opts.publicUrl ?? PUBLIC_URL, { signal: ctrl });
+        const j = (await r2.json()) as { total?: unknown; apps?: Record<string, unknown> };
+        pub = { at: Date.now(), body: { app: j.apps?.[opts.app] ?? null, total: j.total ?? null } };
+      } catch {
+        if (!pub) return res.json(empty);
+      }
+    }
+    res.json(pub.body);
   });
   if (opts.originApps) {
     r.options("/hit", (req, res) => {

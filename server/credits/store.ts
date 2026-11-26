@@ -25,6 +25,8 @@ export interface LedgerEntry {
   /** Play purchaseType: 0 = test (license tester), 1 = promo, 2 = rewarded; absent = real. */
   purchaseType?: number;
   reason?: string;
+  /** A tip ("Support Mohit's apps", website): the purchase's Sparks are the thank-you. */
+  tip?: boolean;
 }
 
 /** Stored on the account doc. kind 'android': app = package, id = app user id; kind 'web': app = '*', id = wallet id. */
@@ -50,6 +52,8 @@ export interface AccountState {
    * from before lazy starters, which got theirs at creation).
    */
   starterState?: StarterState;
+  /** A wallet backup code is saved for this wallet (web). */
+  backup?: boolean;
 }
 
 export type StarterState = 'pending' | 'paused' | 'address_limit';
@@ -92,7 +96,45 @@ export interface PurchaseRecord {
   reversedCredits?: number;
   /** Reversals applied once each (Play voided purchase records), by id → credits. */
   reversals?: Record<string, number>;
+  /** Gift purchase: the one-use code made for it (no Sparks were credited to `account`, the buyer). */
+  giftCode?: string;
+  /** Stripe Checkout Session id (gift purchases: so a refund can be traced to the code). */
+  sessionId?: string;
+  /** Gift voided after a refund / dispute ("refund" | "dispute"), or logged as used before the refund. */
+  giftVoided?: string;
+  giftUsedBeforeRefund?: string;
+  /** A tip purchase. */
+  tip?: boolean;
 }
+
+/** A gift purchase to record (no Sparks to the buyer): the purchase + a one-use promo code, in one transaction. */
+export interface GiftInput {
+  /** Formatted code ("K7QM-3XRA-PW9D-HT4N"): the promo doc id. */
+  code: string;
+  credits: number;
+  /** Buyer's wallet key (resolved): "My gift codes" lists by it. */
+  buyerKey: string;
+  provider: string;
+  purchaseKey: string;
+  secondaryKeys: string[];
+  orderId: string | null;
+  productId: string;
+  sessionId: string;
+  /** ISO time the code expires. */
+  expiresAt: string;
+  purchaseType?: number;
+}
+
+/** One gift code as its buyer sees it. */
+export interface GiftRecord {
+  code: string;
+  credits: number;
+  createdAt: string;
+  expiresAt: string | null;
+  status: 'ready' | 'used' | 'void' | 'expired';
+}
+
+export type GiftVoidOutcome = 'voided' | 'already' | 'used' | 'restored' | 'unchanged';
 
 export interface CreditPurchaseInput {
   /** Wallet key to credit. */
@@ -110,11 +152,19 @@ export interface CreditPurchaseInput {
   /** Already final at the provider (no consume step). */
   finalized: boolean;
   purchaseType?: number;
+  /** A tip: the ledger entry and purchase record are flagged. */
+  tip?: boolean;
 }
 
 /** aiCreditPromos/{CODE}: grants `credits` once per wallet, at most `maxRedemptions` times, until `expiresAt`. */
 export interface PromoCode {
   code: string;
+  /** Gift codes (website purchase): buyer wallet key, purchase key and Stripe session id. */
+  giftBuyer?: string;
+  giftPurchaseKey?: string;
+  giftSession?: string;
+  /** Why a gift code was switched off ("refund" | "dispute"). */
+  voidReason?: string;
   credits: number;
   /** null (or missing) = no limit: then the redemptions counter is not kept (no hot doc for big public codes). */
   maxRedemptions: number | null;
@@ -143,6 +193,14 @@ export function liveClaims(doc: { claims?: unknown; count?: unknown; windowStart
   if (!doc) return [];
   const raw = Array.isArray(doc.claims) ? doc.claims : Array.from({ length: Math.max(0, Math.min(1000, Number(doc.count) || 0)) }, () => Number(doc.windowStart) || 0);
   return raw.filter((t): t is number => typeof t === 'number' && t > nowMs - windowMs && t <= nowMs + 60_000);
+}
+
+/** Status of a gift code for its buyer (both stores). */
+export function giftStatus(p: PromoCode, now: Date): GiftRecord['status'] {
+  if ((p.redemptions ?? 0) >= 1) return 'used';
+  if (!p.active) return 'void';
+  if (p.expiresAt && Date.parse(p.expiresAt) <= now.getTime()) return 'expired';
+  return 'ready';
 }
 
 /** Shared validity check (both stores). */
@@ -253,6 +311,27 @@ export interface CreditStore {
   mergeAccounts(fromKey: string, toKey: string, reason: string, now: Date): Promise<MergeResult>;
   /** Follow mergedInto (a few hops) to the wallet that holds the Sparks now. */
   resolveAccount(key: string): Promise<string>;
+  /**
+   * Record a gift purchase once (idempotent on purchaseKey and every secondary key, like creditPurchase): the
+   * purchase record (account = buyer, no Sparks credited) and the promo code { credits, maxRedemptions 1,
+   * expiresAt } in one transaction. A repeat returns the code made the first time (duplicate: true).
+   */
+  createGift(g: GiftInput, now: Date): Promise<{ code: string; credits: number; expiresAt: string; buyer: string; duplicate: boolean }>;
+  /**
+   * After a refund or dispute of a gift purchase: switch its code off if nobody used it yet ('voided'), or log on the
+   * purchase that it was already used ('used'; the Sparks can't be taken back). `restore` (a dispute Mohit won):
+   * switch a code voided by that dispute back on ('restored'). Null: no such purchase, or it isn't a gift.
+   */
+  voidGift(find: { purchaseKey?: string; secondaryKey?: string }, reason: string, now: Date, restore?: boolean): Promise<{ outcome: GiftVoidOutcome; code: string } | null>;
+  /** Gift codes bought by these wallets, newest first (at most 50). */
+  listGifts(buyerKeys: string[], now: Date): Promise<GiftRecord[]>;
+  /** Save `codeHash` as this wallet's backup code, replacing (deleting) its previous one. */
+  setBackupCode(key: string, codeHash: string, now: Date): Promise<void>;
+  /**
+   * Use a backup code: the wallet key it belongs to (null: unknown). The code is replaced by `newHash` in the same
+   * transaction (one use: the old code stops working).
+   */
+  useBackupCode(codeHash: string, newHash: string, now: Date): Promise<string | null>;
 }
 
 interface MemAccount {
@@ -265,6 +344,7 @@ interface MemAccount {
   ledger: LedgerEntry[];
   totals: { granted: number; purchased: number; spent: number; ownerSpent?: number };
   owner?: boolean;
+  backupCodeHash?: string;
 }
 
 export function liveHeld(holds: Iterable<{ credits: number; expiresAt: number }>, nowMs: number): number {
@@ -286,6 +366,7 @@ export class MemoryCreditStore implements CreditStore {
   readonly promos = new Map<string, PromoCode>();
   readonly linkCodes = new Map<string, { account: string; expiresAt: number; usedAt?: number }>();
   readonly promoRedemptions = new Map<string, Set<string>>();
+  readonly backupCodes = new Map<string, { account: string; createdAt: string }>();
 
   private ensureSync(key: string, meta: AccountMeta, starter: number, now: Date): { acc: MemAccount; created: boolean } {
     const existing = this.accounts.get(key);
@@ -308,6 +389,7 @@ export class MemoryCreditStore implements CreditStore {
       owner: acc.owner === true,
       ...(acc.totals.purchased > 0 ? { paid: true } : {}),
       ...(acc.starterState && !acc.starterGrantedAt ? { starterState: acc.starterState } : {}),
+      ...(acc.backupCodeHash ? { backup: true } : {}),
     };
   }
 
@@ -457,6 +539,7 @@ export class MemoryCreditStore implements CreditStore {
     const entry: LedgerEntry = { type: 'purchase', credits: p.credits, balanceAfter: acc.balance, at: now.toISOString(), productId: p.productId, provider: p.provider };
     if (p.orderId) entry.orderId = p.orderId;
     if (p.purchaseType !== undefined) entry.purchaseType = p.purchaseType;
+    if (p.tip) entry.tip = true;
     acc.ledger.push(entry);
     this.purchases.set(p.purchaseKey, {
       account: p.key,
@@ -466,6 +549,7 @@ export class MemoryCreditStore implements CreditStore {
       credits: p.credits,
       finalized: p.finalized,
       createdAt: now.toISOString(),
+      ...(p.tip ? { tip: true } : {}),
     });
     for (const k of p.secondaryKeys) this.orders.set(k, p.purchaseKey);
     return { balance: acc.balance, duplicate: false, finalized: p.finalized, account: p.key };
@@ -499,7 +583,7 @@ export class MemoryCreditStore implements CreditStore {
   async reversePurchase(find: { purchaseKey?: string; secondaryKey?: string }, fraction: number, reason: string, now: Date) {
     const key = find.purchaseKey ?? (find.secondaryKey ? this.orders.get(find.secondaryKey) : undefined);
     const rec = key ? this.purchases.get(key) : undefined;
-    if (!rec) return null;
+    if (!rec || rec.giftCode) return null; // gifts credited nobody: voidGift handles them
     const target = Math.min(rec.credits, Math.max(0, Math.round(rec.credits * Math.min(1, Math.max(0, fraction)))));
     const delta = target - (rec.reversedCredits ?? 0);
     const accountKey = await this.resolveAccount(rec.account);
@@ -576,4 +660,114 @@ export class MemoryCreditStore implements CreditStore {
     }
     return k;
   }
+
+  async createGift(g: GiftInput, now: Date) {
+    const viaSecondary = g.secondaryKeys.map((k) => this.orders.get(k)).find((k) => k !== undefined);
+    const prior = this.purchases.get(g.purchaseKey) ?? (viaSecondary ? this.purchases.get(viaSecondary) : undefined);
+    if (prior?.giftCode) {
+      const p = this.promos.get(prior.giftCode);
+      return { code: prior.giftCode, credits: prior.credits, expiresAt: p?.expiresAt ?? '', buyer: prior.account, duplicate: true };
+    }
+    if (prior) throw new Error('createGift: purchase already recorded as Sparks');
+    if (this.promos.has(g.code)) throw new Error('createGift: code exists');
+    const at = now.toISOString();
+    this.promos.set(g.code, {
+      code: g.code,
+      credits: g.credits,
+      maxRedemptions: 1,
+      redemptions: 0,
+      expiresAt: g.expiresAt,
+      active: true,
+      createdAt: at,
+      note: 'gift',
+      giftBuyer: g.buyerKey,
+      giftPurchaseKey: g.purchaseKey,
+      giftSession: g.sessionId,
+    });
+    this.purchases.set(g.purchaseKey, {
+      account: g.buyerKey,
+      provider: g.provider,
+      productId: g.productId,
+      orderId: g.orderId,
+      credits: g.credits,
+      finalized: true,
+      createdAt: at,
+      giftCode: g.code,
+      sessionId: g.sessionId,
+    });
+    for (const k of g.secondaryKeys) this.orders.set(k, g.purchaseKey);
+    return { code: g.code, credits: g.credits, expiresAt: g.expiresAt, buyer: g.buyerKey, duplicate: false };
+  }
+
+  async voidGift(find: { purchaseKey?: string; secondaryKey?: string }, reason: string, now: Date, restore = false) {
+    const key = find.purchaseKey ?? (find.secondaryKey ? this.orders.get(find.secondaryKey) : undefined);
+    const rec = key ? this.purchases.get(key) : undefined;
+    if (!rec?.giftCode) return null;
+    const p = this.promos.get(rec.giftCode);
+    if (!p) return null;
+    const outcome = giftVoidStep(rec, p, reason, restore, now);
+    if (outcome.promo) Object.assign(p, outcome.promo);
+    if (outcome.purchase) Object.assign(rec, outcome.purchase);
+    return { outcome: outcome.outcome, code: rec.giftCode };
+  }
+
+  async listGifts(buyerKeys: string[], now: Date) {
+    const keys = new Set(buyerKeys);
+    return [...this.promos.values()]
+      .filter((p) => p.giftBuyer && keys.has(p.giftBuyer))
+      .map((p) => giftRecordOf(p, now))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, 50);
+  }
+
+  async setBackupCode(key: string, codeHash: string, now: Date) {
+    const acc = this.accounts.get(key);
+    if (!acc) throw new Error('setBackupCode: no such wallet');
+    if (acc.backupCodeHash) this.backupCodes.delete(acc.backupCodeHash);
+    this.backupCodes.set(codeHash, { account: key, createdAt: now.toISOString() });
+    acc.backupCodeHash = codeHash;
+  }
+
+  async useBackupCode(codeHash: string, newHash: string, now: Date) {
+    const c = this.backupCodes.get(codeHash);
+    const acc = c ? this.accounts.get(c.account) : undefined;
+    if (!c || !acc || acc.backupCodeHash !== codeHash) return null;
+    this.backupCodes.delete(codeHash);
+    this.backupCodes.set(newHash, { account: c.account, createdAt: now.toISOString() });
+    acc.backupCodeHash = newHash;
+    return c.account;
+  }
+}
+
+/** A gift code as its buyer sees it (both stores). */
+export function giftRecordOf(p: PromoCode, now: Date): GiftRecord {
+  return { code: p.code, credits: p.credits, createdAt: p.createdAt, expiresAt: p.expiresAt, status: giftStatus(p, now) };
+}
+
+/**
+ * What a refund / dispute (or a won dispute, `restore`) does to a gift (both stores): the outcome and the fields to
+ * write on the promo and the purchase. Idempotent: repeating an event changes nothing more.
+ */
+export function giftVoidStep(
+  rec: PurchaseRecord,
+  p: PromoCode,
+  reason: string,
+  restore: boolean,
+  now: Date,
+): { outcome: GiftVoidOutcome; promo?: Partial<PromoCode> & { voidedAt?: string | null }; purchase?: Partial<PurchaseRecord> & { giftVoidedAt?: string } } {
+  const at = now.toISOString();
+  const used = (p.redemptions ?? 0) >= 1;
+  if (restore) {
+    // Only a code this dispute switched off comes back (never one a refund voided).
+    if (!used && !p.active && p.voidReason === 'dispute' && rec.giftVoided === 'dispute') {
+      return { outcome: 'restored', promo: { active: true, voidReason: 'dispute_won', voidedAt: null }, purchase: { giftVoided: 'dispute_won' } };
+    }
+    return { outcome: 'unchanged' };
+  }
+  if (used) {
+    if (rec.giftUsedBeforeRefund) return { outcome: 'used' };
+    return { outcome: 'used', purchase: { giftUsedBeforeRefund: `${reason} ${at}` } };
+  }
+  if (!p.active && (rec.giftVoided === 'refund' || rec.giftVoided === 'dispute')) return { outcome: 'already' };
+  return { outcome: 'voided', promo: { active: false, voidReason: reason, voidedAt: at }, purchase: { giftVoided: reason, giftVoidedAt: at } };
 }

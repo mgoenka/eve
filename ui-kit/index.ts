@@ -57,6 +57,8 @@ export { MoreApps } from './components/MoreApps';
 export type { MoreAppsProps } from './components/MoreApps';
 export { GuestOutro } from './components/GuestOutro';
 export { DailyReminderPrompt } from './components/DailyReminderPrompt';
+export { PublicCounter } from './components/PublicCounter';
+export type { PublicCounterProps } from './components/PublicCounter';
 export type { DailyReminderPromptProps } from './components/DailyReminderPrompt';
 export type { GuestOutroProps } from './components/GuestOutro';
 export { APPS, currentApp, appLink, siblingApps, isAndroidWeb } from './utils/apps';
@@ -148,6 +150,11 @@ export {
   redeemPromoCode,
   createDeviceLinkCode,
   linkThisDevice,
+  buyGiftCode,
+  buyTip,
+  listGiftCodes,
+  createBackupCode,
+  restoreFromBackupCode,
   activeCreditsProvider,
   registerWebCreditsProvider,
   AI_CREDIT_PACKS,
@@ -161,6 +168,7 @@ export {
   whenCreditsLoaded,
 } from './utils/credits';
 export type { AiFetchJsonOptions, CreditsProvider, CreditsProviderEvents, CreditsState } from './utils/credits';
+export type { GiftCode, PurchaseExtras } from './utils/credits';
 export { playCreditsProvider, getAppUserId, nativeBridge } from './utils/creditsPlay';
 export { webCreditsProvider, CREDITS_CHECKOUT_URL, CREDITS_CONFIRM_URL } from './utils/creditsWeb';
 export type { NativeBridge, NativeBilling, NativeProduct, NativePurchase } from './utils/creditsPlay';

@@ -14,13 +14,15 @@
 // aiCreditPromos/{CODE}                           PromoCode { credits, maxRedemptions, redemptions, expiresAt, active, ... }
 // aiCreditPromos/{CODE}/redemptions/{walletKey}   { account, credits, at, app }  (one per wallet)
 // aiCreditLinkCodes/{sha256(code)}               { account, expiresAt, createdAt, usedAt? } (web linking, 10 min)
+// aiCreditPromos/{GIFT-CODE}                      gift codes: PromoCode + { giftBuyer, giftPurchaseKey, giftSession } (maxRedemptions 1)
+// aiCreditBackupCodes/{sha256(code)}             { account, createdAt }  (web wallet backup code; account.backupCodeHash = current)
 //
 // Only the server touches these (no client SDK, no security-rule access needed). The package is
 // imported lazily so web-only traffic and apps without Firestore never load it.
 import type { DocumentReference, Firestore, Transaction } from '@google-cloud/firestore';
 import { COLLECTIONS, WEB_SWITCH_DOC } from './config.ts';
-import { hasPromoLimit, liveClaims, liveHeld, promoProblem } from './store.ts';
-import type { AccountMeta, AccountState, ChargeInput, CreditPurchaseInput, CreditStore, LedgerEntry, MergeResult, PromoCode, PromoResult, PurchaseRecord, StarterOutcome, StarterRule, StarterState } from './store.ts';
+import { giftRecordOf, giftVoidStep, hasPromoLimit, liveClaims, liveHeld, promoProblem } from './store.ts';
+import type { AccountMeta, AccountState, ChargeInput, CreditPurchaseInput, CreditStore, GiftInput, GiftRecord, LedgerEntry, MergeResult, PromoCode, PromoResult, PurchaseRecord, StarterOutcome, StarterRule, StarterState } from './store.ts';
 
 type Holds = Record<string, { credits: number; expiresAt: number }>;
 interface AccountDoc {
@@ -40,6 +42,8 @@ interface AccountDoc {
   starterGrantedAt?: string;
   /** Starter not granted yet: 'pending' | 'paused' | 'address_limit' (see AccountState.starterState). */
   starterState?: StarterState;
+  /** sha256 of the wallet's current backup code (aiCreditBackupCodes doc id). */
+  backupCodeHash?: string;
 }
 
 export interface FirestoreStoreOptions {
@@ -124,6 +128,7 @@ export class FirestoreCreditStore implements CreditStore {
       owner: doc.owner === true,
       ...((doc.totals?.purchased ?? 0) > 0 ? { paid: true } : {}),
       ...(doc.starterState && !doc.starterGrantedAt ? { starterState: doc.starterState } : {}),
+      ...(doc.backupCodeHash ? { backup: true } : {}),
     };
   }
 
@@ -378,6 +383,7 @@ export class FirestoreCreditStore implements CreditStore {
       const e: LedgerEntry = { type: 'purchase', credits: p.credits, balanceAfter: balance, at, productId: p.productId, provider: p.provider };
       if (p.orderId) e.orderId = p.orderId;
       if (p.purchaseType !== undefined) e.purchaseType = p.purchaseType;
+      if (p.tip) e.tip = true;
       tx.create(ledger(), e);
       const rec: PurchaseRecord = {
         account: p.key,
@@ -387,6 +393,7 @@ export class FirestoreCreditStore implements CreditStore {
         credits: p.credits,
         finalized: p.finalized,
         createdAt: at,
+        ...(p.tip ? { tip: true } : {}),
       };
       tx.create(purchaseRef, rec);
       for (const r of secondaryRefs) tx.create(r, { purchaseKey: p.purchaseKey, account: p.key });
@@ -449,6 +456,7 @@ export class FirestoreCreditStore implements CreditStore {
       const pSnap = await tx.get(purchaseRef);
       if (!pSnap.exists) return null;
       const rec = pSnap.data() as PurchaseRecord;
+      if (rec.giftCode) return null; // gifts credited nobody: voidGift handles them
       const accRef = db.collection(COLLECTIONS.accounts).doc(rec.account);
       const aSnap = await tx.get(accRef);
       if (!aSnap.exists) return null;
@@ -568,6 +576,128 @@ export class FirestoreCreditStore implements CreditStore {
       k = next;
     }
     return k;
+  }
+
+  private async purchaseKeyOf(find: { purchaseKey?: string; secondaryKey?: string }): Promise<string | undefined> {
+    if (find.purchaseKey) return find.purchaseKey;
+    if (!find.secondaryKey) return undefined;
+    const db = await this.db();
+    const s = await db.collection(COLLECTIONS.externalIds).doc(find.secondaryKey).get();
+    return (s.data() as { purchaseKey?: string } | undefined)?.purchaseKey;
+  }
+
+  async createGift(g: GiftInput, now: Date) {
+    const db = await this.db();
+    const purchaseRef = db.collection(COLLECTIONS.purchases).doc(g.purchaseKey);
+    const secondaryRefs = g.secondaryKeys.map((k) => db.collection(COLLECTIONS.externalIds).doc(k));
+    const promoRef = db.collection(COLLECTIONS.promos).doc(g.code);
+    return db.runTransaction(async (tx) => {
+      const prior = await tx.get(purchaseRef);
+      const priorSecondary = (await Promise.all(secondaryRefs.map((r) => tx.get(r)))).find((d) => d.exists);
+      let rec = prior.exists ? (prior.data() as PurchaseRecord) : null;
+      if (!rec && priorSecondary) {
+        const k = (priorSecondary.data() as { purchaseKey?: string }).purchaseKey;
+        const s = k ? await tx.get(db.collection(COLLECTIONS.purchases).doc(k)) : null;
+        rec = s?.exists ? (s.data() as PurchaseRecord) : null;
+        if (!rec) throw new Error('createGift: secondary id already used');
+      }
+      if (rec) {
+        if (!rec.giftCode) throw new Error('createGift: purchase already recorded as Sparks');
+        const p = await tx.get(db.collection(COLLECTIONS.promos).doc(rec.giftCode));
+        return { code: rec.giftCode, credits: rec.credits, expiresAt: (p.data() as PromoCode | undefined)?.expiresAt ?? '', buyer: rec.account, duplicate: true };
+      }
+      const at = now.toISOString();
+      const promo: PromoCode = {
+        code: g.code,
+        credits: g.credits,
+        maxRedemptions: 1,
+        redemptions: 0,
+        expiresAt: g.expiresAt,
+        active: true,
+        createdAt: at,
+        note: 'gift',
+        giftBuyer: g.buyerKey,
+        giftPurchaseKey: g.purchaseKey,
+        giftSession: g.sessionId,
+      };
+      tx.create(promoRef, promo); // fails on the (astronomically unlikely) clash: the caller's retry makes a new code
+      const record: PurchaseRecord = {
+        account: g.buyerKey,
+        provider: g.provider,
+        productId: g.productId,
+        orderId: g.orderId,
+        credits: g.credits,
+        finalized: true,
+        createdAt: at,
+        giftCode: g.code,
+        sessionId: g.sessionId,
+      };
+      tx.create(purchaseRef, record);
+      for (const r of secondaryRefs) tx.create(r, { purchaseKey: g.purchaseKey, account: g.buyerKey });
+      return { code: g.code, credits: g.credits, expiresAt: g.expiresAt, buyer: g.buyerKey, duplicate: false };
+    });
+  }
+
+  async voidGift(find: { purchaseKey?: string; secondaryKey?: string }, reason: string, now: Date, restore = false) {
+    const purchaseKey = await this.purchaseKeyOf(find);
+    if (!purchaseKey) return null;
+    const db = await this.db();
+    const purchaseRef = db.collection(COLLECTIONS.purchases).doc(purchaseKey);
+    return db.runTransaction(async (tx) => {
+      const pSnap = await tx.get(purchaseRef);
+      const rec = pSnap.exists ? (pSnap.data() as PurchaseRecord) : null;
+      if (!rec?.giftCode) return null;
+      const promoRef = db.collection(COLLECTIONS.promos).doc(rec.giftCode);
+      const promoSnap = await tx.get(promoRef);
+      if (!promoSnap.exists) return null;
+      const step = giftVoidStep(rec, promoSnap.data() as PromoCode, reason, restore, now);
+      if (step.promo) tx.update(promoRef, step.promo);
+      if (step.purchase) tx.update(purchaseRef, step.purchase);
+      return { outcome: step.outcome, code: rec.giftCode };
+    });
+  }
+
+  async listGifts(buyerKeys: string[], now: Date): Promise<GiftRecord[]> {
+    const keys = [...new Set(buyerKeys)].slice(0, 10);
+    if (!keys.length) return [];
+    const db = await this.db();
+    // Single-field equality / in: served by Firestore's automatic index (no composite index to deploy).
+    const snap = await db.collection(COLLECTIONS.promos).where('giftBuyer', 'in', keys).limit(50).get();
+    return snap.docs
+      .map((d) => giftRecordOf(d.data() as PromoCode, now))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async setBackupCode(key: string, codeHash: string, now: Date): Promise<void> {
+    const db = await this.db();
+    const accRef = db.collection(COLLECTIONS.accounts).doc(key);
+    const codes = db.collection(COLLECTIONS.backupCodes);
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(accRef);
+      if (!snap.exists) throw new Error('setBackupCode: no such wallet');
+      const old = (snap.data() as AccountDoc).backupCodeHash;
+      if (old) tx.delete(codes.doc(old));
+      tx.create(codes.doc(codeHash), { account: key, createdAt: now.toISOString() });
+      tx.update(accRef, { backupCodeHash: codeHash, backupCodeAt: now.toISOString(), updatedAt: now.toISOString() });
+    });
+  }
+
+  async useBackupCode(codeHash: string, newHash: string, now: Date): Promise<string | null> {
+    const db = await this.db();
+    const codes = db.collection(COLLECTIONS.backupCodes);
+    return db.runTransaction(async (tx) => {
+      const cSnap = await tx.get(codes.doc(codeHash));
+      const account = cSnap.exists ? (cSnap.data() as { account?: string }).account : undefined;
+      if (!account) return null;
+      const accRef = db.collection(COLLECTIONS.accounts).doc(account);
+      const aSnap = await tx.get(accRef);
+      if (!aSnap.exists || (aSnap.data() as AccountDoc).backupCodeHash !== codeHash) return null;
+      const at = now.toISOString();
+      tx.delete(codes.doc(codeHash));
+      tx.create(codes.doc(newHash), { account, createdAt: at });
+      tx.update(accRef, { backupCodeHash: newHash, backupCodeAt: at, backupRestoredAt: at, updatedAt: at });
+      return account;
+    });
   }
 
   async webEnabled(): Promise<boolean> {
