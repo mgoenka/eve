@@ -379,10 +379,10 @@ async function generateImage(prompt: string): Promise<GeneratedImage | null> {
 // model returns ~1.5 MB 1024px PNGs. Shrink them to a 512px WebP (~30-60 KB) before caching and
 // sending. If sharp can't load on this host, send the original rather than fail.
 const THUMB_PX = 512;
-type Sharp = typeof import('sharp');
+type Sharp = (typeof import('sharp'))['default'];
 let sharpLib: Promise<Sharp | null> | null = null;
 function loadSharp() {
-  sharpLib ??= import('sharp').then((m) => ((m as { default?: Sharp }).default ?? (m as unknown as Sharp))).catch((err) => {
+  sharpLib ??= import('sharp').then((m) => ((m as unknown as { default?: Sharp }).default ?? (m as unknown as Sharp))).catch((err) => {
     console.warn('sharp unavailable, sending full-size images:', err?.message || err);
     return null;
   });
