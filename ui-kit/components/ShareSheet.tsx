@@ -4,7 +4,7 @@ import { Modal } from './Modal';
 import { Button } from './Button';
 import { CopyIcon, DownloadIcon, ShareIcon } from './icons';
 import { showToast } from '../utils/toastBus';
-import { copyToClipboard } from '../utils/share';
+import { copyToClipboard, tagShareText, tagShareUrl } from '../utils/share';
 import { isNativeApp } from '../utils/native';
 import type { ScoreCardData, ScoreCardFormat } from '../utils/scoreCard';
 import { recordScoreCardVideo, renderScoreCardPng, scoreVideoMimeType } from '../utils/scoreCard';
@@ -76,7 +76,8 @@ export function ShareSheet({ open, onClose, data, text, title = 'Share your scor
   const videoKey = useRef('');
   const stem = useMemo(() => fileName || data.app.replace(/^Mohit's\s+/i, '').toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-score', [fileName, data.app]);
   const canVideo = useMemo(() => scoreVideoMimeType() !== null, []);
-  const fullText = useMemo(() => (text.includes(data.url) ? text : text + ' ' + data.url), [text, data.url]);
+  const shareUrl = useMemo(() => tagShareUrl(data.url), [data.url]);
+  const fullText = useMemo(() => tagShareText(text.includes(data.url) ? text : text + ' ' + data.url), [text, data.url]);
   const phone = useMemo(isPhone, []);
 
   useEffect(() => {
@@ -151,8 +152,8 @@ export function ShareSheet({ open, onClose, data, text, title = 'Share your scor
     });
   const enc = encodeURIComponent;
   const whatsapp = () => openOut('https://wa.me/?text=' + enc(fullText));
-  const facebook = () => openOut('https://www.facebook.com/sharer/sharer.php?u=' + enc(data.url) + '&quote=' + enc(text));
-  const xpost = () => openOut('https://x.com/intent/post?text=' + enc(text) + '&url=' + enc(data.url));
+  const facebook = () => openOut('https://www.facebook.com/sharer/sharer.php?u=' + enc(shareUrl) + '&quote=' + enc(text));
+  const xpost = () => openOut('https://x.com/intent/post?text=' + enc(text) + '&url=' + enc(shareUrl));
   const copy = () => void copyToClipboard(fullText, 'Copied. Paste it anywhere.');
 
   const social = [

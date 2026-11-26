@@ -1,4 +1,4 @@
-// Synced from app-platform/server-kit/pulse/index.ts. Do not edit here. VERSION 425e7a4 2026-11-25T19:59:05Z
+// Synced from app-platform/server-kit/pulse/index.ts. Do not edit here. VERSION 0d61898 2026-11-26T14:00:10Z
 /**
  * Pulse: anonymous, cookie-free usage counts for every app and the website.
  *
@@ -65,6 +65,8 @@ export function refBucket(host: string | undefined | null, ownHost?: string): st
   if (!h) return "direct";
   if (ownHost && h === ownHost.toLowerCase()) return "direct";
   if (h === "android-app") return "app";
+  if (h === "mg-share") return "shared link";
+  if (h === "mg-qr") return "qr code";
   const table: [RegExp, string][] = [
     [/(^|\.)mohitgoenka\.com$/, "mohitgoenka.com"],
     [/(^|\.)google\./, "google"],

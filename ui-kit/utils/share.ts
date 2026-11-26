@@ -1,5 +1,8 @@
 /* generated from app-platform/ui-kit — edit there and re-sync. */
 import { showToast } from './toastBus';
+import { tagShareText, tagShareUrl } from './shareTag';
+
+export { tagShareText, tagShareUrl };
 
 export interface ShareData {
   title?: string;
@@ -49,8 +52,8 @@ export async function copyToClipboard(text: string, toastMessage: string | false
 export async function shareOrCopy(data: ShareData, opts: { copiedMessage?: string } = {}): Promise<ShareResult> {
   const payload: ShareData = {};
   if (data.title) payload.title = data.title;
-  if (data.text) payload.text = data.text;
-  if (data.url) payload.url = data.url;
+  if (data.text) payload.text = tagShareText(data.text);
+  if (data.url) payload.url = tagShareUrl(data.url);
   try {
     if (typeof navigator !== 'undefined' && typeof navigator.share === 'function' && (!navigator.canShare || navigator.canShare(payload))) {
       await navigator.share(payload);
@@ -60,7 +63,7 @@ export async function shareOrCopy(data: ShareData, opts: { copiedMessage?: strin
     if (e instanceof DOMException && e.name === 'AbortError') return 'cancelled';
     /* otherwise fall back to copy */
   }
-  const text = data.url ?? [data.text, data.title].filter(Boolean).join(' ');
+  const text = payload.url ?? [payload.text, data.title].filter(Boolean).join(' ');
   if (!text) return 'failed';
   const ok = await copyToClipboard(text, opts.copiedMessage ?? (data.url ? 'Link copied' : 'Copied to clipboard'));
   return ok ? 'copied' : 'failed';

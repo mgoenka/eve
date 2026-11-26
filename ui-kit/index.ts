@@ -92,7 +92,7 @@ export type { MgSettings } from './utils/settingsStore';
 export { showToast, dismissToast } from './utils/toastBus';
 export type { ToastOptions, ToastTone } from './utils/toastBus';
 export { haptic, haptics } from './utils/haptics';
-export { shareOrCopy, copyToClipboard } from './utils/share';
+export { shareOrCopy, copyToClipboard, tagShareUrl, tagShareText } from './utils/share';
 export type { ShareData, ShareResult } from './utils/share';
 export type { ScoreCardData, ScoreCardPlayer, ScoreCardStat, ScoreCardFormat } from './utils/scoreCard';
 export { adaptiveSkill, aiSucceeds, skillToError, skillToDelay, createSkillTracker } from './utils/adaptiveAi';

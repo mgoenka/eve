@@ -65,8 +65,12 @@
     return 'desktop';
   };
   var tz = function () { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined; } catch (e) { return undefined; } };
+  // Read ?s=share / ?s=qr now: apps may tidy their address bar before the open beacon goes out.
+  var via = '';
+  try { via = new URLSearchParams(location.search).get('s') || ''; } catch (e) {}
   var refHost = function () {
     var r = document.referrer || '';
+    if (via === 'share' || via === 'qr') return 'mg-' + via;
     if (/^android-app:/i.test(r)) return 'android-app';
     try { return r ? new URL(r).hostname : ''; } catch (e) { return ''; }
   };

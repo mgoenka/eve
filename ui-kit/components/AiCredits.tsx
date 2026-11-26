@@ -328,7 +328,25 @@ export function AiCreditsHost() {
  *   const APP_RULES = [...rules, ...aiCreditsRuleSections()];
  */
 export function aiCreditsRuleSections(): RuleSection[] {
-  if (!isNativeApp()) return [];
+  if (!isNativeApp()) {
+    // Website: only on pages that meter AI (the web switch on). One wallet per browser, shared by every app.
+    const st = getCreditsState();
+    if (!creditsEnabled() || (st.loaded && !st.enabled)) return [];
+    return [
+      {
+        title: 'Sparks',
+        icon: '✨',
+        items: [
+          `The magic features (freshly made rounds, custom themes and more) use Sparks ✨. New visitors get ${AI_STARTER_CREDITS} free Sparks to start (while the free daily allowance lasts); your balance is the ✨ chip at the top.`,
+          'Each one uses a few Sparks, based on what it really costs to make, and the chip shows what was used. Repeats are free, and everything else is always free.',
+          'Tap the chip to get more; payment is handled securely by Stripe. Your Sparks work in every one of these apps in this browser.',
+          'Using another device? Tap the chip, then link your browsers with a one-time code to share one balance.',
+          'Have a promo code? Tap the chip, then “Have a promo code?”.',
+          'Sparks are kept in this browser: clearing its site data for mohitgoenka.com, or 400 days without use, removes them.',
+        ],
+      },
+    ];
+  }
   const packs = AI_CREDIT_PACKS.map((p) => `${fmt(p.credits)} Sparks for $${p.priceUsd.toFixed(2)}`).join(', ');
   return [
     {

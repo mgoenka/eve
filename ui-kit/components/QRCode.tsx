@@ -1,6 +1,7 @@
 /* generated from app-platform/ui-kit — edit there and re-sync. */
 import { useMemo } from 'react';
 import { encode } from '../vendor/uqr.js';
+import { tagShareUrl } from '../utils/share';
 
 export interface QRCodeProps {
   /** The text/URL to encode. Encoded locally — nothing is sent anywhere. */
@@ -26,7 +27,7 @@ export interface QRCodeProps {
  */
 export function QRCode({ value, size = 200, ecc = 'M', margin = 2, color = '#0a0a0b', background = '#ffffff', label = 'QR code', className }: QRCodeProps) {
   const { path, n } = useMemo(() => {
-    const qr = encode(value, { ecc, border: margin });
+    const qr = encode(tagShareUrl(value, 'qr'), { ecc, border: margin });
     let d = '';
     qr.data.forEach((row, y) => {
       let x = 0;

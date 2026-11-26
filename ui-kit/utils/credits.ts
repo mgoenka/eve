@@ -22,6 +22,7 @@ export const AI_CREDIT_PACKS: ReadonlyArray<{ id: string; credits: number; price
 export const AI_STARTER_CREDITS = 100;
 export const CREDITS_BALANCE_URL = '/api/credits/balance';
 export const BALANCE_HEADER = 'X-MG-Credits-Balance';
+export const CHARGED_HEADER = 'X-MG-Credits-Charged';
 /** JSON `error` code of the server's HTTP 402. */
 export const INSUFFICIENT_CREDITS = 'insufficient_credits';
 
@@ -352,7 +353,12 @@ export async function aiFetchJson<T = unknown>(url: string, options: AiFetchJson
       headers,
       onResponse: (res) => {
         retryHeader = res.headers.get('Retry-After');
-        if (metered) readBalanceHeader(res);
+        if (metered) {
+          readBalanceHeader(res);
+          // Say what an action cost, so Sparks never feel like a black box (background calls stay quiet).
+          const used = Number(res.headers.get(CHARGED_HEADER));
+          if (ai === 'action' && used > 0 && !state.owner) showToast({ id: 'mg-sparks-used', tone: 'info', message: `✨ ${used} Sparks used`, duration: 2500 });
+        }
         userHook?.(res);
       },
     });
