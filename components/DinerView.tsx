@@ -73,7 +73,7 @@ import { eveningIcs } from '../lib/ics';
 import { StopCard } from './StopCard';
 import { EveLogo } from './EveLogo';
 import { useOpenRules, useOpenSettings } from './RulesContext';
-import { AppFooter, AppHeader, COPYRIGHT, CreditsChip, IconButton, MoreApps, PRIVACY_URL, ReportContentButton, TERMS_URL, isNativeApp, shareOrCopy, speculativeAiAllowed, useToast } from '../ui-kit';
+import { AppFooter, AppHeader, COPYRIGHT, CreditsChip, IconButton, MoreApps, PRIVACY_URL, ReportContentButton, TERMS_URL, isNativeApp, shareOrCopy, speculativeAiAllowed, trackPulse, useToast } from '../ui-kit';
 
 interface Props {
   onSwitchToRestaurant: () => void;
@@ -1090,6 +1090,7 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
       }));
       setStops(initialStops);
       setPhase('ready');
+      trackPulse('use');
 
       // Story (parallel with images)
       loadStory({
@@ -1786,6 +1787,7 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
           };
         });
         setStops(newStops);
+        trackPulse('use');
         // The old narration and send-off describe the old evening: drop them until the new ones arrive.
         setNarrationAudio(null);
         setNarrationText('');
