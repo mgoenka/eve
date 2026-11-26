@@ -1,4 +1,4 @@
-// Synced from app-platform/server-kit/seo/index.ts. Do not edit here. VERSION 89b3aca 2026-11-26T20:06:18Z
+// Synced from app-platform/server-kit/seo/index.ts. Do not edit here. VERSION a12e840 2026-11-26T20:11:30Z
 // Link previews and crawl hygiene for the apps' Express servers (no dependencies).
 //   import { withPreview, isAssetMiss, safeRoomMap } from "./server/seo/index.ts";
 // - withPreview(html, { title, description, image, url }): the app's index.html with its <title>, meta

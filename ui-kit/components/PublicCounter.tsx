@@ -39,11 +39,21 @@ export function PublicCounter({ kind = 'game', className }: PublicCounterProps) 
   }, []);
   if (!t) return null;
   const fmt = (n: number) => n.toLocaleString();
-  const parts: string[] = [];
-  if (kind === 'game' && t.games) parts.push(`${fmt(t.games)} games played`);
-  if (t.playersWeek) parts.push(`${fmt(t.playersWeek)} ${kind === 'game' ? 'players' : 'people'} this week`);
+  // As approved in the mockup: small muted text with the numbers in gold.
+  const parts: Array<[number, string]> = [];
+  if (kind === 'game' && t.games) parts.push([t.games, 'games played']);
+  if (t.playersWeek) parts.push([t.playersWeek, `${kind === 'game' ? 'players' : 'people'} this week`]);
   if (!parts.length) return null;
-  return <p className={cx('text-sm text-mg-muted', className)}>{parts.join(' · ')}</p>;
+  return (
+    <p className={cx('text-xs text-mg-muted', className)}>
+      {parts.map(([n, label], i) => (
+        <span key={label}>
+          {i > 0 ? <span aria-hidden="true"> · </span> : null}
+          <span className="font-semibold tabular-nums text-mg-gold">{fmt(n)}</span> {label}
+        </span>
+      ))}
+    </p>
+  );
 }
 
 export default PublicCounter;
