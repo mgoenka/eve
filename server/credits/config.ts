@@ -5,10 +5,11 @@
 export const CREDIT_USD = 0.001;
 
 /**
- * Google Play's service fee on the packs. 0.30 until Mohit confirms the 15% program
- * (Play Console > Setup > "15% service fee" enrolment), then set 0.15.
+ * Google Play's fee on the packs: US first $1M a year = 10% service fee + 5% Play Billing fee (new fee model since
+ * 2026-06-30; the account group is set up in Play Console > Associated developer accounts, checked 2026-11-26).
+ * Worst-case checks (tests) still use 0.30.
  */
-export const GOOGLE_FEE = 0.3;
+export const GOOGLE_FEE = 0.15;
 
 /**
  * Pricing target the round packs were chosen against: revenue after fees ÷ the AI cost the Sparks can buy.
@@ -82,7 +83,53 @@ export const PACKS = [
   { id: 'ai_credits_1999', priceUsd: 19.99, credits: 10000 },
 ] as const;
 
-export type PackId = (typeof PACKS)[number]['id'];
+export type PackId = (typeof PACKS)[number]['id'] | typeof CUSTOM_PACK_ID;
+
+/**
+ * Website only: buyers pick their own amount ("Choose your amount"). Play can only sell products created in
+ * advance, so the Android apps keep the fixed packs. The price follows one curve through the fixed packs (so a
+ * custom 2,000 costs exactly the $4.99 pack), more Sparks per dollar as amounts grow, with a small-amount anchor
+ * that still clears Stripe's $0.30 fixed fee and its $0.50 minimum charge.
+ */
+export const CUSTOM_PACK_ID = 'sparks_custom';
+export const CUSTOM_MIN_CREDITS = 100;
+export const CUSTOM_MAX_CREDITS = 50_000;
+/** [Sparks, US$] anchors; prices between anchors are linear, rounded up to the cent. */
+export const CUSTOM_CURVE: ReadonlyArray<readonly [number, number]> = [
+  [100, 0.59],
+  [300, 0.99],
+  [2000, 4.99],
+  [10_000, 19.99],
+  [50_000, 89.99],
+];
+
+/** Price (US$) for a custom amount, or null outside CUSTOM_MIN_CREDITS..CUSTOM_MAX_CREDITS / not an integer. */
+export function customPriceUsd(credits: number): number | null {
+  if (!Number.isInteger(credits) || credits < CUSTOM_MIN_CREDITS || credits > CUSTOM_MAX_CREDITS) return null;
+  for (let i = 1; i < CUSTOM_CURVE.length; i++) {
+    const [c0, p0] = CUSTOM_CURVE[i - 1]!;
+    const [c1, p1] = CUSTOM_CURVE[i]!;
+    // Rounded up to the cent, so every extra Spark costs something and the anchors stay exact.
+    if (credits <= c1) return Math.ceil(Math.round((p0 + ((credits - c0) / (c1 - c0)) * (p1 - p0)) * 1e6) / 1e4) / 100;
+  }
+  return null;
+}
+
+/** Most Sparks a budget buys on the custom curve (null below the smallest custom price). */
+export function customCreditsForUsd(usd: number): number | null {
+  if (!Number.isFinite(usd)) return null;
+  const minP = customPriceUsd(CUSTOM_MIN_CREDITS)!;
+  if (usd < minP) return null;
+  if (usd >= customPriceUsd(CUSTOM_MAX_CREDITS)!) return CUSTOM_MAX_CREDITS;
+  let lo = CUSTOM_MIN_CREDITS;
+  let hi = CUSTOM_MAX_CREDITS;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (customPriceUsd(mid)! <= usd + 1e-9) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
+}
 
 const micros = (usd: number) => Math.round(usd * 1_000_000);
 
@@ -121,6 +168,13 @@ export function packsFor(provider: PaymentProvider): PackInfo[] {
 
 /** Play packs (what the Android apps sell). */
 export const PACK_INFO: readonly PackInfo[] = packsFor('play');
+
+/** A custom-amount web pack (Stripe only), or undefined when the amount is out of range. */
+export function customPack(credits: unknown): PackInfo | undefined {
+  const n = typeof credits === 'string' && /^\d{1,7}$/.test(credits) ? Number(credits) : credits;
+  const price = typeof n === 'number' ? customPriceUsd(n) : null;
+  return price === null ? undefined : { id: CUSTOM_PACK_ID, priceUsd: price, credits: n as number, provider: 'stripe' };
+}
 
 export function packById(id: unknown, provider: PaymentProvider = 'play'): PackInfo | undefined {
   return typeof id === 'string' ? packsFor(provider).find((p) => p.id === id) : undefined;

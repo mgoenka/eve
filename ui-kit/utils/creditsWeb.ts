@@ -94,11 +94,11 @@ export const webCreditsProvider: CreditsProvider = {
     return { ok: s.checkout !== false && Object.keys(prices).length > 0, prices };
   },
 
-  async purchase(packId) {
+  async purchase(packId, credits) {
     try {
       const r = await fetchJson<{ url?: string }>(CREDITS_CHECKOUT_URL, {
         method: 'POST',
-        body: { packId, returnUrl: cleanUrl().toString() },
+        body: { packId, ...(typeof credits === 'number' ? { credits } : {}), returnUrl: cleanUrl().toString() },
         timeoutMs: 20000,
         retries: 0,
       });

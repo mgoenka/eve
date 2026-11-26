@@ -16,8 +16,10 @@ import {
   loadPrices,
   openCreditsSheet,
   subscribeCredits,
+  customAmountPrice,
+  customAmountForBudget,
 } from '../utils/credits';
-import type { CreditsState } from '../utils/credits';
+import type { CreditsState, CustomAmount } from '../utils/credits';
 import { isNativeApp } from '../utils/native';
 import { PRIVACY_URL, TERMS_URL } from '../utils/constants';
 import { Button } from './Button';
@@ -106,6 +108,84 @@ function OwnerCodeForm() {
       <Button size="sm" type="submit" loading={busy} loadingText="Checking" disabled={!code.trim()}>
         Apply
       </Button>
+    </form>
+  );
+}
+
+/** Website only: any amount of Sparks, priced on the same curve as the packs (type Sparks or a budget in $). */
+function CustomAmountForm({ custom, disabled, busy }: { custom: CustomAmount; disabled: boolean; busy: boolean }) {
+  const [sparks, setSparks] = useState('');
+  const [usd, setUsd] = useState('');
+  const n = Number(sparks);
+  const price = sparks ? customAmountPrice(custom, n) : null;
+  const field =
+    'h-9 min-w-0 rounded-mg-sm border border-mg-border bg-mg-bg px-3 text-sm tabular-nums text-mg-text placeholder:text-mg-subtle focus:border-mg-gold focus:outline-none';
+  return (
+    <form
+      className="mt-2 rounded-mg border border-mg-border bg-mg-surface px-4 py-3"
+      aria-label="Choose your amount"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (price === null || disabled || busy) return;
+        void buyCredits(custom.id, n);
+      }}
+    >
+      <div className="text-base font-semibold text-mg-text">Choose your amount</div>
+      <div className="mt-2 flex items-center gap-2">
+        <input
+          inputMode="numeric"
+          autoComplete="off"
+          aria-label="Sparks"
+          placeholder="Sparks"
+          value={sparks}
+          onChange={(e) => {
+            const v = e.target.value.replace(/[^0-9]/g, '').slice(0, 6);
+            setSparks(v);
+            const p = v ? customAmountPrice(custom, Number(v)) : null;
+            setUsd(p === null ? '' : p.toFixed(2));
+          }}
+          className={cx(field, 'w-0 flex-[3]')}
+        />
+        <span aria-hidden="true" className="text-sm text-mg-subtle">
+          =
+        </span>
+        <span className="relative flex w-0 flex-[2] items-center">
+          <span aria-hidden="true" className="pointer-events-none absolute left-2.5 text-sm text-mg-subtle">
+            $
+          </span>
+          <input
+            inputMode="decimal"
+            autoComplete="off"
+            aria-label="Price in US dollars"
+            placeholder="0.00"
+            value={usd}
+            onChange={(e) => {
+              const raw = e.target.value.replace(/[^0-9.]/g, '');
+              const dot = raw.indexOf('.');
+              const v = (dot < 0 ? raw : raw.slice(0, dot + 1) + raw.slice(dot + 1).replace(/\./g, '').slice(0, 2)).slice(0, 8);
+              setUsd(v);
+              const c = v ? customAmountForBudget(custom, Number(v)) : null;
+              setSparks(c === null ? '' : String(c));
+            }}
+            className={cx(field, 'w-full pl-6')}
+          />
+        </span>
+        <Button
+          size="sm"
+          type="submit"
+          disabled={disabled || price === null}
+          loading={busy}
+          loadingText="Opening checkout"
+          aria-label={price === null ? 'Buy' : `Buy ${fmt(n)} Sparks for $${price.toFixed(2)}`}
+        >
+          Buy
+        </Button>
+      </div>
+      <p className="mt-1.5 text-xs text-mg-subtle" aria-live="polite">
+        {price === null
+          ? `Any amount from ${fmt(custom.min)} to ${fmt(custom.max)} Sparks, or type what you want to spend.`
+          : `${fmt(n)} Sparks for $${price.toFixed(2)}. Bigger amounts get more Sparks per dollar.`}
+      </p>
     </form>
   );
 }
@@ -264,6 +344,9 @@ export function CreditsSheet() {
           );
         })}
       </ul>
+      {!viaPlay && !s.owner && s.custom ? (
+        <CustomAmountForm custom={s.custom} disabled={unavailable || (s.buying !== null && s.buying !== s.custom.id)} busy={s.buying === s.custom.id} />
+      ) : null}
       {viaPlay || s.owner ? null : <p className="mt-2 text-xs text-mg-subtle">Taxes (like VAT) are added at checkout and shown before you pay.</p>}
 
       {unavailable && !s.owner ? (

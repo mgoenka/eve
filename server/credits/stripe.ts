@@ -11,7 +11,7 @@
 // Prices are created once per pack by lookup key (stripeLookupKey) with the AIaaS tax code and
 // tax_behavior "exclusive": the buyer pays tax on top of the US list price.
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { STRIPE_API_VERSION, STRIPE_SECRETS, STRIPE_TAX_CODE, TERMS_URL, stripeLookupKey } from './config.ts';
+import { CUSTOM_PACK_ID, STRIPE_API_VERSION, STRIPE_SECRETS, STRIPE_TAX_CODE, TERMS_URL, stripeLookupKey } from './config.ts';
 import type { PackInfo } from './config.ts';
 
 export interface StripeCheckoutSession {
@@ -25,6 +25,8 @@ export interface StripeCheckoutSession {
   payment_intent?: string | null;
   metadata?: Record<string, string> | null;
   amount_total?: number | null;
+  /** Before tax (Managed Payments adds tax on top). */
+  amount_subtotal?: number | null;
   currency?: string | null;
   livemode?: boolean;
 }
@@ -260,7 +262,8 @@ export class StripeRestApi implements StripeApi {
   }
 
   async createCheckoutSession(input: CheckoutInput): Promise<{ id: string; url: string }> {
-    const price = await this.ensurePrice(input.pack);
+    // Fixed packs use their saved Price; a custom amount is priced inline (its product is made per checkout).
+    const price = input.pack.id === CUSTOM_PACK_ID ? customPriceData(input.pack) : await this.ensurePrice(input.pack);
     const params = checkoutSessionParams(input, price);
     const { consent_collection: _c, custom_text: _t, ...withoutConsent } = params;
     let s: StripeCheckoutSession;
@@ -288,10 +291,26 @@ export class StripeRestApi implements StripeApi {
 }
 
 /** Checkout Session parameters (exported for tests): one pack, Managed Payments, Terms consent, return URLs. */
-export function checkoutSessionParams(input: CheckoutInput, price: string): Record<string, unknown> {
+/** Inline price for a custom amount: same product name, description, tax code and tax handling as the packs. */
+export function customPriceData(pack: PackInfo): Record<string, unknown> {
+  const credits = pack.credits.toLocaleString('en-US');
+  return {
+    currency: 'usd',
+    unit_amount: Math.round(pack.priceUsd * 100),
+    tax_behavior: 'exclusive',
+    product_data: {
+      name: `${credits} Sparks`,
+      description: `${credits} Sparks for the magic features in Mohit's apps and games on mohitgoenka.com, kept in this browser as long as you use them at least once every 400 days.`,
+      tax_code: STRIPE_TAX_CODE,
+      metadata: { mg_pack: pack.id, mg_credits: String(pack.credits) },
+    },
+  };
+}
+
+export function checkoutSessionParams(input: CheckoutInput, price: string | Record<string, unknown>): Record<string, unknown> {
   return {
     mode: 'payment',
-    line_items: [{ price, quantity: 1 }],
+    line_items: [typeof price === 'string' ? { price, quantity: 1 } : { price_data: price, quantity: 1 }],
     managed_payments: { enabled: true },
     consent_collection: { terms_of_service: 'required' },
     custom_text: { terms_of_service_acceptance: { message: `I agree to the [Terms](${TERMS_URL}).` } },
@@ -328,6 +347,7 @@ export class FakeStripeApi implements StripeApi {
       payment_status: 'unpaid',
       payment_intent: null,
       metadata: { mg_wallet: input.walletId, mg_pack: input.pack.id, mg_credits: String(input.pack.credits), mg_app: input.app },
+      amount_subtotal: Math.round(input.pack.priceUsd * 100),
       livemode: false,
     });
     return { id, url };

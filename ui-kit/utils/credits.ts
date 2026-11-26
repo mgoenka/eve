@@ -48,7 +48,8 @@ export interface CreditsProvider {
   /** Localized prices by pack id. ok:false = purchases unavailable here right now. */
   loadPrices(packIds: string[]): Promise<{ ok: boolean; prices: Record<string, string> }>;
   /** Start buying a pack. The outcome comes back through the events given to start(). */
-  purchase(packId: string): Promise<void>;
+  /** credits: a custom amount (website only, packId = the custom id). */
+  purchase(packId: string, credits?: number): Promise<void>;
   /** Called once: listen for purchases and recover unfinished ones. */
   start(events: CreditsProviderEvents): void;
   /** The sheet opened: re-check unfinished purchases. */
@@ -117,6 +118,42 @@ export interface CreditsState {
   starterPaused: boolean;
   /** This network (IP address) already used its free starter Sparks. */
   starterLimited: boolean;
+  /** Website: buyers can pick their own amount, priced on this curve ([Sparks, US$] anchors). */
+  custom: CustomAmount | null;
+}
+
+export interface CustomAmount {
+  id: string;
+  min: number;
+  max: number;
+  curve: ReadonlyArray<readonly [number, number]>;
+}
+
+/** Price for a custom amount on the server's curve (same math as server-kit customPriceUsd), or null. */
+export function customAmountPrice(c: CustomAmount, credits: number): number | null {
+  if (!Number.isInteger(credits) || credits < c.min || credits > c.max) return null;
+  for (let i = 1; i < c.curve.length; i++) {
+    const [c0, p0] = c.curve[i - 1]!;
+    const [c1, p1] = c.curve[i]!;
+    if (credits <= c1) return Math.ceil(Math.round((p0 + ((credits - c0) / (c1 - c0)) * (p1 - p0)) * 1e6) / 1e4) / 100;
+  }
+  return null;
+}
+
+/** Most Sparks a budget buys on the curve, or null below the smallest price. */
+export function customAmountForBudget(c: CustomAmount, usd: number): number | null {
+  const minP = customAmountPrice(c, c.min);
+  const maxP = customAmountPrice(c, c.max);
+  if (!Number.isFinite(usd) || minP === null || maxP === null || usd < minP) return null;
+  if (usd >= maxP) return c.max;
+  let lo = c.min;
+  let hi = c.max;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if ((customAmountPrice(c, mid) ?? Infinity) <= usd + 1e-9) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
 }
 
 let state: CreditsState = {
@@ -138,6 +175,7 @@ let state: CreditsState = {
   starterPending: false,
   starterPaused: false,
   starterLimited: false,
+  custom: null,
 };
 const listeners = new Set<() => void>();
 function setState(patch: Partial<CreditsState>) {
@@ -180,6 +218,7 @@ async function loadBalance(): Promise<void> {
       starterPending?: boolean;
       starterPaused?: boolean;
       starterLimited?: boolean;
+      custom?: CustomAmount;
     }>(CREDITS_BALANCE_URL, {
       headers: creditsHeaders(),
       timeoutMs: 10000,
@@ -198,6 +237,8 @@ async function loadBalance(): Promise<void> {
         starterPending: r.starterPending === true,
         starterPaused: r.starterPaused === true,
         starterLimited: r.starterLimited === true,
+        custom:
+          r.custom && Number.isInteger(r.custom.min) && Number.isInteger(r.custom.max) && Array.isArray(r.custom.curve) && r.custom.curve.length >= 2 ? r.custom : null,
       });
     } else if (r && r.enforced === false) {
       setState({ loaded: true, ...(state.enabled ? { enabled: false, sheetOpen: false } : {}) }); // web switch off
@@ -490,14 +531,14 @@ export async function linkThisDevice(code: string): Promise<boolean> {
 }
 
 /** Buy a pack with the active provider. */
-export async function buyCredits(packId: string): Promise<void> {
+export async function buyCredits(packId: string, credits?: number): Promise<void> {
   const provider = activeCreditsProvider();
   if (!provider) {
     showToast({ tone: 'error', message: 'Purchases are unavailable on this device right now.' });
     return;
   }
   setState({ buying: packId });
-  await provider.purchase(packId);
+  await provider.purchase(packId, credits);
 }
 
 let started = false;

@@ -35,6 +35,11 @@ import {
   normalizeLinkCode,
   packById,
   packsFor,
+  customPack,
+  CUSTOM_PACK_ID,
+  CUSTOM_MIN_CREDITS,
+  CUSTOM_MAX_CREDITS,
+  CUSTOM_CURVE,
 } from './config.ts';
 import type { PaymentProvider } from './config.ts';
 import { costOfCall, usageOf } from './pricing.ts';
@@ -632,6 +637,8 @@ export function createCredits(options: CreditsOptions) {
         .configured()
         .catch(() => false);
       body.taxNote = 'Taxes (like VAT) are added at checkout and shown before you pay.';
+      // "Choose your amount": any whole number of Sparks in range, priced on one curve through the fixed packs.
+      body.custom = { id: CUSTOM_PACK_ID, min: CUSTOM_MIN_CREDITS, max: CUSTOM_MAX_CREDITS, curve: CUSTOM_CURVE };
     }
     return body as { enforced: true; balance: number; available: number } & Record<string, unknown>;
   }
@@ -643,7 +650,8 @@ export function createCredits(options: CreditsOptions) {
    * Provider-agnostic: call it from the Play adapter (verifyPlay) or a Stripe webhook.
    */
   async function creditPurchase(p: CreditPurchaseInput) {
-    const pack = packById(p.packId, p.provider);
+    // Custom web amounts (Stripe only) carry their Sparks in p.credits, checked against the curve.
+    const pack = p.packId === CUSTOM_PACK_ID && p.provider === 'stripe' ? customPack(p.credits) : packById(p.packId, p.provider);
     if (!pack) throw new Error('creditPurchase: unknown pack ' + String(p.packId));
     const credits = p.credits ?? pack.credits;
     if (!Number.isInteger(credits) || credits <= 0) throw new Error('creditPurchase: invalid credits');
@@ -835,8 +843,13 @@ export function createCredits(options: CreditsOptions) {
   async function fulfillSession(s: StripeCheckoutSession): Promise<{ status: number; body: Record<string, unknown>; account?: string }> {
     const md = s.metadata ?? {};
     const walletId = typeof md.mg_wallet === 'string' ? md.mg_wallet : '';
-    const pack = packById(md.mg_pack, 'stripe');
+    const pack = md.mg_pack === CUSTOM_PACK_ID ? customPack(md.mg_credits) : packById(md.mg_pack, 'stripe');
     if ((s.mode && s.mode !== 'payment') || !WEB_WALLET_RE.test(walletId) || !pack) return { status: 400, body: { error: 'invalid_session' } };
+    // Custom amounts: the price paid (before tax) must match the curve for the Sparks promised.
+    if (pack.id === CUSTOM_PACK_ID && typeof s.amount_subtotal === 'number' && s.amount_subtotal !== Math.round(pack.priceUsd * 100)) {
+      console.error(`[credits] ${app}: custom session ${mask(s.id)} paid ${s.amount_subtotal}¢ for ${pack.credits} Sparks (curve ${Math.round(pack.priceUsd * 100)}¢)`);
+      return { status: 400, body: { error: 'invalid_session' } };
+    }
     if (s.payment_status !== 'paid') return { status: 202, body: { error: 'payment_pending' } };
     const promised = typeof md.mg_credits === 'string' && /^\d{1,7}$/.test(md.mg_credits) ? Number(md.mg_credits) : pack.credits;
     const pi = typeof s.payment_intent === 'string' ? s.payment_intent : null;
@@ -1123,8 +1136,8 @@ export function createCredits(options: CreditsOptions) {
         const w2 = checkoutWalletLimit.hit(wallet.id);
         if (w2) return limited(res, w2);
         await prepareWallet(wallet); // the buyer's address: starter credits before the first purchase
-        const b = (req.body ?? {}) as { packId?: unknown; returnUrl?: unknown };
-        const pack = packById(b.packId, 'stripe');
+        const b = (req.body ?? {}) as { packId?: unknown; credits?: unknown; returnUrl?: unknown };
+        const pack = b.packId === CUSTOM_PACK_ID ? customPack(b.credits) : packById(b.packId, 'stripe');
         const returnUrl = safeReturnUrl(b.returnUrl);
         if (!pack || !returnUrl) {
           res.status(400).json({ error: 'invalid' });
@@ -1135,7 +1148,7 @@ export function createCredits(options: CreditsOptions) {
           return;
         }
         const s = await stripe().createCheckoutSession({ pack, walletId: wallet.id, app, returnUrl });
-        console.log(`[credits] ${app}: checkout ${pack.id} for ${mask(wallet.id)}`);
+        console.log(`[credits] ${app}: checkout ${pack.id}${pack.id === CUSTOM_PACK_ID ? ' ' + pack.credits : ''} for ${mask(wallet.id)}`);
         res.status(200).json({ url: s.url });
       } catch (err) {
         if (sendError(res, err)) return;
