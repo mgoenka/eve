@@ -1,4 +1,4 @@
-// Synced from app-platform/server-kit/seo/index.ts. Do not edit here. VERSION 57f4ce4 2026-11-26T04:35:01Z
+// Synced from app-platform/server-kit/seo/index.ts. Do not edit here. VERSION 83a45d9-dirty 2026-11-26T20:02:53Z
 // Link previews and crawl hygiene for the apps' Express servers (no dependencies).
 //   import { withPreview, isAssetMiss, safeRoomMap } from "./server/seo/index.ts";
 // - withPreview(html, { title, description, image, url }): the app's index.html with its <title>, meta
@@ -84,4 +84,20 @@ export function queryString(q: unknown): string {
   if (typeof q === "string") return q;
   if (Array.isArray(q) && typeof q[0] === "string") return q[0];
   return "";
+}
+
+/**
+ * Express handler for /.well-known/assetlinks.json (Android App Links): lets the Play app (signed with these
+ * certificate SHA-256 fingerprints, from Play's app-signing key) open https links to this site.
+ *   app.get("/.well-known/assetlinks.json", assetLinks("com.mohitgoenka.covert", ["AB:CD:…"]));
+ */
+export function assetLinks(packageName: string, sha256: string[]) {
+  const body = JSON.stringify([
+    { relation: ["delegate_permission/common.handle_all_urls"], target: { namespace: "android_app", package_name: packageName, sha256_cert_fingerprints: sha256 } },
+  ]);
+  return (_req: unknown, res: { setHeader(k: string, v: string): unknown; end(b: string): unknown }) => {
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.end(body);
+  };
 }

@@ -40,7 +40,7 @@ import { normalizeArrivals } from './server/planTimes.ts';
 import { ttsFixture } from './server/ai-fixtures.ts';
 import { keepPlanShape, refinePrompt } from './server/refine.ts';
 import fs from 'fs';
-import { withPreview, isAssetMiss, queryString, escapeHtml } from './server/seo/index.ts';
+import { withPreview, isAssetMiss, queryString, escapeHtml, assetLinks } from './server/seo/index.ts';
 import { CITIES, findCity } from './data/cities';
 import { SPECIAL_CAPTION_MAX, SPECIAL_NAME_MAX, brandIdFor, cleanSpecialText, saveSpecial, specialsPromptBlock } from './server/specials.ts';
 
@@ -53,6 +53,10 @@ const TEXT_MODEL = 'gemini-3.8-flash'; // pinned: gemini-flash-latest moves to n
 const IMAGE_MODEL = 'gemini-2.5-flash-image';
 
 const app = express();
+
+// Android App Links: the Play app (signed by Play's app-signing key) opens https links to this site.
+
+app.get("/.well-known/assetlinks.json", assetLinks("com.mohitgoenka.eve", ["E9:C9:4B:3E:EA:BD:CE:39:6D:E9:E3:CC:4B:4A:4D:D4:36:92:9B:E7:1D:40:11:CD:3B:5A:27:8F:36:93:FF:E4"]));
 // Smoke tests and headless browsers get free AI fixtures (never Gemini). Off Cloud Run every AI call does.
 app.use(aiTestModeMiddleware);
 app.disable('x-powered-by');
