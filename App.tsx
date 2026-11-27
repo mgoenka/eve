@@ -42,8 +42,8 @@ const APP_RULES: RuleSection[] = [
     icon: '✨',
     items: [
       'Each stop shows its arrival time, what to order or do, walking time, a map link and reservation links where the venue takes bookings. Arrival times add up: each stop starts when the one before ends plus the walk.',
-      'Eve paints the first stop’s scene on her own. Tap Show picture on any other card to paint that one.',
-      'With her voice on, Eve walks you through the evening stop by stop, every stop of it. You can stop the walkthrough, or play her narration.',
+      'Tap Show picture on a card to paint its scene. When pictures cost you nothing, Eve paints the first stop’s scene on her own.',
+      'With her voice on, Eve writes a short story around the stops and walks you through the evening stop by stop, every stop of it (turn her voice on later and she writes it then). You can stop the walkthrough, or play her narration when she has recorded one.',
       'Ask for changes in the chat ("swap dessert for live music") or tap a tweak chip: More upscale, More casual, Earlier, Vegan only or Cheaper.',
       'A tweak chip adjusts the evening you have, it never starts over: the same number of stops in the same order, in the same area and vibe. Eve keeps the stops that already fit and swaps the rest for nearby places of the same kind. Earlier moves the whole evening an hour earlier and keeps the places (the start time on the form moves too). Cheaper also halves the budget per person on the form, and Vegan only adds vegan to the dietary needs.',
       'After any change, stops Eve kept keep their pictures, and her story and narration are rewritten for the new evening.',

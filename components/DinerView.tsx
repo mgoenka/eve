@@ -65,7 +65,7 @@ import type { SavedEvening } from '../services/savedEvenings';
 import { BackupButton, BackupModal, useBackupEntry } from '../ui-kit/components/BackupModal';
 import { backup } from '../lib/backup';
 import { clearSnapshot, useSnapshot } from '../services/persist';
-import { DINER_SNAPSHOT_KEY, DINER_SNAPSHOT_V, readDinerSnapshot } from '../services/dinerSnapshot';
+import { DINER_SNAPSHOT_KEY, DINER_SNAPSHOT_V, readDinerSnapshot, sanitizePlanLink } from '../services/dinerSnapshot';
 import type { DinerSnapshot } from '../services/dinerSnapshot';
 import { getPicture, pictureKey, putPicture } from '../services/stopPictures';
 import { isEcho } from '../lib/evePrompts';
@@ -145,7 +145,7 @@ function readURLParams() {
     if (!sp.has('plan')) return null;
     const json = sp.get('plan');
     if (!json) return null;
-    return JSON.parse(decodeURIComponent(atob(json)));
+    return sanitizePlanLink(JSON.parse(decodeURIComponent(atob(json))));
   } catch {
     return null;
   }
@@ -263,11 +263,11 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
   const toast = useToast();
   // What was on screen before a reload / relaunch (form + finished evening), restored without asking Eve
   // again. A shared evening (?e=) or a different ?plan= link than the one saved wins over it.
+  // Reloading the shared link itself (same address) keeps what was changed on it here.
   const [restored] = useState<DinerSnapshot | null>(() => {
-    if (readSharedEvening()) return null;
     const snap = readDinerSnapshot();
     if (!snap) return null;
-    if (readURLParams() && window.location.search !== snap.search) return null;
+    if ((readSharedEvening() || readURLParams()) && window.location.search !== snap.search) return null;
     return snap;
   });
   const restoredEvening = restored?.evening || null;
@@ -305,9 +305,22 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
   // While Eve writes the story, a placeholder holds its place above the stops
   // (so the cards don't jump down when the text lands).
   const [storyPending, setStoryPending] = useState(false);
+  // Only the newest story request lands: a story for an evening that was since changed (a refine, a new
+  // plan) arriving late used to replace the new evening's story.
+  const storySeqRef = useRef(0);
   const loadStory = useCallback((input: Parameters<typeof eveStory>[0]) => {
+    const seq = ++storySeqRef.current;
     setStoryPending(true);
-    return eveStory(input).finally(() => setStoryPending(false));
+    // With Eve's voice on, the story is what she walks the user through (their choice, so not gated as
+    // speculative AI); with it off it is an extra that runs only when it can't spend Sparks.
+    return eveStory(input, { userAsked: !mutedRef.current })
+      .then((st) => {
+        if (seq !== storySeqRef.current) throw new Error('stale story');
+        return st;
+      })
+      .finally(() => {
+        if (seq === storySeqRef.current) setStoryPending(false);
+      });
   }, []);
   const [narrationAudio, setNarrationAudio] = useState<string | null>(null);
   const [narrationMime, setNarrationMime] = useState<string>('audio/mpeg');
@@ -338,7 +351,7 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
   const [locating, setLocating] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
   // The plan on screen came from someone else's share link (?e=).
-  const [fromShare, setFromShare] = useState(false);
+  const [fromShare, setFromShare] = useState(() => !!restored?.evening && !!readSharedEvening());
 
   // Recent evenings (this device) + the visitor's hourly picture budget.
   const [recentEvenings, setRecentEvenings] = useState<SavedEvening[]>(() => loadEvenings());
@@ -471,6 +484,8 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
     setPhase('input');
     setStops([]);
     setStory(null);
+    storySeqRef.current++;
+    setStoryPending(false);
     setPlanTitle('');
     eveningIdRef.current = '';
     setRecentEvenings(loadEvenings());
@@ -943,11 +958,21 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
       }
       cancelRef.current = false;
       eveningIdRef.current = '';
+      // A new plan is this visitor's own: no "A friend planned this", and the address no longer carries the
+      // friend's evening (a reload comes back to this one).
+      setFromShare(false);
+      if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('e')) {
+        const u = new URL(window.location.href);
+        u.searchParams.delete('e');
+        window.history.replaceState({}, '', u.toString());
+      }
       setError(null);
       setPhase('forging');
       setPlanTitle('');
       setStops([]);
       setStory(null);
+      storySeqRef.current++; // a story still on its way for the last evening never lands on this one
+      setStoryPending(false);
       setNarrationAudio(null);
       setNarrationText('');
       setEveIntroText('');
@@ -1182,7 +1207,7 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
 
   // Opening a shared link that carries a finished plan shows it directly.
   useEffect(() => {
-    const shared = readSharedEvening();
+    const shared = restored ? null : readSharedEvening();
     if (shared) {
       restoreEvening(shared);
       setFromShare(true);
@@ -1904,6 +1929,24 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
     }, 900);
     return () => clearTimeout(t);
   }, [story, stops, muted, startWalkthrough]);
+
+  // Turning Eve's voice on over an evening that has no story yet (it was skipped while she was muted):
+  // write it now, so she can walk the user through it.
+  useEffect(() => {
+    if (muted || phaseRef.current !== 'ready' || stops.length === 0 || story || storyPending) return;
+    loadStory({
+      title: planTitle,
+      stops: stops.map((s) => ({ name: s.name, kind: s.kind, oneLineVibe: s.oneLineVibe, signatureItem: s.signatureItem })),
+      vibe,
+      city,
+      party,
+    })
+      .then((st) => {
+        if (!cancelRef.current) setStory(st);
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [muted]);
 
   const stopWalkthrough = useCallback(() => {
     walkingCancelRef.current = true;

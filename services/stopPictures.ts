@@ -82,3 +82,22 @@ export async function getPicture(key: string): Promise<{ data: string; mime: str
     return null;
   }
 }
+
+/** Deletes every picture and narration clip kept on this device ("Delete my account and data"). */
+export async function clearPictures(): Promise<void> {
+  try {
+    const db = await (dbPromise ?? Promise.resolve(null));
+    db?.close();
+    dbPromise = null;
+    if (typeof indexedDB === 'undefined') return;
+    await new Promise<void>((resolve) => {
+      const req = indexedDB.deleteDatabase(DB_NAME);
+      req.onsuccess = () => resolve();
+      req.onerror = () => resolve();
+      // Another Eve tab still has it open: it goes once that tab closes.
+      req.onblocked = () => resolve();
+    });
+  } catch {
+    /* ignore */
+  }
+}

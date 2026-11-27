@@ -289,12 +289,12 @@ export async function eveStory(input: {
   vibe: string;
   city: string;
   party: number;
-}): Promise<EveStory> {
+}, opts: { userAsked?: boolean } = {}): Promise<EveStory> {
   return runLocalFirst<EveStory>({
     // Longer evenings (4-6 stops) need room for a beat per extra stop.
     minOutputTokens: LOCAL_TOKENS.story + Math.max(0, input.stops.length - 3) * 90,
     local: () => localStory(input),
-    server: () => call('/api/eve-story', input, { timeoutMs: 45_000, ai: 'background' }),
+    server: () => call('/api/eve-story', input, { timeoutMs: 45_000, ai: 'background', userAsked: !!opts.userAsked }),
   });
 }
 

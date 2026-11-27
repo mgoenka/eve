@@ -2,7 +2,7 @@
 // discards the tab, Android kills the app, or a deploy reloads the page. Text only: pictures live in
 // stopPictures (by key) and narration audio is not kept.
 import type { DietaryPreference, EveStory, Vibe } from '@/types';
-import { VIBES } from '@/constants';
+import { DIETARY_PREFERENCES, VIBES } from '@/constants';
 import { isObj, readSnapshot } from './persist';
 import { sanitizeEvening, sanitizeStops, type SavedStop } from './savedEvenings';
 
@@ -55,6 +55,7 @@ export interface DinerSnapshot {
 }
 
 const VIBE_IDS = new Set<string>(VIBES.map((v) => v.id));
+const DIETARY_IDS = new Set<string>(DIETARY_PREFERENCES.map((d) => d.id));
 const str = (v: unknown, max: number) => (typeof v === 'string' ? v.slice(0, max) : '');
 
 function sanitizeForm(raw: unknown): DinerForm | null {
@@ -75,6 +76,28 @@ function sanitizeForm(raw: unknown): DinerForm | null {
     freeText: str(raw.freeText, 2000),
     formExpanded: raw.formExpanded !== false,
   };
+}
+
+/**
+ * The form fields a ?plan= link carries (a city page sends just the city and vibe), cleaned like a snapshot:
+ * a link is anyone's text, and a field of the wrong type used to crash the planner.
+ */
+export function sanitizePlanLink(raw: unknown): Partial<DinerForm> | null {
+  if (!isObj(raw)) return null;
+  const base = sanitizeEvening({ ...raw, stops: [{ name: 'x' }] });
+  if (!base) return null;
+  const out: Partial<DinerForm> = {};
+  if (typeof raw.city === 'string' && raw.city.trim()) out.city = str(raw.city, 120);
+  if (VIBE_IDS.has(raw.vibe as string)) out.vibe = base.vibe;
+  if (raw.party !== undefined) out.party = Math.round(base.party);
+  if (Array.isArray(raw.dietary)) out.dietary = base.dietary.filter((d) => DIETARY_IDS.has(d)) as DietaryPreference[];
+  if (raw.budgetPerPerson !== undefined) out.budgetPerPerson = Math.round(base.budgetPerPerson);
+  if (typeof raw.cuisinePref === 'string') out.cuisinePref = str(raw.cuisinePref, 80);
+  if (base.whenISO) out.whenISO = base.whenISO;
+  if (typeof raw.startTime === 'string' && /^\d{1,2}:\d{2}$/.test(raw.startTime)) out.startTime = base.startTime;
+  if (raw.durationHours !== undefined) out.durationHours = base.durationHours;
+  if (typeof raw.freeText === 'string') out.freeText = str(raw.freeText, 2000);
+  return out;
 }
 
 function sanitizeSnapshotEvening(raw: unknown, form: DinerForm): DinerEvening | null {

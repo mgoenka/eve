@@ -407,8 +407,32 @@ async function toThumbnail(img: GeneratedImage): Promise<GeneratedImage> {
   }
 }
 
+/**
+ * A content-pack picture as a JPEG (Instagram's own format) at most `px` wide: the model's ~1.5 MB PNGs
+ * become ~150-250 KB, so a 4-picture pack is ~1 MB on a phone instead of ~8 MB. Original on failure.
+ */
+async function toJpeg(img: GeneratedImage, px = 1024, quality = 86): Promise<GeneratedImage> {
+  const sharp = await loadSharp();
+  if (!sharp) return img;
+  try {
+    // Pixel cap: a special's picture comes from the visitor, so a tiny file that decodes huge is refused.
+    const out = await sharp(Buffer.from(img.imageData, 'base64'), { limitInputPixels: 40_000_000 })
+      .resize(px, px, { fit: 'inside', withoutEnlargement: true })
+      .flatten({ background: '#1a0d2e' })
+      .jpeg({ quality, mozjpeg: true })
+      .toBuffer();
+    return { imageData: out.toString('base64'), imageMime: 'image/jpeg' };
+  } catch (err: any) {
+    console.warn('jpeg conversion failed, sending the original image:', err?.message || err);
+    return img;
+  }
+}
+
+// A Firestore document holds at most 1 MiB, so a special's picture is kept well under it (base64 characters).
+const SPECIAL_IMAGE_MAX_CHARS = 700_000;
+
 // ---------- Server-side caches for identical requests ----------
-// Content-pack images are big (~1-2 MB of base64 each; stop and avatar images are ~50 KB WebP), so the image caches are bounded by
+// Content-pack images are the biggest (~200-300 KB of base64 each as JPEG; stop and avatar images are ~50 KB WebP), so the image caches are bounded by
 // bytes as well as entries to stay well inside a 512 MiB instance
 // (all caches together top out around 110 MB).
 const HOUR = 60 * 60 * 1000;
@@ -1077,7 +1101,8 @@ app.post('/api/reverse-geocode', metered('reverse-geocode', estGeocode, async (r
 
   try {
     const response = await generateText({ contents: prompt, maxOutputTokens: 256, config: { temperature: 0.2 } });
-    const place = (response.text || '').trim().replace(/^["']|["']$/g, '');
+    // One short line: the form's location field (and a week-long cache) takes nothing longer.
+    const place = str((response.text || '').trim().split('\n')[0].replace(/^["']|["']$/g, ''), 120);
     if (place) geocodeCache.set(geoKey, place);
     res.json({ city: place });
   } catch (err: any) {
@@ -1092,9 +1117,8 @@ app.get('/api/specials', async (req, res) => {
     const specials = cityFilter
       ? await firestore.listSpecialsForCity(cityFilter, 25)
       : await firestore.listSpecials(25);
-    // Pictures only on request (?images=1): the planner just matches names, and each picture is ~1 MB.
-    const withImages = req.query?.images === '1';
-    res.json({ specials: withImages ? specials : specials.map(({ imageData: _i, imageMime: _m, ...rest }) => rest) });
+    // Text only: the planner just matches names (the list read never loads pictures, see lib/firestore LIST_FIELDS).
+    res.json({ specials: specials.map(({ imageData: _i, imageMime: _m, ...rest }) => rest) });
   } catch (err: any) {
     res.json({ specials: [] });
   }
@@ -1606,7 +1630,8 @@ CRITICAL composition rules:
   let heroImageData: string | undefined;
   let heroImageMime: string | undefined;
   try {
-    const hero = await generateImage(heroImagePrompt);
+    const heroRaw = await generateImage(heroImagePrompt);
+    const hero = heroRaw ? await toJpeg(heroRaw) : null;
     if (hero) {
       heroImageData = hero.imageData;
       heroImageMime = hero.imageMime;
@@ -1621,7 +1646,7 @@ CRITICAL composition rules:
         const img = await generateImage(
           `${sharedContext}\n\nScene from a 15-second Reel: ${scene.description}.\nEditorial food/restaurant photography style. Warm dusk light.\n\nCRITICAL: Image MUST be full-bleed with NO white background, NO cream background, NO pale studio backdrop, NO white border. Fill all four edges with the scene — deep shadow, dim ambient warmth, or out-of-focus interior. NO text, NO logos. Square aspect ratio.`
         );
-        if (img) return img;
+        if (img) return await toJpeg(img);
       } catch (err: any) {
         console.warn('reel scene image failed:', err?.message || err);
       }
@@ -1791,7 +1816,7 @@ app.post('/api/post-special', async (req, res) => {
   const cuisine: string = cleanSpecialText(req.body?.cuisine, 40) || 'fusion';
   const dishName: string = cleanSpecialText(req.body?.dishName, SPECIAL_NAME_MAX);
   const caption: string = cleanSpecialText(req.body?.caption, SPECIAL_CAPTION_MAX);
-  // Only a real base64 PNG/JPEG/WebP (<= ~4.5 MB) is stored with a special.
+  // Only a real base64 PNG/JPEG/WebP (<= ~4.5 MB) is accepted with a special (stored as a smaller JPEG, below).
   const rawImage = req.body?.imageData;
   const rawMime = req.body?.imageMime;
   const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp']);
@@ -1801,8 +1826,6 @@ app.post('/api/post-special', async (req, res) => {
     /^[A-Za-z0-9+/]+={0,2}$/.test(rawImage) &&
     typeof rawMime === 'string' &&
     IMAGE_MIMES.has(rawMime);
-  const imageData: string | undefined = imageOk ? rawImage : undefined;
-  const imageMime: string | undefined = imageOk ? rawMime : undefined;
 
   if (!restaurantName || !dishName || !city) {
     return jsonError(res, 400, 'restaurantName, dishName, city required');
@@ -1823,6 +1846,12 @@ app.post('/api/post-special', async (req, res) => {
     // can be a diner's dinner anchor (see the skeleton prompt).
     const brand = await firestore.getBrand(brandIdFor(restaurantName, city)).catch(() => null);
     const verified = !!(brand?.instagramBusinessAccountId && brand.ownerKeyHash && safeEqual(brand.ownerKeyHash, ownerKeyHash));
+    // The pack's picture (a ~2 MB PNG) would not fit a Firestore document, and the special was then only kept
+    // in this instance's memory: store a 768px JPEG instead, or no picture when it still doesn't fit.
+    const picture = imageOk ? await toJpeg({ imageData: rawImage, imageMime: rawMime }, 768, 80) : null;
+    const pictureFits = !!picture && picture.imageData.length <= SPECIAL_IMAGE_MAX_CHARS;
+    const imageData = pictureFits ? picture!.imageData : undefined;
+    const imageMime = pictureFits ? picture!.imageMime : undefined;
     // Free AI test mode (smoke tests, automated browsers) never writes to the real dining index.
     const result = await saveSpecial(
       { ownerKeyHash, restaurantName, city, cuisine, dishName, caption, imageData, imageMime, verified, postedAtISO: new Date().toISOString() },
@@ -2103,6 +2132,18 @@ app.get('/api/auth/instagram/callback', async (req, res) => {
     if (!igAccount) {
       return res.redirect('/restaurant?ig=no_business_account');
     }
+    // Brand ids are public ("name-city"): a restaurant already connected from another device keeps its
+    // connection unless the same Instagram account connects again. Otherwise anyone could take over a
+    // restaurant's publishing (and its "verified" specials) by connecting their own account to its id.
+    const ownerKeyHash = sha256(ownerKeyFor(req, res));
+    const existing = await firestore.getBrand(brandId);
+    if (
+      existing?.instagramBusinessAccountId &&
+      existing.instagramBusinessAccountId !== igAccount.igBusinessAccountId &&
+      !(existing.ownerKeyHash && safeEqual(existing.ownerKeyHash, ownerKeyHash))
+    ) {
+      return res.redirect('/restaurant?ig=taken');
+    }
     // Publishing needs proof that this browser connected the account: a
     // random key in an httpOnly cookie, stored server-side only as a hash.
     const publishKey = crypto.randomBytes(24).toString('base64url');
@@ -2110,7 +2151,7 @@ app.get('/api/auth/instagram/callback', async (req, res) => {
       instagramAccessToken: igAccount.pageAccessToken,
       instagramBusinessAccountId: igAccount.igBusinessAccountId,
       instagramPublishKeyHash: sha256(publishKey),
-      ownerKeyHash: sha256(ownerKeyFor(req, res)),
+      ownerKeyHash,
     });
     res.cookie(IG_COOKIE, `${brandId}.${publishKey}`, {
       httpOnly: true,

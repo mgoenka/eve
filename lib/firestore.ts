@@ -87,10 +87,9 @@ function setMemoryBrand(id: string, b: RestaurantBrandDoc) {
   if (memoryBrands.size > MEMORY_BRANDS_MAX) memoryBrands.delete(memoryBrands.keys().next().value!);
 }
 
-// Every plan request (and /api/specials) reads the latest ~200 specials. Cache that
-// read for 60 s per instance; writes from this instance drop it at once. Other
-// instances catch up within the TTL. Concurrent misses share one Firestore read.
-// Specials carry their image, so an unusually large result isn't kept.
+// Every plan request (and /api/specials) reads the latest ~200 specials (text only, see LIST_FIELDS). Cache
+// that read for 60 s per instance; new and deleted specials from this instance drop it at once. Other
+// instances catch up within the TTL. Concurrent misses share one Firestore read. An unusually large result isn't kept.
 const SPECIALS_CACHE_LIMIT = 200;
 const SPECIALS_CACHE_TTL_MS = 60_000;
 const SPECIALS_CACHE_MAX_BYTES = 48 * 1024 * 1024;
@@ -112,10 +111,15 @@ function publicSpecial({ ownerKeyHash: _owner, ...s }: PostedSpecialDoc): Posted
   return s;
 }
 
+// What every reader of the list uses (the planner, Eve Original badges, restaurant metrics). The picture and the
+// owner key hash stay in Firestore: each picture is up to ~700 KB, and 200 of them made every list read huge.
+const LIST_FIELDS = ['restaurantName', 'city', 'cuisine', 'dishName', 'caption', 'postedAtISO', 'views', 'planInclusions', 'clickThroughs', 'verified'];
+
 async function querySpecials(d: Firestore, limit: number): Promise<PostedSpecialDoc[]> {
   const snap = await d
     .collection('specials')
     .orderBy('postedAtISO', 'desc')
+    .select(...LIST_FIELDS)
     .limit(limit)
     .get();
   return snap.docs.map((doc) => publicSpecial({ id: doc.id, ...(doc.data() as PostedSpecialDoc) }));
@@ -214,8 +218,9 @@ export async function bumpSpecialMetric(
   }
   try {
     const { FieldValue } = await import('@google-cloud/firestore');
+    // No cache drop here: a plan bumps a counter every time it picks a special, and dropping the 60 s cache on
+    // each bump meant a fresh 200-document read per plan. Metrics catch up within the cache's 60 s.
     await d.collection('specials').doc(id).update({ [metric]: FieldValue.increment(by) });
-    invalidateSpecialsCache();
   } catch (err: any) {
     // Fall through silently — analytics are non-critical
     console.warn('[firestore] bumpSpecialMetric failed:', err?.message || err);

@@ -66,6 +66,11 @@ function suggestionText(s: SuggestSpecialResponse): string {
     .join('\n');
 }
 
+/** File extension for a picture's type (the pack's pictures are JPEGs; older ones were PNGs). */
+function imageExt(mime: string | undefined): string {
+  return mime === 'image/jpeg' ? 'jpg' : mime === 'image/webp' ? 'webp' : 'png';
+}
+
 function downloadDataUrl(filename: string, mime: string, base64: string) {
   const link = document.createElement('a');
   link.href = `data:${mime};base64,${base64}`;
@@ -170,6 +175,14 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
     const igStatus = sp.get('ig');
     if (!igStatus) return;
     if (igStatus === 'connected') setIgConnected(true);
+    else
+      setError(
+        igStatus === 'taken'
+          ? 'This restaurant is already connected to a different Instagram account from another device.'
+          : igStatus === 'no_business_account'
+            ? 'Instagram connected, but no Instagram business account was found. Switch the account to a business or creator account and try again.'
+            : 'Instagram couldn\u2019t be connected just now. Please try again.'
+      );
     // Drop the param from the URL once we've consumed it.
     sp.delete('ig');
     const cleanUrl = `${window.location.pathname}${sp.toString() ? `?${sp.toString()}` : ''}`;
@@ -345,7 +358,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
         const ia = new Uint8Array(ab);
         for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
         const blob = new Blob([ab], { type: pack.instagramPost.imageMime });
-        const file = new File([blob], `${pack.dishName.replace(/\s+/g, '-')}.png`, {
+        const file = new File([blob], `${pack.dishName.replace(/\s+/g, '-')}.${imageExt(pack.instagramPost.imageMime)}`, {
           type: pack.instagramPost.imageMime,
         });
         const navAny = navigator as any;
@@ -368,7 +381,7 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
     } catch {}
     if (pack?.instagramPost.imageData && pack.instagramPost.imageMime) {
       downloadDataUrl(
-        `${pack.dishName.replace(/\s+/g, '-')}-ig.png`,
+        `${pack.dishName.replace(/\s+/g, '-')}-ig.${imageExt(pack.instagramPost.imageMime)}`,
         pack.instagramPost.imageMime,
         pack.instagramPost.imageData
       );
@@ -754,18 +767,22 @@ export function RestaurantView({ onSwitchToDiner }: Props) {
                     <button
                       onClick={() =>
                         downloadDataUrl(
-                          `${pack.dishName.replace(/\s+/g, '-')}-ig.png`,
+                          `${pack.dishName.replace(/\s+/g, '-')}-ig.${imageExt(pack.instagramPost.imageMime)}`,
                           pack.instagramPost.imageMime || 'image/png',
                           pack.instagramPost.imageData!
                         )
                       }
+                      aria-label="Download the picture"
+                      title="Download the picture"
                       className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 text-xs font-semibold tracking-wide uppercase text-eve-cream/70 inline-flex items-center gap-1"
                     >
-                      <Download size={10} />
+                      <Download size={10} aria-hidden="true" />
                     </button>
                   )}
                   <button
                     onClick={() => copyToClipboard('ig', `${pack.instagramPost.caption}\n\n${pack.instagramPost.hashtags.map((h) => '#' + h).join(' ')}`)}
+                    aria-label={copied === 'ig' ? 'Caption copied' : 'Copy the caption and hashtags'}
+                    title="Copy the caption and hashtags"
                     className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 text-xs font-semibold tracking-wide uppercase text-eve-cream/70 inline-flex items-center gap-1"
                   >
                     {copied === 'ig' ? <Check size={10} /> : <Copy size={10} />}

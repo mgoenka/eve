@@ -4,6 +4,7 @@ import { AppHeader, Button, FetchError, LocalAiSetting, Modal, fetchJson, useCon
 import { EveLogo } from './EveLogo';
 import { useOpenRules } from './RulesContext';
 import { backup } from '../lib/backup';
+import { clearPictures } from '../services/stopPictures';
 
 // "Delete my account and data" (Google Play account-deletion policy).
 // Eve has no sign-in: the server keeps only what this device published
@@ -18,14 +19,15 @@ interface DeleteResult {
   deleted: { specials: number; brands: number };
 }
 
-/** Clears everything Eve keeps in this browser (recent evenings, restaurant profile, settings). */
-function clearDeviceData() {
+/** Clears everything Eve keeps in this browser (recent evenings, restaurant profile, settings, painted pictures and narration). */
+async function clearDeviceData() {
   try {
     localStorage.clear();
   } catch {}
   try {
     sessionStorage.clear();
   } catch {}
+  await clearPictures();
 }
 
 function plural(n: number, one: string, many: string) {
@@ -62,7 +64,7 @@ export function AccountDataSection({ compact = false, onDeleted }: { compact?: b
         timeoutMs: 20_000,
         retries: 1,
       });
-      clearDeviceData();
+      await clearDeviceData();
       setResult(r);
       onDeleted?.();
     } catch (e) {
