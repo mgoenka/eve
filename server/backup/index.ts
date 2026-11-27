@@ -1,4 +1,4 @@
-// Synced from app-platform/server-kit/backup/index.ts. Do not edit here. VERSION b0c5e31 2026-11-25T17:25:13Z
+// Synced from app-platform/server-kit/backup/index.ts. Do not edit here. VERSION 595736a 2026-11-27T02:54:49Z
 /**
  * Backup / sync server: a private-key record store (Firestore, or memory for local runs and tests) and an Express
  * router with rate limits, size caps and one-use link codes. The client is ui-kit/utils/backup.ts; the wire format
@@ -18,7 +18,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { isIPv6 } from "node:net";
 import type { Firestore } from "@google-cloud/firestore";
-import { APP_RE, LIMITS, LINK_CODE_LENGTH, LINK_TTL_MS, cleanRecord, normalizeKey, normalizeLinkCode, randomCode, type SyncRecord, type SyncResponse } from "./protocol.ts";
+import { APP_RE, LIMITS, LINK_CODE_LENGTH, LINK_TTL_MS, cleanFamilyRecord, cleanRecord, decodeFamilyCookie, encodeFamilyCookie, normalizeKey, normalizeLinkCode, randomCode, type SyncRecord, type SyncResponse } from "./protocol.ts";
 
 export * from "./protocol.ts";
 
@@ -312,6 +312,24 @@ export interface BackupRouterOptions {
   globalPerMinute?: number;
 }
 
+// ---------- backup family cookie ----------
+export const FAMILY_COOKIE = "mg_bk";
+/** 400 days: the longest cookie lifetime Chrome keeps (re-set whenever an app publishes). */
+const FAMILY_MAX_AGE_S = 400 * 24 * 3600;
+const FAMILY_SITE = "mohitgoenka.com";
+/** ".mohitgoenka.com" on the live hosts (shared by every app), null elsewhere (a host-only cookie: localhost, tests). */
+export function familyCookieDomain(host: string | undefined): string | null {
+  const h = String(host ?? "").toLowerCase().replace(/:\d+$/, "");
+  return h === FAMILY_SITE || h.endsWith(`.${FAMILY_SITE}`) ? `.${FAMILY_SITE}` : null;
+}
+function cookieOf(req: Req, name: string): string {
+  for (const part of String(req.get("cookie") ?? "").split(";")) {
+    const i = part.indexOf("=");
+    if (i > 0 && part.slice(0, i).trim() === name) return part.slice(i + 1).trim();
+  }
+  return "";
+}
+
 /** Returns express.Router() (typed as the app's own Router) with the routes on it, plus `.store`. */
 export function backupRouter<R>(express: ExpressLike<R>, opts: BackupRouterOptions): R & { store: BackupStore } {
   if (!APP_RE.test(opts.app)) throw new Error(`backupRouter: bad app id ${opts.app}`);
@@ -444,6 +462,24 @@ export function backupRouter<R>(express: ExpressLike<R>, opts: BackupRouterOptio
     } catch (err) {
       unavailable(res, "link redeem", err);
     }
+  });
+
+  // ---------- backup family (docs/backup-family.md): one key for every app on *.mohitgoenka.com ----------
+  // The record lives in an httpOnly cookie on the parent domain, so every app in this browser shares it;
+  // mg_bk_on=1 (readable) only tells the page there is one, so apps without it skip this request.
+  r.get("/family", limit(syncPerMinute), (req, res) => {
+    res.json(decodeFamilyCookie(cookieOf(req, FAMILY_COOKIE)) ?? {});
+  });
+  r.post("/family", limit(syncPerMinute), (req, res) => {
+    const rec = cleanFamilyRecord(req.body?.record);
+    if (!rec) {
+      res.status(400).json({ error: "invalid" });
+      return;
+    }
+    const domain = familyCookieDomain(req.get("host"));
+    const tail = `Path=/; Max-Age=${FAMILY_MAX_AGE_S}; SameSite=Lax${domain ? `; Domain=${domain}; Secure` : ""}`;
+    res.set("Set-Cookie", [`${FAMILY_COOKIE}=${encodeFamilyCookie(rec)}; HttpOnly; ${tail}`, `${FAMILY_COOKIE}_on=1; ${tail}`] as unknown as string);
+    res.json({ ok: true });
   });
 
   // Errors from the JSON parser (too large / bad JSON) inside this router.

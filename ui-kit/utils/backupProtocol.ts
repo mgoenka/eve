@@ -126,3 +126,88 @@ export function parseBackupFile(text: string, app: string, kinds?: readonly stri
   }
   return out;
 }
+
+// ---------- backup family: one key for every app (docs/backup-family.md) ----------
+
+/**
+ * One app's view of the shared backup. `key` + `at` (when a person last linked / restored, 0 for a key an app made
+ * itself); `on` + `onAt` (the backup switch a person last set in any app, null / 0 = never).
+ */
+export interface FamilyRecord {
+  key: string | null;
+  at: number;
+  on: boolean | null;
+  onAt: number;
+}
+
+const famNum = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v < 1e15 ? Math.floor(v) : null);
+
+/** A valid record or null (from JSON, a cookie, another app). */
+export function cleanFamilyRecord(v: unknown): FamilyRecord | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  const key = o.key === null || o.key === undefined || o.key === '' ? null : typeof o.key === 'string' ? (normalizeKey(o.key) ?? undefined) : undefined;
+  const at = famNum(o.at ?? 0);
+  const onAt = famNum(o.onAt ?? 0);
+  const on = o.on === true || o.on === false ? o.on : o.on === null || o.on === undefined ? null : undefined;
+  if (key === undefined || at === null || onAt === null || on === undefined) return null;
+  if (!key && !onAt) return null;
+  return { key, at: key ? at : 0, on: onAt ? on : null, onAt: on === null ? 0 : onAt };
+}
+
+/** Cookie value: "v1.<key|_>.<at>.<1|0|_>.<onAt>". */
+export function encodeFamilyCookie(r: FamilyRecord): string {
+  return ['v1', r.key ?? '_', r.at, r.on === null ? '_' : r.on ? '1' : '0', r.onAt].join('.');
+}
+export function decodeFamilyCookie(s: string): FamilyRecord | null {
+  const p = String(s ?? '').split('.');
+  if (p.length !== 5 || p[0] !== 'v1') return null;
+  return cleanFamilyRecord({ key: p[1] === '_' ? null : p[1], at: Number(p[2]), on: p[3] === '_' ? null : p[3] === '1', onAt: Number(p[4]) });
+}
+
+/** Key: largest `at`, tie → smallest key. Switch: largest `onAt` > 0. Null when nothing is known. */
+export function mergeFamily(list: readonly (FamilyRecord | null | undefined)[]): FamilyRecord | null {
+  let k: FamilyRecord | null = null;
+  let s: FamilyRecord | null = null;
+  for (const r of list) {
+    if (!r) continue;
+    if (r.key && (!k || r.at > k.at || (r.at === k.at && r.key < k.key!))) k = r;
+    if (r.onAt > 0 && r.on !== null && (!s || r.onAt > s.onAt)) s = r;
+  }
+  if (!k && !s) return null;
+  return { key: k?.key ?? null, at: k?.at ?? 0, on: s?.on ?? null, onAt: s?.onAt ?? 0 };
+}
+
+export interface FamilyMine {
+  /** null: no key yet, or one never used with the cloud. */
+  key: string | null;
+  at: number;
+  on: boolean;
+  /** 0: the person never set the switch in this app. */
+  onAt: number;
+}
+
+/** What this app should do given the family (docs/backup-family.md, steps 2-4). */
+export function planFamily(mine: FamilyMine, f: FamilyRecord | null): { adoptKey: string | null; at: number; setOn: boolean | null; onAt: number; publish: FamilyRecord | null } {
+  let key = mine.key;
+  let at = mine.at;
+  let adoptKey: string | null = null;
+  if (f?.key && f.key !== key && (!key || f.at > at || (f.at === at && f.key < key))) {
+    adoptKey = f.key;
+    key = f.key;
+    at = f.at;
+  }
+  let on = mine.on;
+  let onAt = mine.onAt;
+  let setOn: boolean | null = null;
+  if (f && f.on !== null && f.onAt > onAt) {
+    setOn = f.on;
+    on = f.on;
+    onAt = f.onAt;
+  }
+  const mineNow: FamilyRecord = { key, at: key ? at : 0, on: onAt ? on : null, onAt: onAt || 0 };
+  const merged = mergeFamily([f, mineNow]);
+  const same = (a: FamilyRecord | null, b: FamilyRecord | null) => !!a && !!b && a.key === b.key && a.at === b.at && a.on === b.on && a.onAt === b.onAt;
+  const publish = merged && (merged.key || merged.onAt) && !same(merged, f) ? merged : null;
+  return { adoptKey, at, setOn, onAt, publish };
+}

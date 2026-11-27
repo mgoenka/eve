@@ -155,6 +155,8 @@ export function BackupModal({ open, onClose, backup, initialCode, title, what, n
   };
 
   const joinUrl = link ? `${location.origin}/?link=${link.code}` : '';
+  // One backup for all of Mohit's apps (docs/backup-family.md).
+  const family = backup.options.family !== false;
   const pretty = (c: string) => `${c.slice(0, 3)}-${c.slice(3)}`;
 
   return (
@@ -164,6 +166,7 @@ export function BackupModal({ open, onClose, backup, initialCode, title, what, n
           <>
             <div className="flex flex-col gap-2">
               <Switch label="Back up to the cloud" description={`${what}, under a private key only your devices have`} checked={s.enabled} onChange={backup.setEnabled} />
+              {family ? <p className="text-mg-2xs text-mg-muted">One backup for all of Mohit's apps: this switch, the key and link codes work for every one of them on this device.</p> : null}
               {s.enabled ? (
                 <button type="button" className={`${quietButton} self-start`} onClick={() => void backup.syncNow()} disabled={s.state === 'syncing'}>
                   Sync now <RefreshIcon size={15} className={s.state === 'syncing' ? 'animate-spin' : ''} />
@@ -173,7 +176,7 @@ export function BackupModal({ open, onClose, backup, initialCode, title, what, n
 
             <section className="flex flex-col gap-3" aria-label="Use on another device">
               <h3 className="text-sm font-semibold text-mg-text">New phone or another device 📱</h3>
-              <p className="text-sm text-mg-muted">Make a code here, then enter it (or scan the QR) on the other device. Both then share the same {noun}.</p>
+              <p className="text-sm text-mg-muted">Make a code here, then enter it (or scan the QR) on the other device. Both then share the same {noun}{family ? ", and Mohit's other apps there join too" : ''}.</p>
               {link ? (
                 <div className="flex flex-col items-center gap-3 p-4 rounded-2xl bg-mg-surface border border-mg-gold/25">
                   <p className="font-mono text-3xl font-black tracking-[0.2em] text-mg-gold" aria-label={`Code ${link.code.split('').join(' ')}`}>{pretty(link.code)}</p>
@@ -196,7 +199,7 @@ export function BackupModal({ open, onClose, backup, initialCode, title, what, n
 
             <section className="flex flex-col gap-3" aria-label="Recovery key">
               <h3 className="text-sm font-semibold text-mg-text">Recovery key 🔑</h3>
-              <p className="text-sm text-mg-muted">Save it in your notes or password manager. If you lose this phone, the key brings everything back.</p>
+              <p className="text-sm text-mg-muted">Save it in your notes or password manager. If you lose this phone, the key brings everything back{family ? " in all of Mohit's apps" : ''}.</p>
               {showKey ? (
                 <div className="flex flex-wrap items-center gap-2 p-3 rounded-xl bg-mg-surface border border-mg-border">
                   <code className="flex-1 min-w-0 break-all font-mono text-sm text-mg-text select-all">{formatKey(backup.getKey())}</code>

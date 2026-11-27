@@ -2,7 +2,8 @@
 import { FetchError, fetchJson } from './fetchJson';
 import { safeGet, safeRemove, safeSet } from './storage';
 import { showToast } from './toastBus';
-import { KEY_ALPHABET, KEY_LENGTH, LIMITS, cleanRecord, normalizeKey, parseBackupFile, randomCode, type BackupFile, type SyncRecord, type SyncResponse } from './backupProtocol';
+import { KEY_ALPHABET, KEY_LENGTH, LIMITS, cleanFamilyRecord, cleanRecord, mergeFamily, normalizeKey, parseBackupFile, planFamily, randomCode, type BackupFile, type FamilyRecord, type SyncRecord, type SyncResponse } from './backupProtocol';
+import { nativeShell } from './nativeShell';
 
 /**
  * Local-first backup and sync (the engine behind BackupModal; Scorer's model, for any app).
@@ -73,6 +74,47 @@ export interface BackupOptions {
   dataOf?: (rec: SyncRecord) => unknown;
   /** Toast when the device storage is full. */
   storageFullMessage?: string;
+  /**
+   * One backup for every app (docs/backup-family.md): share the private key and the backup switch with Mohit's other
+   * apps in this browser (a cookie on .mohitgoenka.com) or on this Android device (the app shell). Default true.
+   */
+  family?: boolean;
+  /** Where the family record is read / written. Default: the Android shell's bridge, else `${endpoint}/family`. */
+  familyTransport?: FamilyTransport;
+}
+
+/** Reads every family record this app can see, and stores this app's own. */
+export interface FamilyTransport {
+  read(): Promise<FamilyRecord[]>;
+  write(r: FamilyRecord): Promise<void>;
+}
+
+/** The Android shell's bridge when it has one, else the app server's cookie route. */
+export function defaultFamilyTransport(endpoint = '/api/backup'): FamilyTransport {
+  const bridge = (nativeShell() as { backupFamily?: { get?: () => Promise<string>; set?: (json: string) => void } } | null)?.backupFamily;
+  if (bridge && typeof bridge.get === 'function' && typeof bridge.set === 'function') {
+    return {
+      async read() {
+        const raw = await Promise.race([bridge.get!(), new Promise<string>((r) => setTimeout(() => r('[]'), 4000))]);
+        const list = JSON.parse(String(raw || '[]')) as unknown;
+        return (Array.isArray(list) ? list : []).map(cleanFamilyRecord).filter((r): r is FamilyRecord => !!r);
+      },
+      async write(r) {
+        bridge.set!(JSON.stringify(r));
+      },
+    };
+  }
+  return {
+    async read() {
+      // mg_bk_on=1 says a record exists (the record itself is httpOnly): no cookie, no request.
+      if (typeof document === 'undefined' || !/(?:^|;\s*)mg_bk_on=1(?:;|$)/.test(String(document.cookie ?? ''))) return [];
+      const r = cleanFamilyRecord(await fetchJson<unknown>(`${endpoint}/family`, { timeoutMs: 6000 }));
+      return r ? [r] : [];
+    },
+    async write(r) {
+      await fetchJson(`${endpoint}/family`, { method: 'POST', body: { record: r }, timeoutMs: 8000 });
+    },
+  };
 }
 
 export interface Backup {
@@ -100,6 +142,8 @@ export interface Backup {
   createLinkCode(): Promise<{ code: string; expiresAt: number }>;
   /** true linked, null wrong / expired code. Throws on network trouble. */
   redeemLinkCode(code: string): Promise<boolean | null>;
+  /** Check the other apps' shared backup now (start() does it, and again when the app comes back). */
+  syncFamily(): Promise<void>;
   /** Start syncing (idempotent). */
   start(): void;
 
@@ -171,10 +215,10 @@ export function createBackup(opts: BackupOptions): Backup {
 
   const prefs = (() => {
     try {
-      const p = JSON.parse(safeGet(keys.prefs) || '{}') as { enabled?: boolean; lastSyncAt?: number; used?: boolean };
-      return { enabled: cloud && (p.enabled ?? opts.defaultEnabled ?? true), lastSyncAt: p.lastSyncAt ?? 0, used: !!p.used };
+      const p = JSON.parse(safeGet(keys.prefs) || '{}') as { enabled?: boolean; lastSyncAt?: number; used?: boolean; at?: number; onAt?: number; solo?: boolean };
+      return { enabled: cloud && (p.enabled ?? opts.defaultEnabled ?? true), lastSyncAt: p.lastSyncAt ?? 0, used: !!p.used, at: p.at ?? 0, onAt: p.onAt ?? 0, solo: !!p.solo };
     } catch {
-      return { enabled: cloud && (opts.defaultEnabled ?? true), lastSyncAt: 0, used: false };
+      return { enabled: cloud && (opts.defaultEnabled ?? true), lastSyncAt: 0, used: false, at: 0, onAt: 0, solo: false };
     }
   })();
   const savePrefs = () => safeSet(keys.prefs, JSON.stringify(prefs));
@@ -412,6 +456,11 @@ export function createBackup(opts: BackupOptions): Backup {
       savePrefs();
       lastError = undefined;
       state = 'idle';
+      // The first real sync of this app's own key: offer it to the other apps (they adopt it if nothing stronger).
+      if (family && !famPublishedAfterSync) {
+        famPublishedAfterSync = true;
+        setTimeout(() => void familyStep(true), 0);
+      }
     } catch (e) {
       lastError = errorText(e);
       state = typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'error';
@@ -430,25 +479,51 @@ export function createBackup(opts: BackupOptions): Backup {
     syncTimer = setTimeout(() => void syncNow(), delay);
   }
 
-  function setEnabled(on: boolean) {
-    if (!cloud) return;
+  function applyEnabled(on: boolean) {
     prefs.enabled = on;
     savePrefs();
     state = on ? 'idle' : 'off';
     emit();
     if (on) void syncNow();
   }
+  /** The person's switch: also every family app's. */
+  function setEnabled(on: boolean) {
+    if (!cloud) return;
+    prefs.onAt = Date.now();
+    applyEnabled(on);
+    void familyStep(true);
+  }
 
-  /** Switch this device to another key: see `switchMode`. */
+  /** Switch this device to another key (a link code or the recovery key): see `switchMode`. */
   async function switchKey(raw: string): Promise<boolean> {
     const k = normalizeKey(raw);
     if (!k) return false;
-    if (k === getKey()) return true;
+    const ok = await moveToKey(k, true);
+    if (ok) {
+      prefs.at = Date.now();
+      prefs.solo = false;
+      savePrefs();
+      void familyStep(true);
+    }
+    return ok;
+  }
+
+  /** `byPerson` turns the backup on (a link / restore); the family's key keeps this app's switch as it is. */
+  async function moveToKey(k: string, byPerson: boolean): Promise<boolean> {
+    if (k === normalizeKey(safeGet(keys.key) ?? '')) return true;
     runBefore();
     await running?.catch(() => undefined);
     safeSet(keys.key, k);
     db.cursor = 0;
-    prefs.enabled = cloud;
+    if (byPerson) prefs.enabled = cloud;
+    if (!prefs.enabled) {
+      // Backup is off here: no network. Everything on this device goes up once it is turned on.
+      for (const id of Object.keys(db.records)) dirty.add(id);
+      savePrefs();
+      persistNow();
+      emit();
+      return true;
+    }
     prefs.used = true;
     savePrefs();
     if (switchMode === 'merge') {
@@ -496,14 +571,56 @@ export function createBackup(opts: BackupOptions): Backup {
     }
   }
 
+  // ---------- backup family (docs/backup-family.md) ----------
+  const family = cloud && opts.family !== false && hasWindow;
+  let transport: FamilyTransport | null = null;
+  let famRunning: Promise<void> | null = null;
+  let famLast = 0;
+  let famPublishedAfterSync = false;
+  /** This app's key if it has really used one (a key nobody synced with and no records is not worth sharing). */
+  const usedKey = () => {
+    const k = normalizeKey(safeGet(keys.key) ?? '');
+    return k && (prefs.used || db.cursor > 0 || liveCount() > 0 || dirty.size > 0) ? k : null;
+  };
+  function familyStep(force: boolean): Promise<void> {
+    if (!family || prefs.solo) return Promise.resolve();
+    if (famRunning) return famRunning;
+    if (!force && Date.now() - famLast < 5 * 60_000) return Promise.resolve();
+    famLast = Date.now();
+    famRunning = (async () => {
+      try {
+        transport ??= opts.familyTransport ?? defaultFamilyTransport(endpoint);
+        const f = mergeFamily(await transport.read());
+        const plan = planFamily({ key: usedKey(), at: prefs.at, on: prefs.enabled, onAt: prefs.onAt }, f);
+        if (plan.adoptKey && (await moveToKey(plan.adoptKey, false))) {
+          prefs.at = plan.at;
+          savePrefs();
+        }
+        if (plan.setOn !== null) {
+          prefs.onAt = plan.onAt;
+          if (plan.setOn !== prefs.enabled) applyEnabled(plan.setOn);
+          else savePrefs();
+        }
+        if (plan.publish) await transport.write(plan.publish);
+      } catch (e) {
+        console.warn('[backup] family', (e as Error)?.message ?? e);
+      } finally {
+        famRunning = null;
+      }
+    })();
+    return famRunning;
+  }
+
   let started = false;
   function start() {
     if (!hasWindow || started) return;
     started = true;
     if (!cloud) return;
-    void syncNow();
+    void familyStep(true).finally(() => void syncNow());
     window.addEventListener('online', () => void syncNow());
-    document.addEventListener('visibilitychange', () => !document.hidden && void syncNow());
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) void familyStep(false).finally(() => void syncNow());
+    });
     setInterval(() => !document.hidden && void syncNow(), pullEveryMs);
   }
 
@@ -515,6 +632,11 @@ export function createBackup(opts: BackupOptions): Backup {
     dirty.clear();
     prefs.lastSyncAt = 0;
     prefs.used = false;
+    prefs.at = 0;
+    prefs.onAt = 0;
+    // Leave the family here until the person links or restores again (or this would rejoin at once).
+    prefs.solo = family;
+    if (family) savePrefs();
     prefs.enabled = cloud && (opts.defaultEnabled ?? true);
     state = prefs.enabled ? 'idle' : 'off';
     lastError = undefined;
@@ -611,6 +733,7 @@ export function createBackup(opts: BackupOptions): Backup {
     createLinkCode,
     redeemLinkCode,
     start,
+    syncFamily: () => familyStep(true),
     exportFile,
     downloadFile,
     importFile,
