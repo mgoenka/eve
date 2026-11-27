@@ -62,7 +62,7 @@ import {
   sanitizeEvening,
 } from '../services/savedEvenings';
 import type { SavedEvening } from '../services/savedEvenings';
-import { BackupButton, BackupModal, useBackupEntry } from '../ui-kit/components/BackupModal';
+import { BackupModal, useBackupEntry } from '../ui-kit/components/BackupModal';
 import { backup } from '../lib/backup';
 import { clearSnapshot, useSnapshot } from '../services/persist';
 import { DINER_SNAPSHOT_KEY, DINER_SNAPSHOT_V, readDinerSnapshot, sanitizePlanLink } from '../services/dinerSnapshot';
@@ -2082,10 +2082,10 @@ export function DinerView({ onSwitchToRestaurant, planSignal = 0 }: Props) {
           onRules={openRules}
           rulesLabel="How Eve works"
           onSettings={openSettings}
+          backup={{ backup, onOpen: backupEntry.show, open: backupEntry.open }}
           right={
             <>
             <CreditsChip />
-            <BackupButton backup={backup} onClick={backupEntry.show} pressed={backupEntry.open} />
             {muted ? (
               <button
                 onClick={() => {

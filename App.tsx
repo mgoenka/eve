@@ -97,7 +97,7 @@ const APP_RULES: RuleSection[] = [
     title: 'Your data',
     icon: '🔒',
     items: [
-      'There is no sign-in. Recent evenings and your restaurant profile are kept on this device and backed up to the cloud under a private key (the cloud button at the top of the planner; you can turn it off there). Pictures stay on this device.',
+      'There is no sign-in. Recent evenings and your restaurant profile are kept on this device and backed up to the cloud under a private key (the cloud button at the top of the planner, or ⋯ then Sync on a phone; you can turn it off there). Pictures stay on this device.',
       'New phone or the website? On the old device tap the cloud, then Get a link code, and enter the code (or scan the QR) on the new one. Lost the phone? Restore with your recovery key from the same screen. Export to file and Import from file work without the cloud.',
       'Specials you publish to Eve diners, and an Instagram connection, are stored on Eve’s server and linked to this device.',
       'Settings (the gear) → Delete my account and data removes all of it, the cloud backup too, and resets Eve on this device.',
