@@ -783,8 +783,9 @@ app.get('/api/health', (_req, res) => {
 });
 
 // ADK-pattern agent endpoint: the same three tools the rest of the
-// app uses, exposed through a single agent runtime call. Inspectable
-// from any client that wants to observe the agent abstraction.
+// app uses, exposed through a single agent runtime call. Same-origin only
+// like every /api/ route (the guard above): pages on Eve can call it, curl
+// and other sites get 403. public/architecture.html documents it that way.
 app.post('/api/agent/run', metered('agent', estAgent, async (req, res) => {
   if (!ai) return jsonError(res, 503, 'GEMINI_API_KEY not configured');
   const plan = req.body?.plan;

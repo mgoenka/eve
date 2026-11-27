@@ -549,7 +549,7 @@
         </div>
         <div class="endpoint">
           <div class="row1"><span class="method">POST</span><span class="path">/api/agent/run</span></div>
-          <div class="desc">ADK-pattern agent runtime. Body: <code>{plan: [{tool, input}]}</code>. Returns tool outputs + per-call latency.</div>
+          <div class="desc">ADK-pattern agent runtime. Body: <code>{plan: [{tool, input}]}</code>. Returns tool outputs + per-call latency. Same-origin only: called from Eve's pages, not from curl.</div>
         </div>
         <div class="endpoint">
           <div class="row1"><span class="method">POST</span><span class="path">/api/eve-parse-intent</span></div>
@@ -614,15 +614,18 @@
       <p class="section-num">08 / AGENT RUNTIME</p>
       <h2>ADK-pattern Agent / Tool / Runner</h2>
       <p>A native TypeScript abstraction in <code>agent.ts</code> mirrors Google's ADK architecture. Tools are typed function declarations; the runner executes them in a deterministic plan and reports per-call latency telemetry.</p>
-      <pre><span class="com">// Try the agent runtime live:</span>
-curl -X POST https://eve.mohitgoenka.com/api/agent/run \
-  -H <span class="str">'Content-Type: application/json'</span> \
-  -d <span class="str">'{"plan":[{"tool":"placesSearch","input":{"name":"Cucina Venti","city":"Mountain View, CA"}}]}'</span>
+      <p><strong>Browser-only.</strong> <code>/api/agent/run</code> answers only requests sent from Eve's own pages: in production every <code>/api/</code> call must carry an <code>Origin</code> header (or, without one, a same-origin <code>Sec-Fetch-Site</code> or <code>Referer</code>) naming <code>eve.mohitgoenka.com</code> or the host that served the page. A plain <code>curl</code> command, a script or another site gets <code>403 Forbidden</code>. Runs are metered like Eve's other AI calls.</p>
+      <pre><span class="com">// The request, as a page on eve.mohitgoenka.com sends it</span>
+<span class="com">// (the browser adds the Origin header):</span>
+POST /api/agent/run
+Content-Type: application/json
+
+<span class="key">{</span> <span class="str">"plan"</span>: [{ <span class="str">"tool"</span>: <span class="str">"placesSearch"</span>, <span class="str">"input"</span>: { <span class="str">"name"</span>: <span class="str">"Cucina Venti"</span>, <span class="str">"city"</span>: <span class="str">"Mountain View, CA"</span> } }] <span class="key">}</span>
 
 <span class="com">// Returns:</span>
 <span class="key">{</span>
   <span class="str">"agent"</span>: <span class="str">"EveBrain"</span>,
-  <span class="str">"tools"</span>: [<span class="str">"placesSearch"</span>, <span class="str">"sceneCard"</span>, <span class="str">"voiceLine"</span>],
+  <span class="str">"tools"</span>: [{ <span class="str">"name"</span>: <span class="str">"placesSearch"</span>, <span class="str">"description"</span>: <span class="str">"..."</span> }, <span class="com">/* sceneCard, voiceLine */</span>],
   <span class="str">"callsMade"</span>: [{ <span class="str">"tool"</span>: <span class="str">"placesSearch"</span>, <span class="str">"ok"</span>: true, <span class="str">"latencyMs"</span>: 15264 }],
   <span class="str">"output"</span>: [{ <span class="str">"tool"</span>: <span class="str">"placesSearch"</span>, <span class="str">"output"</span>: { <span class="str">"details"</span>: <span class="str">"..."</span> }}]
 <span class="key">}</span></pre>
