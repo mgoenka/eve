@@ -1,4 +1,4 @@
-// Synced from app-platform/server-kit/ai-guard. Do not edit here. VERSION 2d3f4b7-dirty 2026-11-24T17:21:35Z
+// Synced from app-platform/server-kit/ai-guard. Do not edit here. VERSION 1613fc1 2026-11-27T05:02:42Z
 /**
  * ai-guard: keeps an app responsive when Gemini is overloaded or the project quota is used up.
  *
@@ -361,6 +361,9 @@ export const withAiFixtures = <T>(fn: () => T): T => fixtureScope.run(true, fn);
 export function aiFixturesActive(): boolean {
   return fixtureScope.getStore() === true || aiEnvMode() === 'fixture';
 }
+// For server/credits (synced separately, so no import): a fixture answer cost nothing, so it charges no Sparks
+// and never answers 402 (credits.run reads this hook).
+(globalThis as Record<symbol, unknown>)[Symbol.for('mg.aiFixtures.active')] = aiFixturesActive;
 
 export interface AiFixtureRequest {
   /** Model in the URL (e.g. gemini-3.8-flash). */

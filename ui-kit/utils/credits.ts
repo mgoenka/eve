@@ -335,10 +335,13 @@ export interface AiFetchJsonOptions extends FetchJsonOptions {
   /**
    * 'action' (default): the user asked for this (a tap) — a 402 opens the "Get Sparks" sheet, ai_busy shows a toast.
    * 'background': speculative / automatic calls (loading tips, prefetch, auto-naming) — never opens the sheet,
-   * never toasts; the caller falls back quietly. Gate them with speculativeAiAllowed().
+   * never toasts; the caller falls back quietly. Gate them with speculativeAiAllowed() / aiCallAllowed('background').
+   * 'core': content the user asked for without tapping this exact call (the story of the night they just planned,
+   * its narration, the first picture, their portrait): charged like an action and never skipped by the background
+   * rule (aiCallAllowed('core') is always true), but quiet like a background call (no sheet, no toast by default).
    */
-  ai?: 'action' | 'background';
-  /** Open the "Get Sparks" sheet on 402 (default: true for ai 'action', false for 'background'). */
+  ai?: 'action' | 'background' | 'core';
+  /** Open the "Get Sparks" sheet on 402 (default: true for ai 'action', false for 'background' and 'core'). */
   creditsSheet?: boolean;
   /** Toast "Lots of people are using this right now…" on HTTP 503 ai_busy (default: as creditsSheet). Pass false when the app shows its own message. */
   toastOnBusy?: boolean;  /** Android: after a 402, wait while the sheet is open and run the call again once enough Sparks are bought (default true). */
@@ -426,12 +429,23 @@ export function whenCreditsLoaded(timeoutMs = 8000): Promise<void> {
 }
 
 /** speculativeAiAllowed() after waiting for the balance (whenCreditsLoaded): `if (await speculativeAiAllowedAsync()) loadTips();` */
-export async function speculativeAiAllowedAsync(timeoutMs?: number): Promise<boolean> {
+export async function speculativeAiAllowedAsync(timeoutMs?: number, opts: { userAsked?: boolean } = {}): Promise<boolean> {
+  if (opts.userAsked) return true;
   await whenCreditsLoaded(timeoutMs);
   return speculativeAiAllowed();
 }
 
-export function speculativeAiAllowed(): boolean {
+/**
+ * May an AI call of this kind run now? 'action' (a tap) and 'core' (content the user asked for: charged normally)
+ * always; 'background' only when speculativeAiAllowed(). `if (!aiCallAllowed(kind)) return fallback;`
+ */
+export function aiCallAllowed(kind: 'action' | 'background' | 'core' = 'action'): boolean {
+  return kind !== 'background' || speculativeAiAllowed();
+}
+
+/** `userAsked: true`: the call is core content the user asked for (ai: 'core'), so it is allowed and charged normally. */
+export function speculativeAiAllowed(opts: { userAsked?: boolean } = {}): boolean {
+  if (opts.userAsked) return true;
   const s = state;
   // Never spend a player's Sparks (free starter or bought) on something they didn't ask for.
   if (isNativeApp()) {
@@ -446,13 +460,16 @@ export function speculativeAiAllowed(): boolean {
   return s.owner;
 }
 
+/** The cost toast: "✨ 1 Spark used", "✨ 12 Sparks used". */
+export const sparksUsedText = (used: number) => `✨ ${used.toLocaleString('en-US')} Spark${used === 1 ? '' : 's'} used`;
+
 /**
  * fetchJson for AI endpoints: adds the wallet headers, keeps the balance chip current, and opens the
  * "Get AI credits" sheet on HTTP 402 (then rethrows, so the caller just stops its spinner).
  * When credits are off (the website today) it is exactly fetchJson.
  */
 export async function aiFetchJson<T = unknown>(url: string, options: AiFetchJsonOptions = {}): Promise<T> {
-  const { ai = 'action', creditsSheet = ai !== 'background', toastOnBusy = creditsSheet && ai !== 'background', retryAfterPurchase = true, ...fetchOptions } = options;
+  const { ai = 'action', creditsSheet = ai === 'action', toastOnBusy = creditsSheet && ai === 'action', retryAfterPurchase = true, ...fetchOptions } = options;
   let retryHeader: string | null = null;
   const userHook = fetchOptions.onResponse;
   const metered = creditsEnabled();
@@ -468,7 +485,7 @@ export async function aiFetchJson<T = unknown>(url: string, options: AiFetchJson
           readBalanceHeader(res);
           // Say what an action cost, so Sparks never feel like a black box (background calls stay quiet).
           const used = Number(res.headers.get(CHARGED_HEADER));
-          if (ai === 'action' && used > 0 && !state.owner) showToast({ id: 'mg-sparks-used', tone: 'info', message: `✨ ${used} Sparks used`, duration: 2500 });
+          if (ai === 'action' && used > 0 && !state.owner) showToast({ id: 'mg-sparks-used', tone: 'info', message: sparksUsedText(used), duration: 2500 });
         }
         userHook?.(res);
       },

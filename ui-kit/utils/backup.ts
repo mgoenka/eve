@@ -16,6 +16,8 @@ import { nativeShell } from './nativeShell';
  *
  * Two ways to use it:
  *   - records you own: `backup.put(kind, id, data)`, `backup.remove(id)`, `backup.live(kind)` (Scorer);
+ *     writes nobody asked for right now (save on unmount, a timer, an autosave) use `backup.putIfLive(kind, id, data)`:
+ *     it does nothing for a record deleted here or on another device (pulled tombstone), so it can't bring it back;
  *   - existing localStorage keys, unchanged app code: `backupKeys(backup, { keys: [...] })` (see below).
  *
  * `encrypt: true` encrypts every record (AES-GCM, key from HKDF of the recovery key) before it leaves the device;
@@ -133,7 +135,13 @@ export interface Backup {
   get(id: string): SyncRecord | undefined;
   all(): SyncRecord[];
   live<T = unknown>(kind: string): T[];
+  /** Store a record (an explicit user save: it wins over a deletion made elsewhere, as the newer write). */
   put(kind: string, id: string, data: unknown): void;
+  /**
+   * Like put(), but a no-op (false) when the record is deleted, here or on another device: for background writes
+   * (unmount / timer / autosave) that must never bring back a record someone deleted. New ids are stored as usual.
+   */
+  putIfLive(kind: string, id: string, data: unknown): boolean;
   remove(id: string): void;
   newId(prefix: string): string;
 
@@ -292,6 +300,11 @@ export function createBackup(opts: BackupOptions): Backup {
     persist();
     emit();
     scheduleSync();
+  }
+  function putIfLive(kind: string, id: string, data: unknown): boolean {
+    if (db.records[id]?.deleted) return false;
+    put(kind, id, data);
+    return true;
   }
   function remove(id: string) {
     const old = db.records[id];
@@ -732,6 +745,7 @@ export function createBackup(opts: BackupOptions): Backup {
     all: () => Object.values(db.records),
     live: <T,>(kind: string) => Object.values(db.records).filter((r) => r.kind === kind && !r.deleted && r.data).map((r) => r.data as T),
     put,
+    putIfLive,
     remove,
     newId,
     getKey,

@@ -70,7 +70,7 @@ export type { PackId, PackInfo, PaymentProvider } from './config.ts';
 export { PRICE_TABLE, PRICING_SOURCE, costOfCall, creditsForUsd, estimateCredits, usageOf, groundedRequestsOf, searchQueriesOf } from './pricing.ts';
 export type { CallUsage, ModelPrice, Rates, UsageMetadata } from './pricing.ts';
 export { MemoryCreditStore } from './store.ts';
-export type { CreditStore, GiftInput, GiftRecord, GiftVoidOutcome, LedgerEntry, MergeResult, PromoCode, PromoError, PromoResult, StarterMissed, StarterOutcome, StarterRule, StarterState } from './store.ts';
+export type { CreditStore, GiftInput, GiftRecord, GiftVoidOutcome, GiftVoidResult, LedgerEntry, MergeResult, PromoCode, PromoError, PromoResult, StarterMissed, StarterOutcome, StarterRule, StarterState } from './store.ts';
 export { FirestoreCreditStore } from './firestore-store.ts';
 export { GooglePlayApi, FakePlayApi, PlayApiError } from './play.ts';
 export type { PlayApi, ProductPurchase, VoidedPage, VoidedPurchase } from './play.ts';

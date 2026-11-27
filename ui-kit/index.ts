@@ -165,6 +165,8 @@ export {
   isAiBusyError,
   speculativeAiAllowed,
   speculativeAiAllowedAsync,
+  aiCallAllowed,
+  sparksUsedText,
   whenCreditsLoaded,
 } from './utils/credits';
 export type { AiFetchJsonOptions, CreditsProvider, CreditsProviderEvents, CreditsState } from './utils/credits';

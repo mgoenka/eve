@@ -218,6 +218,15 @@ const header = (req: ReqLike, name: string): string => {
   return (Array.isArray(v) ? v[0] : v) ?? '';
 };
 export const isNativeRequest = (req: ReqLike) => header(req, 'user-agent').includes(NATIVE_UA_TOKEN);
+/** ai-guard's "this request is answered by fixtures" hook (Symbol.for('mg.aiFixtures.active')), when loaded. */
+const aiFixturesNow = (): boolean => {
+  const f = (globalThis as Record<symbol, unknown>)[Symbol.for('mg.aiFixtures.active')];
+  try {
+    return typeof f === 'function' && f() === true;
+  } catch {
+    return false;
+  }
+};
 /** For logs only: never log ids or tokens in full. */
 export const mask = (s: string) => (s ? s.slice(0, 6) + '…' : '');
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -313,19 +322,39 @@ export function safeReturnUrl(raw: unknown): string | null {
 }
 const SECONDARY_RE = /^[A-Za-z0-9.\-_]{1,100}$/;
 
-class Window {
+/**
+ * Fixed-window counter per key. Expired windows are swept at most once a minute (not on every hit: that was a full
+ * scan per request once 5000 keys were live), and at most `maxKeys` are kept (the oldest go first), so memory stays
+ * bounded however many addresses or wallet ids a flood uses.
+ */
+export class Window {
   private readonly hits = new Map<string, { count: number; resetAt: number }>();
   private readonly limit: number;
   private readonly ms: number;
-  constructor(limit: number, ms: number) {
+  private readonly maxKeys: number;
+  private lastSweep = 0;
+  constructor(limit: number, ms: number, maxKeys = 50_000) {
     this.limit = limit;
     this.ms = ms;
+    this.maxKeys = maxKeys;
+  }
+  get size() {
+    return this.hits.size;
   }
   /** 0 = allowed, else seconds to wait. */
   hit(key: string, now = Date.now()): number {
-    if (this.hits.size > 5000) for (const [k, b] of this.hits) if (b.resetAt <= now) this.hits.delete(k);
+    if (now - this.lastSweep > Math.min(this.ms, 60_000)) {
+      this.lastSweep = now;
+      for (const [k, b] of this.hits) if (b.resetAt <= now) this.hits.delete(k);
+    }
     const b = this.hits.get(key);
     if (!b || b.resetAt <= now) {
+      if (b) this.hits.delete(key);
+      while (this.hits.size >= this.maxKeys) {
+        const oldest = this.hits.keys().next().value;
+        if (oldest === undefined) break;
+        this.hits.delete(oldest);
+      }
       this.hits.set(key, { count: 1, resetAt: now + this.ms });
       return 0;
     }
@@ -338,6 +367,29 @@ class Window {
     if (!b || b.resetAt <= now || b.count < this.limit) return 0;
     return Math.max(1, Math.ceil((b.resetAt - now) / 1000));
   }
+  /** Take back one hit (an attempt counted up front that turned out not to count). */
+  undo(key: string, now = Date.now()): void {
+    const b = this.hits.get(key);
+    if (b && b.resetAt > now && b.count > 0) b.count -= 1;
+  }
+}
+
+/**
+ * "Only wrong guesses count", without a race: the attempt is counted BEFORE the lookup (so a burst of parallel
+ * guesses can't all pass a check made before any of them was counted) and given back unless it was a wrong guess.
+ * Returns the seconds to wait (0 = go) and `release()`, to call unless the attempt was a wrong guess.
+ */
+function guessAttempt(limits: Array<[Window, string]>): { wait: number; release: () => void } {
+  let wait = 0;
+  for (const [w, k] of limits) wait = Math.max(wait, w.hit(k));
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    for (const [w, k] of limits) w.undo(k);
+  };
+  if (wait) release();
+  return { wait, release };
 }
 
 const TOKEN_RE = /^[A-Za-z0-9._:\-]{20,4096}$/;
@@ -571,7 +623,9 @@ export function createCredits(options: CreditsOptions) {
    */
   async function run<T>(wallet: Wallet | null, opts: RunOptions, fn: (meter: Meter) => Promise<T>): Promise<RunResult<T>> {
     const meter = newMeter();
-    if (!wallet) return { value: await fn(meter), charged: 0, balance: null };
+    // Free AI test mode (server/ai-guard.ts: automated requests, or off Cloud Run): Gemini answers with fixtures,
+    // so nothing is charged and an empty wallet is never refused.
+    if (!wallet || aiFixturesNow()) return { value: await fn(meter), charged: 0, balance: null };
     wallet = await currentWeb(wallet).catch(() => wallet!);
 
     const holdId = randomBytes(9).toString('hex');
@@ -936,13 +990,17 @@ export function createCredits(options: CreditsOptions) {
         return out.status === 200 ? `credited ${String(out.body.credited)}` : String(out.body.error);
       }
       case 'charge.dispute.closed': {
-        // Won disputes (status "won"): Stripe returns the money, so the Sparks the dispute took come back.
+        // Won disputes (status "won") and inquiries closed without a chargeback ("warning_closed"): the money stays
+        // with Mohit, so the Sparks the dispute took come back (never the part a refund took).
         // Needs the charge.dispute.closed event enabled on the webhook endpoint in the Stripe Dashboard.
-        if (obj.status !== 'won') return 'ignored (dispute not won)';
+        if (obj.status !== 'won' && obj.status !== 'warning_closed') return 'ignored (dispute not won)';
         const pi = typeof obj.payment_intent === 'string' ? obj.payment_intent : '';
         if (!pi) return 'ignored (no payment intent)';
         const g = await store.voidGift({ secondaryKey: `stripe:${pi}` }, 'dispute_won', now(), true);
-        if (g) return `gift code ${g.outcome} (dispute won)`;
+        if (g) {
+          if (g.account && g.reversed && g.reversed < 0) console.log(`[credits] ${app}: +${-g.reversed} (gift ${g.code.slice(0, 4)}…, dispute won) back to ${mask(g.account.split(':').pop() ?? '')}, balance ${g.balance}`);
+          return `gift code ${g.outcome} (dispute won)`;
+        }
         const r = await store.reversePurchase({ secondaryKey: `stripe:${pi}` }, 0, 'dispute_won', now());
         if (!r) return 'ignored (unknown purchase)';
         if (r.reversed < 0) console.log(`[credits] ${app}: +${-r.reversed} (dispute won) for ${mask(r.account.replace(/^web:/, ''))}, balance ${r.balance}`);
@@ -959,11 +1017,18 @@ export function createCredits(options: CreditsOptions) {
           fraction = amount > 0 && Number.isFinite(refunded) ? refunded / amount : 1;
         }
         const reason = event.type === 'charge.refunded' ? 'refund' : 'dispute';
-        // A gift credited nobody: its code is switched off if unused; a used one is logged (can't be taken back).
-        const g = await store.voidGift({ secondaryKey: `stripe:${pi}` }, reason, now());
+        // A gift credited nobody: an unused code is switched off; a used one's Sparks come back from the wallet that
+        // redeemed it (same rules as a purchase: proportional refunds, all while disputed; never below 0).
+        const g = await store.voidGift({ secondaryKey: `stripe:${pi}` }, reason, now(), false, fraction);
         if (g) {
-          if (g.outcome === 'used') console.warn(`[credits] ${app}: ${reason} of gift ${g.code.slice(0, 4)}…: the code was already used, its Sparks stay with the wallet that redeemed it`);
-          else if (g.outcome === 'voided') console.log(`[credits] ${app}: gift ${g.code.slice(0, 4)}… voided (${reason})`);
+          if (g.outcome === 'used') {
+            const who = g.account ? mask(g.account.split(':').pop() ?? '') : 'unknown wallet';
+            console.warn(
+              `[credits] ${app}: ${reason} of gift ${g.code.slice(0, 4)}…: the code was already used; -${g.reversed ?? 0} from ${who}` +
+                (g.shortfall ? ` (${g.shortfall} Sparks already spent, not recovered)` : '') +
+                (g.balance !== undefined ? `, balance ${g.balance}` : ''),
+            );
+          } else if (g.outcome === 'voided') console.log(`[credits] ${app}: gift ${g.code.slice(0, 4)}… voided (${reason})`);
           return `gift code ${g.outcome} (${reason})`;
         }
         const r = await store.reversePurchase({ secondaryKey: `stripe:${pi}` }, fraction, reason, now());
@@ -988,13 +1053,22 @@ export function createCredits(options: CreditsOptions) {
     const code = typeof raw === 'string' ? raw.trim() : '';
     // Only unknown codes count (5 per hour per address, 5 per day per wallet): friends redeeming a shared code
     // on one Wi-Fi aren't blocked (nor by an expired or used-up code), guessing is.
-    const wait = Math.max(ownerIpLimit.peek(ipOf(req)), ownerWalletLimit.peek(wallet.key));
-    if (wait) return { status: 429, body: { error: 'rate_limited', retryAfter: wait } };
+    const attempt = guessAttempt([
+      [ownerIpLimit, ipOf(req)],
+      [ownerWalletLimit, wallet.key],
+    ]);
+    if (attempt.wait) return { status: 429, body: { error: 'rate_limited', retryAfter: attempt.wait } };
+    let wrong = false;
+    try {
+      return await checkCode(wallet, code, () => (wrong = true));
+    } finally {
+      if (!wrong) attempt.release();
+    }
+  }
+  /** redeemCode's lookup; calls `markWrong` for an unknown code (the only outcome that counts as a guess). */
+  async function checkCode(wallet: Wallet, code: string, markWrong: () => void): Promise<{ status: number; body: Record<string, unknown> }> {
     const miss = (error: string) => {
-      if (error === 'wrong_code') {
-        ownerIpLimit.hit(ipOf(req));
-        ownerWalletLimit.hit(wallet.key);
-      }
+      if (error === 'wrong_code') markWrong();
       return { status: 403, body: { error } };
     };
     if (!code || code.length > 200) return { status: 400, body: { error: 'invalid' } };
@@ -1049,14 +1123,21 @@ export function createCredits(options: CreditsOptions) {
     }
     const code = typeof body.linkCode === 'string' ? normalizeLinkCode(body.linkCode) : '';
     const ip = clientIp(req);
-    const waitIp = ownerIpLimit.peek(ipKey(ip));
-    if (waitIp) return { status: 429, body: { error: 'rate_limited', retryAfter: waitIp } };
-    if (code.length !== LINK_CODE_LENGTH) return { status: 400, body: { error: 'invalid' } };
-    const targetKey = await store.takeLinkCode(createHash('sha256').update(code).digest('hex'), now());
-    if (!targetKey || !targetKey.startsWith('web:')) {
-      ownerIpLimit.hit(ipKey(ip));
-      return { status: 403, body: { error: 'wrong_link_code' } };
+    const attempt = guessAttempt([[ownerIpLimit, ipKey(ip)]]);
+    if (attempt.wait) return { status: 429, body: { error: 'rate_limited', retryAfter: attempt.wait } };
+    if (code.length !== LINK_CODE_LENGTH) {
+      attempt.release();
+      return { status: 400, body: { error: 'invalid' } };
     }
+    let targetKey: string | null;
+    try {
+      targetKey = await store.takeLinkCode(createHash('sha256').update(code).digest('hex'), now());
+    } catch (err) {
+      attempt.release();
+      throw err;
+    }
+    if (!targetKey || !targetKey.startsWith('web:')) return { status: 403, body: { error: 'wrong_link_code' } }; // counted
+    attempt.release();
     if (!wallet || wallet.kind !== 'web') {
       const fresh = randomBytes(24).toString('base64url');
       wallet = webWallet(fresh, ip);
@@ -1095,17 +1176,23 @@ export function createCredits(options: CreditsOptions) {
       return { status: 200, body: { ok: true, code } };
     }
     const ip = ipOf(req);
-    const wait = Math.max(backupIpLimit.peek(ip), wallet ? backupWalletLimit.peek(wallet.key) : 0);
-    if (wait) return { status: 429, body: { error: 'rate_limited', retryAfter: wait } };
+    const attempt = guessAttempt(wallet ? [[backupIpLimit, ip], [backupWalletLimit, wallet.key]] : [[backupIpLimit, ip]]);
+    if (attempt.wait) return { status: 429, body: { error: 'rate_limited', retryAfter: attempt.wait } };
     const entered = typeof body.backupCode === 'string' ? normalizeBackupCode(body.backupCode.slice(0, 200)) : '';
-    if (entered.length !== BACKUP_CODE_GROUPS * BACKUP_CODE_GROUP_LENGTH) return { status: 400, body: { error: 'invalid' } };
-    const next = randomCode(BACKUP_CODE_GROUPS, BACKUP_CODE_GROUP_LENGTH);
-    const account = await store.useBackupCode(backupHash(entered), backupHash(next), now());
-    if (!account || !account.startsWith('web:')) {
-      backupIpLimit.hit(ip);
-      if (wallet) backupWalletLimit.hit(wallet.key);
-      return { status: 403, body: { error: 'wrong_backup_code' } };
+    if (entered.length !== BACKUP_CODE_GROUPS * BACKUP_CODE_GROUP_LENGTH) {
+      attempt.release();
+      return { status: 400, body: { error: 'invalid' } };
     }
+    const next = randomCode(BACKUP_CODE_GROUPS, BACKUP_CODE_GROUP_LENGTH);
+    let account: string | null;
+    try {
+      account = await store.useBackupCode(backupHash(entered), backupHash(next), now());
+    } catch (err) {
+      attempt.release();
+      throw err;
+    }
+    if (!account || !account.startsWith('web:')) return { status: 403, body: { error: 'wrong_backup_code' } }; // counted
+    attempt.release();
     if (!wallet || wallet.kind !== 'web') wallet = webWallet(randomBytes(24).toString('base64url'), clientIp(req));
     const targetKey = await store.resolveAccount(account);
     const group = await currentWeb(wallet);

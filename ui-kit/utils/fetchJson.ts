@@ -18,10 +18,41 @@ export class FetchError extends Error {
     this.body = init.body;
     this.attempts = init.attempts;
   }
-  /** True for errors worth a Retry button (timeouts, network, 429, 5xx). */
-  get retryable(): boolean {
-    return this.kind === 'timeout' || this.kind === 'network' || (this.kind === 'http' && (this.status === 429 || this.status >= 500));
+  /** The server's machine-readable code: body.code, else a code-like body.error ("rate_limited"), else ''. */
+  get code(): string {
+    return serverCode(this.body);
   }
+  /**
+   * True for errors worth a Retry button (timeouts, network, 429, 5xx). A 429 that names its own `code` (e.g.
+   * login_locked) is the server's final word for now, not a blip: not retryable.
+   */
+  get retryable(): boolean {
+    if (this.kind === 'timeout' || this.kind === 'network') return true;
+    if (this.kind !== 'http') return false;
+    if (this.status === 429) return !(this.body && typeof this.body === 'object' && typeof (this.body as { code?: unknown }).code === 'string');
+    return this.status >= 500;
+  }
+}
+
+const CODE_RE = /^[a-z][a-z0-9_]{1,63}$/;
+/** body.code, or body.error when it is a code ("rate_limited") rather than a sentence. */
+export function serverCode(body: unknown): string {
+  if (!body || typeof body !== 'object') return '';
+  const b = body as { code?: unknown; error?: unknown };
+  if (typeof b.code === 'string' && b.code) return b.code;
+  return typeof b.error === 'string' && CODE_RE.test(b.error) ? b.error : '';
+}
+
+/**
+ * The text a failed answer shows: the server's own `message`, else its `error` when that is a sentence (not a
+ * code), else a friendly default for the status. A 429's own explanation ("Try again in 15 minutes") is kept.
+ */
+export function serverMessage(body: unknown): string {
+  if (!body || typeof body !== 'object') return '';
+  const b = body as { message?: unknown; error?: unknown };
+  if (typeof b.message === 'string' && b.message.trim() && b.message.length <= 300) return b.message;
+  if (typeof b.error === 'string' && b.error.trim() && !CODE_RE.test(b.error)) return b.error;
+  return '';
 }
 
 export interface FetchJsonOptions extends Omit<RequestInit, 'body' | 'signal'> {
@@ -134,10 +165,7 @@ export async function fetchJson<T = unknown>(url: string, options: FetchJsonOpti
         }
       } else if (responseType === 'json') parsed = null;
       if (!res.ok) {
-        const serverMsg = parsed && typeof parsed === 'object' && 'error' in parsed && typeof (parsed as { error: unknown }).error === 'string'
-          ? (parsed as { error: string }).error
-          : '';
-        throw new FetchError('http', serverMsg || friendly('http', res.status), { status: res.status, url, body: parsed, attempts: attempt + 1 });
+        throw new FetchError('http', serverMessage(parsed) || friendly('http', res.status), { status: res.status, url, body: parsed, attempts: attempt + 1 });
       }
       return parsed as T;
     } catch (e) {

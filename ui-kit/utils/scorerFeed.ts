@@ -26,10 +26,10 @@ export function reportToScorer(data: ScoreCardData): void {
       emoji: data.emoji,
       headline: data.headline,
       players: (data.players ?? []).slice(0, 16).map((p) => ({ name: String(p.name).slice(0, 40), score: p.score, winner: !!p.winner, ai: !!p.ai })),
-      at: Date.now(),
     });
-    if (sent.has(body.replace(/"at":\d+/, ''))) return;
-    sent.add(body.replace(/"at":\d+/, ''));
+    // No client time: Scorer stamps the result itself when it arrives.
+    if (sent.has(body)) return;
+    sent.add(body);
     void fetch(SCORER_FEED_URL, { method: 'POST', mode: 'no-cors', keepalive: true, headers: { 'content-type': 'text/plain' }, body }).catch(() => {});
   } catch {
     /* never let reporting break a game */

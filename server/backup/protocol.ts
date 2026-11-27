@@ -1,4 +1,4 @@
-// Synced from app-platform/ui-kit/utils/backupProtocol.ts. Do not edit here. VERSION 2f77c7c 2026-11-27T03:20:51Z
+// Synced from app-platform/ui-kit/utils/backupProtocol.ts. Do not edit here. VERSION 1613fc1 2026-11-27T05:02:42Z
 /* generated from app-platform/ui-kit — edit there and re-sync. */
 /**
  * Backup / sync wire format, shared by the browser engine (utils/backup.ts) and the server

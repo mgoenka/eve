@@ -21,8 +21,8 @@
 // imported lazily so web-only traffic and apps without Firestore never load it.
 import type { DocumentReference, Firestore, Transaction } from '@google-cloud/firestore';
 import { COLLECTIONS, WEB_SWITCH_DOC } from './config.ts';
-import { giftRecordOf, giftVoidStep, hasPromoLimit, liveClaims, liveHeld, promoProblem } from './store.ts';
-import type { AccountMeta, AccountState, ChargeInput, CreditPurchaseInput, CreditStore, GiftInput, GiftRecord, LedgerEntry, MergeResult, PromoCode, PromoResult, PurchaseRecord, StarterOutcome, StarterRule, StarterState } from './store.ts';
+import { giftClawEntry, giftClawStep, giftRecordOf, giftVoidStep, hasPromoLimit, liveClaims, liveHeld, promoProblem, reversalStep } from './store.ts';
+import type { AccountMeta, AccountState, ChargeInput, CreditPurchaseInput, CreditStore, GiftInput, GiftRecord, GiftVoidResult, LedgerEntry, MergeResult, PromoCode, PromoResult, PurchaseRecord, StarterOutcome, StarterRule, StarterState } from './store.ts';
 
 type Holds = Record<string, { credits: number; expiresAt: number }>;
 interface AccountDoc {
@@ -469,14 +469,19 @@ export class FirestoreCreditStore implements CreditStore {
         accRefNow = nextRef;
         doc = next.data() as AccountDoc;
       }
-      const target = Math.min(rec.credits, Math.max(0, Math.round(rec.credits * Math.min(1, Math.max(0, fraction)))));
-      const delta = target - (rec.reversedCredits ?? 0);
-      // delta < 0 gives Sparks back (a dispute Mohit won: fraction 0 restores what the dispute took).
-      if (delta === 0) return { reversed: 0, balance: doc.balance, account: accRefNow.id };
+      const step = reversalStep(rec, fraction, reason);
+      const delta = step.target - (rec.reversedCredits ?? 0);
+      const state = { refundFraction: step.refundFraction, disputed: step.disputed };
+      const stateChanged = (rec.refundFraction ?? 0) !== step.refundFraction || (rec.disputed === true) !== step.disputed;
+      // delta < 0 gives Sparks back (a dispute Mohit won restores what the dispute took, not what was refunded).
+      if (delta === 0) {
+        if (stateChanged) tx.update(purchaseRef, state);
+        return { reversed: 0, balance: doc.balance, account: accRefNow.id };
+      }
       const balance = doc.balance - delta;
       const at = now.toISOString();
       tx.update(accRefNow, { balance, updatedAt: at });
-      tx.update(purchaseRef, { reversedCredits: target, reversedAt: at });
+      tx.update(purchaseRef, { reversedCredits: step.target, reversedAt: at, ...state });
       const e: LedgerEntry = { type: 'reversal', credits: -delta, balanceAfter: balance, at, reason, productId: rec.productId, provider: rec.provider };
       if (rec.orderId) e.orderId = rec.orderId;
       tx.create(accRefNow.collection('ledger').doc(), e);
@@ -519,7 +524,8 @@ export class FirestoreCreditStore implements CreditStore {
       tx.create(redemptionRef, { account: key, credits, at, app: meta.app });
       // Codes without a limit keep no counter: no write to the shared promo doc, so a popular code can't get hot
       // (the redemptions subcollection still records each wallet once).
-      if (hasPromoLimit(promo)) tx.update(promoRef, { redemptions: (promo.redemptions ?? 0) + 1, lastRedeemedAt: at });
+      // Gift codes also remember who redeemed them (a refund or chargeback takes the Sparks back from that wallet).
+      if (hasPromoLimit(promo)) tx.update(promoRef, { redemptions: (promo.redemptions ?? 0) + 1, lastRedeemedAt: at, ...(promo.giftBuyer ? { giftRedeemer: key } : {}) });
       return { ok: true, code, credits, balance };
     });
   }
@@ -638,22 +644,45 @@ export class FirestoreCreditStore implements CreditStore {
     });
   }
 
-  async voidGift(find: { purchaseKey?: string; secondaryKey?: string }, reason: string, now: Date, restore = false) {
+  async voidGift(find: { purchaseKey?: string; secondaryKey?: string }, reason: string, now: Date, restore = false, fraction = 1): Promise<GiftVoidResult | null> {
     const purchaseKey = await this.purchaseKeyOf(find);
     if (!purchaseKey) return null;
     const db = await this.db();
     const purchaseRef = db.collection(COLLECTIONS.purchases).doc(purchaseKey);
-    return db.runTransaction(async (tx) => {
+    return db.runTransaction(async (tx): Promise<GiftVoidResult | null> => {
+      // Every read first (purchase, code, redeemer and the wallet it was merged into), then the writes.
       const pSnap = await tx.get(purchaseRef);
       const rec = pSnap.exists ? (pSnap.data() as PurchaseRecord) : null;
       if (!rec?.giftCode) return null;
       const promoRef = db.collection(COLLECTIONS.promos).doc(rec.giftCode);
       const promoSnap = await tx.get(promoRef);
       if (!promoSnap.exists) return null;
-      const step = giftVoidStep(rec, promoSnap.data() as PromoCode, reason, restore, now);
+      const promo = promoSnap.data() as PromoCode;
+      const step = giftVoidStep(rec, promo, reason, restore, now);
+      let found: { ref: DocumentReference; doc: AccountDoc } | null = null;
+      if ((promo.redemptions ?? 0) >= 1) {
+        // Codes redeemed before giftRedeemer was recorded: the one redemption doc says who.
+        let redeemer = promo.giftRedeemer;
+        if (!redeemer) {
+          const r = await tx.get(promoRef.collection('redemptions').limit(1));
+          redeemer = r.empty ? undefined : (r.docs[0]!.data() as { account?: string }).account ?? r.docs[0]!.id;
+        }
+        if (redeemer) found = await FirestoreCreditStore.followMerges(tx, db, redeemer);
+      }
       if (step.promo) tx.update(promoRef, step.promo);
-      if (step.purchase) tx.update(purchaseRef, step.purchase);
-      return { outcome: step.outcome, code: rec.giftCode };
+      const base: GiftVoidResult = { outcome: step.outcome, code: rec.giftCode };
+      if (!found) {
+        if (step.purchase) tx.update(purchaseRef, step.purchase);
+        return base;
+      }
+      const c = giftClawStep(rec, fraction, reason, found.doc.balance);
+      tx.update(purchaseRef, { ...(step.purchase ?? {}), reversedCredits: c.target, clawedCredits: c.clawed, refundFraction: c.refundFraction, disputed: c.disputed });
+      const result: GiftVoidResult = { outcome: restore ? (c.change > 0 ? 'restored' : 'unchanged') : 'used', code: rec.giftCode, reversed: c.change ? -c.change : 0, account: found.ref.id, balance: found.doc.balance };
+      if (!c.write) return result;
+      const balance = found.doc.balance + c.change;
+      if (c.change !== 0) tx.update(found.ref, { balance, updatedAt: now.toISOString() });
+      tx.create(found.ref.collection('ledger').doc(), giftClawEntry(rec, c, reason, balance, now));
+      return { ...result, balance, ...(c.shortfall ? { shortfall: c.shortfall } : {}) };
     });
   }
 

@@ -67,7 +67,8 @@ async function call<T>(
   opts: {
     timeoutMs: number;
     retries?: number;
-    ai?: true | 'background';
+    /** true: a tap. 'background': an optional extra (skipped when it could spend Sparks the user didn't choose). 'core': content the user asked for (the night's story and its narration): charged like a tap, quiet like background. */
+    ai?: true | 'background' | 'core';
     signal?: AbortSignal;
     /** A background call the user did choose (Eve's voice after "Activate"): not gated by speculativeAiAllowed. */
     userAsked?: boolean;
@@ -91,7 +92,7 @@ async function call<T>(
       signal: opts.signal,
     };
     const data = opts.ai
-      ? await aiFetchJson<T>(url, { ...request, ai: opts.ai === 'background' ? 'background' : 'action', toastOnBusy: false })
+      ? await aiFetchJson<T>(url, { ...request, ai: opts.ai === true ? 'action' : opts.ai, toastOnBusy: false })
       : await fetchJson<T>(url, request);
     publishLimit((data as any)?.imageLimit);
     return data;
@@ -193,7 +194,7 @@ export async function narrationText(req: NarrationRequest): Promise<{ narration:
   return runLocalFirst({
     minOutputTokens: LOCAL_TOKENS.narration,
     local: () => localNarration(req),
-    server: () => call('/api/plan-experience/narration', req, { timeoutMs: 45_000, ai: 'background' }),
+    server: () => call('/api/plan-experience/narration', req, { timeoutMs: 45_000, ai: 'core' }),
   });
 }
 
@@ -294,7 +295,7 @@ export async function eveStory(input: {
     // Longer evenings (4-6 stops) need room for a beat per extra stop.
     minOutputTokens: LOCAL_TOKENS.story + Math.max(0, input.stops.length - 3) * 90,
     local: () => localStory(input),
-    server: () => call('/api/eve-story', input, { timeoutMs: 45_000, ai: 'background', userAsked: !!opts.userAsked }),
+    server: () => call('/api/eve-story', input, { timeoutMs: 45_000, ai: 'core' }),
   });
 }
 

@@ -165,6 +165,47 @@ async function androidGenerate(req: AndroidLlmRequest, ms: number, signal?: Abor
   }
 }
 
+/**
+ * Chrome writes "Unable to create a text session…" to the console whenever its engine can't run on this device,
+ * on every probe. After the first such answer this browser skips the browser engine for a day (no probe, so no
+ * log, and features go straight to the server), unless localStorage mg_debug_local_ai = '1'. A click on "use this
+ * device's AI" (prepareLocalAi) or turning the setting on checks again at once.
+ */
+const QUIET_KEY = 'mg_local_ai_quiet_until';
+const QUIET_MS = 24 * 3600_000;
+const debugLocalAi = () => {
+  try {
+    return globalThis.localStorage?.getItem('mg_debug_local_ai') === '1';
+  } catch {
+    return false;
+  }
+};
+const browserQuiet = () => {
+  if (debugLocalAi()) return false;
+  try {
+    return Number(globalThis.localStorage?.getItem(QUIET_KEY)) > Date.now();
+  } catch {
+    return false;
+  }
+};
+const quietBrowser = (why: unknown) => {
+  if (debugLocalAi()) console.debug('[localAi] browser engine unavailable:', why);
+  try {
+    globalThis.localStorage?.setItem(QUIET_KEY, String(Date.now() + QUIET_MS));
+  } catch {
+    /* storage off: probe again next time */
+  }
+};
+const unquietBrowser = () => {
+  try {
+    globalThis.localStorage?.removeItem(QUIET_KEY);
+  } catch {
+    /* ignore */
+  }
+};
+/** The engine's "can't make a session on this device" answer (vs a one-off failure). */
+const noSession = (e: unknown) => /unable to create|NotSupportedError|not supported|service is not running/i.test(`${(e as { name?: string } | null)?.name ?? ''} ${(e as { message?: string } | null)?.message ?? ''}`);
+
 let probed = false;
 let probeDone = false;
 let probedAt = 0;
@@ -190,9 +231,18 @@ export function refreshLocalAi(force = false): Promise<LocalAiInfo> {
         return info;
       }
       const L = lm();
+      if (L && browserQuiet()) {
+        set({ state: 'unavailable', engine: null });
+        return info;
+      }
       if (L) {
-        // Chrome may reject (and log) when it can't create a text session on this device: that just means "unavailable".
-        const state = await L.availability(TEXT_IO).catch(() => 'unavailable' as const);
+        // Chrome may reject (and log) when it can't create a text session on this device: that just means
+        // "unavailable", and this browser stays quiet about it for a day (see QUIET_KEY).
+        const state = await L.availability(TEXT_IO).catch((e: unknown) => {
+          quietBrowser(e);
+          return 'unavailable' as const;
+        });
+        if (state === 'unavailable') quietBrowser('availability: unavailable');
         let image = false;
         if (state === 'available') image = (await L.availability(IMAGE_IO).catch(() => 'unavailable')) === 'available';
         set({ state, engine: state === 'unavailable' ? null : 'browser', image, maxOutputTokens: BROWSER_MAX_OUTPUT });
@@ -218,7 +268,8 @@ export function refreshLocalAi(force = false): Promise<LocalAiInfo> {
  * Resolves true once the model is ready.
  */
 export async function prepareLocalAi(): Promise<boolean> {
-  const cur = await refreshLocalAi();
+  unquietBrowser(); // the person asked: check this device again now
+  const cur = await refreshLocalAi(info.state === 'unavailable');
   if (cur.state === 'available') return true;
   if (cur.state !== 'downloadable' && cur.state !== 'downloading') return false;
   set({ state: 'downloading', progress: 0 });
@@ -307,6 +358,10 @@ export async function localPrompt(o: LocalPromptOptions): Promise<string> {
       session = await withTimeout(created, Math.min(CREATE_TIMEOUT_MS, ms), ctl);
     } catch (e) {
       void created.then((s) => s.destroy(), () => {});
+      if (!o.signal?.aborted && noSession(e)) {
+        quietBrowser(e);
+        set({ state: 'unavailable', engine: null });
+      }
       throw o.signal?.aborted ? abortError() : e;
     }
     try {
@@ -440,7 +495,10 @@ if (typeof window !== 'undefined') {
   // No probe on load (it is lazy). Once something has asked: check again when the setting is turned back on,
   // and when the page becomes visible again (a download may have finished meanwhile), at most every 30 s.
   subscribeSettings(() => {
-    if (probed && localAiEnabled()) void refreshLocalAi(true);
+    if (probed && localAiEnabled()) {
+      unquietBrowser();
+      void refreshLocalAi(true);
+    }
   });
   let lastVisible = Date.now();
   document.addEventListener('visibilitychange', () => {

@@ -1,4 +1,4 @@
-// Synced from app-platform/server-kit/backup/index.ts. Do not edit here. VERSION 2f77c7c 2026-11-27T03:20:51Z
+// Synced from app-platform/server-kit/backup/index.ts. Do not edit here. VERSION 1613fc1 2026-11-27T05:02:42Z
 /**
  * Backup / sync server: a private-key record store (Firestore, or memory for local runs and tests) and an Express
  * router with rate limits, size caps and one-use link codes. The client is ui-kit/utils/backup.ts; the wire format
@@ -13,7 +13,7 @@
  * Firestore layout (default; Scorer keeps its own top-level names):
  *   mgBackup/{app}/spaces/{sha256(app:key)}             { count, createdAt, lastSeenAt }
  *   mgBackup/{app}/spaces/{id}/records/{recordId}       { kind, updatedAt, deleted, data (JSON string), seq }
- *   mgBackup/{app}/links/{sha256(app-link:code)}        { key, expiresAt }   one use, 10 minutes
+ *   mgBackup/{app}/links/{sha256(app-link:code)}        { key, expiresAt, expireAt }   one use, 10 minutes (TTL on expireAt)
  */
 import { createHash, randomBytes } from "node:crypto";
 import { isIPv6 } from "node:net";
@@ -174,7 +174,9 @@ export function createFirestoreStore(names: StoreNames, projectId?: string): Bac
       const fs = await db();
       const code = newLinkCode();
       const expiresAt = Date.now() + LINK_TTL_MS;
-      await fs.collection(names.links).doc(codeIdOf(names, code)).set({ key, expiresAt });
+      // expireAt: a Firestore TTL policy (collection group "links", field expireAt) deletes codes nobody redeemed,
+      // which otherwise keep the raw key (the one that decrypts an encrypted space) in Firestore for good.
+      await fs.collection(names.links).doc(codeIdOf(names, code)).set({ key, expiresAt, expireAt: new Date(expiresAt) });
       return { code, expiresAt };
     },
     async erase(spaceId) {
@@ -249,6 +251,12 @@ export class RateLimiter {
     }
     b.count += 1;
     return b.count <= this.limit ? 0 : Math.max(1, Math.ceil((b.resetAt - now) / 1000));
+  }
+
+  /** Take back one hit (an attempt counted up front that turned out not to count). */
+  undo(key: string): void {
+    const b = this.buckets.get(key);
+    if (b && b.resetAt > Date.now() && b.count > 0) b.count -= 1;
   }
 }
 
@@ -450,16 +458,24 @@ export function backupRouter<R>(express: ExpressLike<R>, opts: BackupRouterOptio
       res.status(400).json({ error: "wrong_code" });
       return;
     }
+    // Counted BEFORE the lookup and given back unless it was a wrong code: past the limit a guess is refused
+    // without being tried (checking only after the lookup still let every guess through), and parallel guesses
+    // can't all pass a check made before any of them was counted.
+    const wait = wrongCodesPerHour.hit(ip);
+    if (wait) {
+      wrongCodesPerHour.undo(ip);
+      return tooMany(res, wait);
+    }
     try {
       const key = await store.redeemLink(code);
       if (!key) {
-        const wait = wrongCodesPerHour.hit(ip);
-        if (wait) return tooMany(res, wait);
         res.status(404).json({ error: "wrong_code" });
         return;
       }
+      wrongCodesPerHour.undo(ip);
       res.json({ key });
     } catch (err) {
+      wrongCodesPerHour.undo(ip);
       unavailable(res, "link redeem", err);
     }
   });

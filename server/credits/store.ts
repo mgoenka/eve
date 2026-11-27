@@ -27,6 +27,8 @@ export interface LedgerEntry {
   reason?: string;
   /** A tip ("Support Mohit's apps", website): the purchase's Sparks are the thank-you. */
   tip?: boolean;
+  /** Gift clawback: Sparks that should have been taken back but weren't there (the balance never goes below 0). */
+  shortfall?: number;
 }
 
 /** Stored on the account doc. kind 'android': app = package, id = app user id; kind 'web': app = '*', id = wallet id. */
@@ -94,6 +96,12 @@ export interface PurchaseRecord {
   createdAt: string;
   /** Credits taken back after a refund or dispute (cumulative). */
   reversedCredits?: number;
+  /** Largest refunded share of the payment seen so far (0..1; refunds only grow, so a late event never lowers it). */
+  refundFraction?: number;
+  /** A dispute is open (true from charge.dispute.created until it is won / the inquiry closes). */
+  disputed?: boolean;
+  /** Used gift: Sparks actually taken back from the redeeming wallet (reversedCredits is what was owed). */
+  clawedCredits?: number;
   /** Reversals applied once each (Play voided purchase records), by id → credits. */
   reversals?: Record<string, number>;
   /** Gift purchase: the one-use code made for it (no Sparks were credited to `account`, the buyer). */
@@ -136,6 +144,19 @@ export interface GiftRecord {
 
 export type GiftVoidOutcome = 'voided' | 'already' | 'used' | 'restored' | 'unchanged';
 
+/**
+ * voidGift's answer. For a used code, `reversed` is what this event moved on the redeeming wallet (`account`):
+ * > 0 taken back, < 0 given back (a won dispute), with `shortfall` = what should have been taken but wasn't there.
+ */
+export interface GiftVoidResult {
+  outcome: GiftVoidOutcome;
+  code: string;
+  reversed?: number;
+  shortfall?: number;
+  account?: string;
+  balance?: number;
+}
+
 export interface CreditPurchaseInput {
   /** Wallet key to credit. */
   key: string;
@@ -163,6 +184,8 @@ export interface PromoCode {
   giftBuyer?: string;
   giftPurchaseKey?: string;
   giftSession?: string;
+  /** Gift codes: the wallet key that redeemed it (so a refund or chargeback can take the Sparks back). */
+  giftRedeemer?: string;
   /** Why a gift code was switched off ("refund" | "dispute"). */
   voidReason?: string;
   credits: number;
@@ -183,6 +206,25 @@ export type PromoResult = { ok: true; code: string; credits: number; balance: nu
 /** True when the code has a redemption limit (maxRedemptions is a number). */
 export function hasPromoLimit(p: PromoCode): p is PromoCode & { maxRedemptions: number } {
   return typeof p.maxRedemptions === 'number' && Number.isFinite(p.maxRedemptions);
+}
+
+/**
+ * What one Stripe refund / dispute event makes the purchase's total reversal (both stores). The state is kept per
+ * cause, so events in any order (Stripe retries, out-of-order delivery) end at the same total:
+ *  - 'refund' (fraction = amount_refunded / amount, cumulative at Stripe): the refunded share only grows, so a late or
+ *    repeated event with a smaller share never gives Sparks back;
+ *  - 'dispute': everything is taken back while the dispute is open;
+ *  - 'dispute_won' (also a closed inquiry): the dispute's part comes back, but never the part that was refunded.
+ * Target = round(credits × (disputed ? 1 : refunded share)).
+ */
+export function reversalStep(rec: PurchaseRecord, fraction: number, reason: string): { target: number; refundFraction: number; disputed: boolean } {
+  let refundFraction = Math.min(1, Math.max(0, rec.refundFraction ?? 0));
+  let disputed = rec.disputed === true;
+  if (reason === 'dispute') disputed = true;
+  else if (reason === 'dispute_won') disputed = false;
+  else refundFraction = Math.max(refundFraction, Math.min(1, Math.max(0, Number.isFinite(fraction) ? fraction : 1)));
+  const target = Math.min(rec.credits, Math.max(0, Math.round(rec.credits * (disputed ? 1 : refundFraction))));
+  return { target, refundFraction, disputed };
 }
 
 /** UTC day "YYYY-MM-DD" (starter budget doc id). */
@@ -279,9 +321,10 @@ export interface CreditStore {
    */
   claimStarter(addressKey: string, limit: number, windowMs: number, now: Date, dryRun?: boolean): Promise<boolean>;
   /**
-   * Take back credits of a refunded or disputed purchase so that, in total, round(credits × fraction) are
-   * reversed (idempotent: repeating an event reverses nothing more). Finds the purchase by its key or a
-   * secondary key ("stripe:<payment intent>"). The balance may go below zero. Null: purchase unknown.
+   * Take back credits of a refunded or disputed purchase (see reversalStep: reason 'refund' with the refunded share
+   * `fraction`, 'dispute', or 'dispute_won'), so that the total reversed matches every event seen so far, in any
+   * order (idempotent: repeating an event reverses nothing more). Finds the purchase by its key or a secondary key
+   * ("stripe:<payment intent>"). The balance may go below zero. Null: purchase unknown.
    */
   reversePurchase(
     find: { purchaseKey?: string; secondaryKey?: string },
@@ -318,11 +361,14 @@ export interface CreditStore {
    */
   createGift(g: GiftInput, now: Date): Promise<{ code: string; credits: number; expiresAt: string; buyer: string; duplicate: boolean }>;
   /**
-   * After a refund or dispute of a gift purchase: switch its code off if nobody used it yet ('voided'), or log on the
-   * purchase that it was already used ('used'; the Sparks can't be taken back). `restore` (a dispute Mohit won):
-   * switch a code voided by that dispute back on ('restored'). Null: no such purchase, or it isn't a gift.
+   * After a refund or dispute of a gift purchase: switch its code off if nobody used it yet ('voided'). A used code
+   * ('used'): take its Sparks back from the wallet that redeemed it (following merges) with the reversalStep rules
+   * (`reason` 'refund' with the refunded share `fraction` | 'dispute' | 'dispute_won'), never below 0 (the shortfall
+   * is written in that wallet's ledger), idempotent; also logged on the purchase. `restore` (a dispute Mohit won):
+   * switch a code voided by that dispute back on, or give a used code's redeemer back what the dispute took
+   * ('restored'). Null: no such purchase, or it isn't a gift.
    */
-  voidGift(find: { purchaseKey?: string; secondaryKey?: string }, reason: string, now: Date, restore?: boolean): Promise<{ outcome: GiftVoidOutcome; code: string } | null>;
+  voidGift(find: { purchaseKey?: string; secondaryKey?: string }, reason: string, now: Date, restore?: boolean, fraction?: number): Promise<GiftVoidResult | null>;
   /** Gift codes bought by these wallets, newest first (at most 50). */
   listGifts(buyerKeys: string[], now: Date): Promise<GiftRecord[]>;
   /** Save `codeHash` as this wallet's backup code, replacing (deleting) its previous one. */
@@ -584,14 +630,16 @@ export class MemoryCreditStore implements CreditStore {
     const key = find.purchaseKey ?? (find.secondaryKey ? this.orders.get(find.secondaryKey) : undefined);
     const rec = key ? this.purchases.get(key) : undefined;
     if (!rec || rec.giftCode) return null; // gifts credited nobody: voidGift handles them
-    const target = Math.min(rec.credits, Math.max(0, Math.round(rec.credits * Math.min(1, Math.max(0, fraction)))));
-    const delta = target - (rec.reversedCredits ?? 0);
+    const step = reversalStep(rec, fraction, reason);
+    const delta = step.target - (rec.reversedCredits ?? 0);
     const accountKey = await this.resolveAccount(rec.account);
     const acc = this.accounts.get(accountKey);
     if (!acc) return null;
-    // delta < 0 gives Sparks back (a dispute Mohit won: fraction 0 restores what the dispute took).
+    rec.refundFraction = step.refundFraction;
+    rec.disputed = step.disputed;
+    // delta < 0 gives Sparks back (a dispute Mohit won restores what the dispute took, not what was refunded).
     if (delta === 0) return { reversed: 0, balance: acc.balance, account: accountKey };
-    rec.reversedCredits = target;
+    rec.reversedCredits = step.target;
     acc.balance -= delta;
     acc.ledger.push({ type: 'reversal', credits: -delta, balanceAfter: acc.balance, at: now.toISOString(), reason, productId: rec.productId, provider: rec.provider, ...(rec.orderId ? { orderId: rec.orderId } : {}) });
     return { reversed: delta, balance: acc.balance, account: accountKey };
@@ -618,6 +666,7 @@ export class MemoryCreditStore implements CreditStore {
     acc.totals.granted += p.credits;
     acc.ledger.push({ type: 'grant', credits: p.credits, balanceAfter: acc.balance, at: now.toISOString(), reason: `promo ${code}` });
     if (hasPromoLimit(p)) p.redemptions += 1; // no limit: no counter (same as the Firestore store)
+    if (p.giftBuyer) p.giftRedeemer = key;
     used.add(key);
     this.promoRedemptions.set(code, used);
     return { ok: true, code, credits: p.credits, balance: acc.balance };
@@ -699,7 +748,7 @@ export class MemoryCreditStore implements CreditStore {
     return { code: g.code, credits: g.credits, expiresAt: g.expiresAt, buyer: g.buyerKey, duplicate: false };
   }
 
-  async voidGift(find: { purchaseKey?: string; secondaryKey?: string }, reason: string, now: Date, restore = false) {
+  async voidGift(find: { purchaseKey?: string; secondaryKey?: string }, reason: string, now: Date, restore = false, fraction = 1): Promise<GiftVoidResult | null> {
     const key = find.purchaseKey ?? (find.secondaryKey ? this.orders.get(find.secondaryKey) : undefined);
     const rec = key ? this.purchases.get(key) : undefined;
     if (!rec?.giftCode) return null;
@@ -708,7 +757,19 @@ export class MemoryCreditStore implements CreditStore {
     const outcome = giftVoidStep(rec, p, reason, restore, now);
     if (outcome.promo) Object.assign(p, outcome.promo);
     if (outcome.purchase) Object.assign(rec, outcome.purchase);
-    return { outcome: outcome.outcome, code: rec.giftCode };
+    if ((p.redemptions ?? 0) < 1) return { outcome: outcome.outcome, code: rec.giftCode };
+    // Used: the Sparks come back from (or, for a won dispute, go back to) the wallet that redeemed the code.
+    const redeemer = p.giftRedeemer ?? [...(this.promoRedemptions.get(rec.giftCode) ?? [])][0];
+    const accountKey = redeemer ? await this.resolveAccount(redeemer) : undefined;
+    const acc = accountKey ? this.accounts.get(accountKey) : undefined;
+    if (!acc || !accountKey) return { outcome: outcome.outcome, code: rec.giftCode };
+    const c = giftClawStep(rec, fraction, reason, acc.balance);
+    Object.assign(rec, { reversedCredits: c.target, clawedCredits: c.clawed, refundFraction: c.refundFraction, disputed: c.disputed });
+    const result: GiftVoidResult = { outcome: restore ? (c.change > 0 ? 'restored' : 'unchanged') : 'used', code: rec.giftCode, reversed: c.change ? -c.change : 0, account: accountKey, balance: acc.balance };
+    if (!c.write) return result;
+    acc.balance += c.change;
+    acc.ledger.push(giftClawEntry(rec, c, reason, acc.balance, now));
+    return { ...result, balance: acc.balance, ...(c.shortfall ? { shortfall: c.shortfall } : {}) };
   }
 
   async listGifts(buyerKeys: string[], now: Date) {
@@ -770,4 +831,38 @@ export function giftVoidStep(
   }
   if (!p.active && (rec.giftVoided === 'refund' || rec.giftVoided === 'dispute')) return { outcome: 'already' };
   return { outcome: 'voided', promo: { active: false, voidReason: reason, voidedAt: at }, purchase: { giftVoided: reason, giftVoidedAt: at } };
+}
+
+/**
+ * A used gift after a refund / dispute event (both stores): the reversalStep target, applied to the wallet that
+ * redeemed the code. More owed: take it, but never more than the balance (the rest is the shortfall, written in the
+ * ledger, never chased later). Less owed (a won dispute): give back what was taken beyond the new target.
+ * `change` is signed for the balance (− taken, + given back); `write` = a ledger entry is due.
+ */
+export function giftClawStep(rec: PurchaseRecord, fraction: number, reason: string, balance: number) {
+  const step = reversalStep(rec, fraction, reason);
+  const before = rec.reversedCredits ?? 0;
+  let clawed = Math.max(0, rec.clawedCredits ?? 0);
+  let change = 0;
+  let shortfall = 0;
+  if (step.target > before) {
+    const want = step.target - before;
+    const take = Math.min(want, Math.max(0, Math.floor(balance)));
+    clawed += take;
+    change = -take;
+    shortfall = want - take;
+  } else if (step.target < before) {
+    const keep = Math.min(clawed, step.target);
+    change = clawed - keep;
+    clawed = keep;
+  }
+  return { ...step, clawed, change, shortfall, write: change !== 0 || shortfall > 0 };
+}
+
+/** The redeeming wallet's ledger entry for a gift clawback (or its return). */
+export function giftClawEntry(rec: PurchaseRecord, c: { change: number; shortfall: number }, reason: string, balanceAfter: number, now: Date): LedgerEntry {
+  const e: LedgerEntry = { type: 'reversal', credits: c.change, balanceAfter, at: now.toISOString(), reason: `gift ${reason}`, productId: rec.productId, provider: rec.provider };
+  if (rec.orderId) e.orderId = rec.orderId;
+  if (c.shortfall > 0) e.shortfall = c.shortfall;
+  return e;
 }

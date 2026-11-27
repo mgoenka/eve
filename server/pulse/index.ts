@@ -1,4 +1,4 @@
-// Synced from app-platform/server-kit/pulse/index.ts. Do not edit here. VERSION a12e840 2026-11-26T20:11:30Z
+// Synced from app-platform/server-kit/pulse/index.ts. Do not edit here. VERSION 1613fc1 2026-11-27T05:02:42Z
 /**
  * Pulse: anonymous, cookie-free usage counts for every app and the website.
  *
@@ -19,6 +19,9 @@
  * Firestore (project public-mohit-260610), days in America/Chicago:
  *   pulse/{app}                    totals: users, sessions, games, uses, seconds, lastAt (last use by others), mine.{same}
  *   pulse/{app}/days/{YYYY-MM-DD}  users, newUsers, sessions, games, uses, seconds, platform.*, form.*, ref.*, tz.*, page.*, mine.{...}
+ *   pulse/{app}/shards/{0..9}               the same totals, written by beacons since 2026-11-27 (one random shard
+ *   pulse/{app}/dayShards/{YYYY-MM-DD}_{0..9}  per beacon, so a busy app never contends on one document); the stats
+ *                                    service reads total = base doc + every shard (counters add up, lastAt = max)
  *   pulse/{app}/games/{fingerprint} at (so a party game shown on six phones counts once)
  *   pulse/{app}/devices/{id}       firstAt, lastAt, lastDay, days, sessions, games, uses, seconds, platform, form, tz, mine
  * Mohit's own devices ("mine": tagged with #mg-me in the URL, or from the stats page) count under mine.* only.
@@ -40,6 +43,12 @@ export const DEVICE_TTL_MS = 395 * 24 * 3600_000; // 13 months
 export const GAME_TTL_MS = 2 * 24 * 3600_000;
 export const DAILY_CAP = 400;
 const MAX_BODY = 1024;
+/** Counter shards per app (totals) and per app-day: each beacon increments one at random. */
+export const COUNTER_SHARDS = 10;
+/** New device ids one address may bring per hour (env PULSE_DEVICES_PER_IP): forged "users" stay cheap. */
+export const DEVICES_PER_IP = Number(process.env.PULSE_DEVICES_PER_IP) || 40;
+/** Beacons one instance counts per day (env PULSE_DAILY_BUDGET): each is a Firestore transaction (~4 writes). */
+export const DAILY_BUDGET = Number(process.env.PULSE_DAILY_BUDGET) || 20_000;
 
 export interface Hit {
   /** Random device id from the browser (never stored as is). */
@@ -179,6 +188,37 @@ export function plan(hit: Hit, dev: Device | null, now: number, freshGame = true
   return { day, mine, device, dayCounts, dims, totals, isNew };
 }
 
+/**
+ * Where one beacon's counters go in Firestore: pulse/{app}/dayShards/{day}_{shard} and pulse/{app}/shards/{shard}.
+ * Readers add every shard to the (older) pulse/{app} and pulse/{app}/days/{day} docs; lastAt is the largest.
+ */
+export function counterDocs(p: NonNullable<ReturnType<typeof plan>>, now: number, shard: number) {
+  const n = Math.max(0, Math.min(COUNTER_SHARDS - 1, Math.floor(shard)));
+  return {
+    dayShard: `${p.day}_${n}`,
+    totalShard: String(n),
+    day: p.mine ? { mine: p.dayCounts } : { ...p.dayCounts, ...p.dims },
+    totals: p.mine ? { mine: p.totals } : p.totals,
+    lastAt: p.mine ? null : now,
+  };
+}
+
+/** Sum counter docs (a base doc and its shards): numbers add, nested maps merge, lastAt is the largest. */
+export function sumCounters(docs: Array<Record<string, any> | null | undefined>): Record<string, any> {
+  const add = (into: Record<string, any>, from: Record<string, any>, top: boolean) => {
+    for (const [k, v] of Object.entries(from ?? {})) {
+      if (top && k === "lastAt") {
+        if (typeof v === "number") into.lastAt = Math.max(into.lastAt ?? 0, v);
+      } else if (typeof v === "number") into[k] = (into[k] ?? 0) + v;
+      else if (v && typeof v === "object" && !Array.isArray(v)) into[k] = add(into[k] ?? {}, v, false);
+    }
+    return into;
+  };
+  const out: Record<string, any> = {};
+  for (const d of docs) if (d) add(out, d, true);
+  return out;
+}
+
 export function createMemoryStore() {
   const devices = new Map<string, Device & Record<string, any>>();
   const days = new Map<string, Record<string, any>>();
@@ -248,8 +288,10 @@ export function createFirestoreStore(projectId = PULSE_PROJECT): PulseStore {
         const devDoc = Object.fromEntries(Object.entries(p.device).map(([k, v]) => [k, counted.includes(k) ? FieldValue.increment(v as number) : v]));
         tx.set(devRef, { ...devDoc, expireAt: new Date(Number(now) + DEVICE_TTL_MS) }, { merge: true });
         // set + merge with nested maps keeps keys like "America/Chicago" as they are (update() would split on dots).
-        tx.set(appRef.collection("days").doc(p.day), inc(p.mine ? { mine: p.dayCounts } : { ...p.dayCounts, ...p.dims }), { merge: true });
-        tx.set(appRef, { ...inc(p.mine ? { mine: p.totals } : p.totals), ...(p.mine ? {} : { lastAt: now }) }, { merge: true });
+        // One random shard per beacon (never the shared day / app doc): see counterDocs.
+        const w = counterDocs(p, now, Math.floor(Math.random() * COUNTER_SHARDS));
+        tx.set(appRef.collection("dayShards").doc(w.dayShard), inc(w.day), { merge: true });
+        tx.set(appRef.collection("shards").doc(w.totalShard), { ...inc(w.totals), ...(w.lastAt ? { lastAt: w.lastAt } : {}) }, { merge: true });
         return "counted" as const;
       });
     },
@@ -287,12 +329,18 @@ class RateLimiter {
   }
 }
 
+/** IPv4 as is; IPv6 by its /64, with "::" expanded first (so 2001:db8::1 and 2001:db8::2 share one key). */
 export function ipKey(ip: string | undefined): string {
   if (!ip) return "unknown";
   const mapped = ip.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i);
   if (mapped) return mapped[1]!;
   if (!isIPv6(ip)) return ip;
-  return ip.split("%")[0]!.toLowerCase().split(":").slice(0, 4).join(":") + "::/64";
+  const addr = ip.split("%")[0]!.toLowerCase();
+  const [head, tail] = addr.split("::");
+  const h = head ? head.split(":") : [];
+  const t = tail ? tail.split(":") : [];
+  const groups = addr.includes("::") ? [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill("0"), ...t] : h;
+  return groups.slice(0, 4).map((g) => parseInt(g || "0", 16).toString(16)).join(":") + "::/64";
 }
 
 // ---------- router ----------
@@ -302,6 +350,8 @@ interface Req {
   body?: any;
   get(name: string): string | undefined;
   on(event: string, cb: (chunk?: any) => void): unknown;
+  removeListener?(event: string, cb: (chunk?: any) => void): unknown;
+  pause?(): unknown;
 }
 interface Res {
   status(code: number): Res;
@@ -333,28 +383,49 @@ export interface PulseRouterOptions {
   perMinute?: number;
   /** Where GET /public reads the rounded totals (default: the pulse service). */
   publicUrl?: string;
+  /** New device ids per address per hour (default DEVICES_PER_IP, env PULSE_DEVICES_PER_IP). */
+  devicesPerIp?: number;
+  /** Beacons counted per instance per day (default DAILY_BUDGET, env PULSE_DAILY_BUDGET). */
+  dailyBudget?: number;
 }
 
 /** The pulse service's rounded public totals. */
 export const PUBLIC_URL = "https://pulse-4161275924.us-west1.run.app/api/public";
 
-const readBody = (req: Req): Promise<string | null> =>
+/**
+ * The beacon body (null: missing, too large or broken). Past MAX_BODY (or a Content-Length over it) the request is
+ * paused and its listeners removed, and `tooLarge` tells the router to answer with Connection: close, so the rest
+ * of an oversized upload is never read.
+ */
+export const readBody = (req: Req): Promise<{ body: string | null; tooLarge: boolean }> =>
   new Promise((resolve) => {
-    if (typeof req.body === "string") return resolve(req.body);
-    if (req.body && typeof req.body === "object" && Object.keys(req.body).length) return resolve(JSON.stringify(req.body));
+    if (typeof req.body === "string") return resolve({ body: req.body, tooLarge: false });
+    if (req.body && typeof req.body === "object" && Object.keys(req.body).length) return resolve({ body: JSON.stringify(req.body), tooLarge: false });
+    const declared = Number(req.get("content-length"));
+    if (Number.isFinite(declared) && declared > MAX_BODY) return resolve({ body: null, tooLarge: true });
     let size = 0;
     const parts: Buffer[] = [];
     let done = false;
-    const finish = (v: string | null) => {
-      if (!done) (done = true), resolve(v);
-    };
-    req.on("data", (c: Buffer) => {
+    const onData = (c: Buffer) => {
       size += c.length;
-      if (size > MAX_BODY) return finish(null);
+      if (size > MAX_BODY) return stop(true);
       parts.push(c);
-    });
-    req.on("end", () => finish(Buffer.concat(parts).toString("utf8")));
-    req.on("error", () => finish(null));
+    };
+    const onEnd = () => finish(Buffer.concat(parts).toString("utf8"), false);
+    const onError = () => finish(null, false);
+    const finish = (v: string | null, tooLarge: boolean) => {
+      if (!done) (done = true), resolve({ body: v, tooLarge });
+    };
+    const stop = (tooLarge: boolean) => {
+      req.removeListener?.("data", onData);
+      req.removeListener?.("end", onEnd);
+      req.pause?.();
+      parts.length = 0;
+      finish(null, tooLarge);
+    };
+    req.on("data", onData);
+    req.on("end", onEnd);
+    req.on("error", onError);
   });
 
 /** POST /hit (204 always, so a beacon never shows an error) and GET /status. */
@@ -366,6 +437,35 @@ export function pulseRouter<R>(express: ExpressLike<R>, opts: PulseRouterOptions
   const allowed = new Set(["localhost", "127.0.0.1", ...(opts.allowedHosts ?? []).map((h) => h.toLowerCase())]);
   const perIp = new RateLimiter(opts.perMinute ?? 60, 60_000);
   const global = new RateLimiter(5000, 60_000);
+  // Bounds what a forged flood can cost (same guard as the stats service): one address brings at most devicesPerIp
+  // new device ids an hour, and the instance counts at most dailyBudget beacons a day. Dropped beacons still get 204.
+  const devicesPerIp = opts.devicesPerIp ?? DEVICES_PER_IP;
+  const dailyBudget = opts.dailyBudget ?? DAILY_BUDGET;
+  const ipDevices = new Map<string, { until: number; ids: Set<string> }>();
+  let budget = { day: "", n: 0, warned: false };
+  const admit = (ip: string, d: string): boolean => {
+    const now = Date.now();
+    const day = dayKey(now);
+    if (budget.day !== day) budget = { day, n: 0, warned: false };
+    if (budget.n >= dailyBudget) {
+      if (!budget.warned) (budget.warned = true), console.warn(`[pulse] daily beacon budget (${dailyBudget}) reached; dropping until tomorrow`);
+      return false;
+    }
+    let seen = ipDevices.get(ip);
+    if (!seen || seen.until <= now) {
+      if (seen) ipDevices.delete(ip);
+      if (ipDevices.size >= 20_000) for (const [k, v] of ipDevices) if (v.until <= now) ipDevices.delete(k);
+      if (ipDevices.size >= 20_000) ipDevices.clear();
+      seen = { until: now + 3600_000, ids: new Set() };
+      ipDevices.set(ip, seen);
+    }
+    if (!seen.ids.has(d)) {
+      if (seen.ids.size >= devicesPerIp) return false;
+      seen.ids.add(d);
+    }
+    budget.n++;
+    return true;
+  };
   const hostOf = (h: string | undefined) => {
     try {
       return h ? new URL(h).hostname.toLowerCase() : null;
@@ -376,8 +476,8 @@ export function pulseRouter<R>(express: ExpressLike<R>, opts: PulseRouterOptions
   const appFor = (req: Req): { app: string; host: string } | null => {
     const source = hostOf(req.get("origin")) ?? hostOf(req.get("referer"));
     if (opts.originApps) {
-      const app = source ? opts.originApps[source] : undefined;
-      return app ? { app, host: source! } : null;
+      const app = source && Object.hasOwn(opts.originApps, source) ? opts.originApps[source] : undefined;
+      return typeof app === "string" && APP_RE.test(app) ? { app, host: source! } : null;
     }
     if (source ? !allowed.has(source) : isProd) return null;
     return { app: opts.app!, host: source ?? "" };
@@ -392,26 +492,34 @@ export function pulseRouter<R>(express: ExpressLike<R>, opts: PulseRouterOptions
   // GET /public: this app's rounded public totals from the pulse service (cached 10 min), so the page can show
   // "2,600 games played" without talking to another origin. Values below the public thresholds come back null.
   let pub: { at: number; body: unknown } | null = null;
+  // One refresh at a time (a burst of page loads shares it), and after a failure the old answer is kept for a
+  // minute instead of every request waiting 4 s on a pulse service that is down.
+  let refreshing: Promise<void> | null = null;
+  let retryAt = 0;
+  const refresh = (app: string) =>
+    (refreshing ??= (async () => {
+      try {
+        const r2 = await fetch(opts.publicUrl ?? PUBLIC_URL, { signal: AbortSignal.timeout(4000) });
+        if (!r2.ok) throw new Error(`HTTP ${r2.status}`);
+        const j = (await r2.json()) as { total?: unknown; apps?: Record<string, unknown> };
+        pub = { at: Date.now(), body: { app: j.apps?.[app] ?? null, total: j.total ?? null } };
+      } catch {
+        retryAt = Date.now() + 60_000;
+      } finally {
+        refreshing = null;
+      }
+    })());
   r.get("/public", async (_req, res) => {
     res.set("Cache-Control", "public, max-age=300");
     const empty = { app: null, total: null };
     if (!opts.app) return res.json(empty);
-    if (!pub || Date.now() - pub.at > 10 * 60_000) {
-      try {
-        const ctrl = AbortSignal.timeout(4000);
-        const r2 = await fetch(opts.publicUrl ?? PUBLIC_URL, { signal: ctrl });
-        const j = (await r2.json()) as { total?: unknown; apps?: Record<string, unknown> };
-        pub = { at: Date.now(), body: { app: j.apps?.[opts.app] ?? null, total: j.total ?? null } };
-      } catch {
-        if (!pub) return res.json(empty);
-      }
-    }
-    res.json(pub.body);
+    if ((!pub || Date.now() - pub.at > 10 * 60_000) && Date.now() >= retryAt) await refresh(opts.app);
+    res.json(pub ? pub.body : empty);
   });
   if (opts.originApps) {
     r.options("/hit", (req, res) => {
       const origin = req.get("origin");
-      if (origin && hostOf(origin) && opts.originApps![hostOf(origin)!]) {
+      if (origin && hostOf(origin) && Object.hasOwn(opts.originApps!, hostOf(origin)!)) {
         res.set("Access-Control-Allow-Origin", origin);
         res.set("Access-Control-Allow-Methods", "POST");
         res.set("Access-Control-Allow-Headers", "Content-Type");
@@ -424,18 +532,19 @@ export function pulseRouter<R>(express: ExpressLike<R>, opts: PulseRouterOptions
   r.post("/hit", async (req, res) => {
     res.set("Cache-Control", "no-store");
     const origin = req.get("origin");
-    if (opts.originApps && origin) {
+    if (opts.originApps && origin && Object.hasOwn(opts.originApps, hostOf(origin) ?? "")) {
       res.set("Access-Control-Allow-Origin", origin);
       res.set("Vary", "Origin");
     }
     // Answer only after the count is saved: Cloud Run stops giving the instance CPU once the response is sent.
     try {
       const target = appFor(req);
-      const body = await readBody(req);
+      const { body, tooLarge } = await readBody(req);
+      if (tooLarge) res.set("Connection", "close"); // don't read the rest of an oversized upload
       if (!target || body == null || isBotUa(req.get("user-agent"))) return;
       if (!global.hit("all") || !perIp.hit(ipKey(req.ip))) return;
       const hit = parseHit(body, target.host);
-      if (!hit) return;
+      if (!hit || !admit(ipKey(req.ip), hit.d)) return;
       await store.record(target.app, hit);
     } catch (err) {
       console.error(`[pulse] record failed`, (err as Error)?.message);
