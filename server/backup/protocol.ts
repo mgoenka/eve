@@ -1,4 +1,4 @@
-// Synced from app-platform/ui-kit/utils/backupProtocol.ts. Do not edit here. VERSION 0c42d35 2026-11-27T03:09:48Z
+// Synced from app-platform/ui-kit/utils/backupProtocol.ts. Do not edit here. VERSION 2f77c7c 2026-11-27T03:20:51Z
 /* generated from app-platform/ui-kit — edit there and re-sync. */
 /**
  * Backup / sync wire format, shared by the browser engine (utils/backup.ts) and the server
@@ -190,7 +190,11 @@ export interface FamilyMine {
 }
 
 /** What this app should do given the family (docs/backup-family.md, steps 2-4). */
-export function planFamily(mine: FamilyMine, f: FamilyRecord | null): { adoptKey: string | null; at: number; setOn: boolean | null; onAt: number; publish: FamilyRecord | null } {
+/**
+ * `publish`: what to write to a shared store (the website cookie) when this app knows better than it.
+ * `own`: this app's record after the plan (Android: every app keeps its own copy for the others to read).
+ */
+export function planFamily(mine: FamilyMine, f: FamilyRecord | null): { adoptKey: string | null; at: number; setOn: boolean | null; onAt: number; publish: FamilyRecord | null; own: FamilyRecord | null } {
   let key = mine.key;
   let at = mine.at;
   let adoptKey: string | null = null;
@@ -210,6 +214,7 @@ export function planFamily(mine: FamilyMine, f: FamilyRecord | null): { adoptKey
   const mineNow: FamilyRecord = { key, at: key ? at : 0, on: onAt ? on : null, onAt: onAt || 0 };
   const merged = mergeFamily([f, mineNow]);
   const same = (a: FamilyRecord | null, b: FamilyRecord | null) => !!a && !!b && a.key === b.key && a.at === b.at && a.on === b.on && a.onAt === b.onAt;
-  const publish = merged && (merged.key || merged.onAt) && !same(merged, f) ? merged : null;
-  return { adoptKey, at, setOn, onAt, publish };
+  const own = merged && (merged.key || merged.onAt) ? merged : null;
+  const publish = own && !same(own, f) ? own : null;
+  return { adoptKey, at, setOn, onAt, publish, own };
 }

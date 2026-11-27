@@ -87,6 +87,8 @@ export interface BackupOptions {
 export interface FamilyTransport {
   read(): Promise<FamilyRecord[]>;
   write(r: FamilyRecord): Promise<void>;
+  /** true: every app keeps its own record (Android), so write it whenever it changes, not only to correct others. */
+  perApp?: boolean;
 }
 
 /** The Android shell's bridge when it has one, else the app server's cookie route. */
@@ -94,6 +96,7 @@ export function defaultFamilyTransport(endpoint = '/api/backup'): FamilyTranspor
   const bridge = (nativeShell() as { backupFamily?: { get?: () => Promise<string>; set?: (json: string) => void } } | null)?.backupFamily;
   if (bridge && typeof bridge.get === 'function' && typeof bridge.set === 'function') {
     return {
+      perApp: true,
       async read() {
         const raw = await Promise.race([bridge.get!(), new Promise<string>((r) => setTimeout(() => r('[]'), 4000))]);
         const list = JSON.parse(String(raw || '[]')) as unknown;
@@ -602,7 +605,12 @@ export function createBackup(opts: BackupOptions): Backup {
           if (plan.setOn !== prefs.enabled) applyEnabled(plan.setOn);
           else savePrefs();
         }
-        if (plan.publish) await transport.write(plan.publish);
+        const famKey = `${app}:backup:family:v1`;
+        const write = transport.perApp ? plan.own : plan.publish;
+        if (write && (!transport.perApp || safeGet(famKey) !== JSON.stringify(write))) {
+          await transport.write(write);
+          if (transport.perApp) safeSet(famKey, JSON.stringify(write));
+        }
       } catch (e) {
         console.warn('[backup] family', (e as Error)?.message ?? e);
       } finally {
@@ -628,7 +636,7 @@ export function createBackup(opts: BackupOptions): Backup {
   function forgetDevice() {
     clearTimeout(saveTimer);
     clearTimeout(syncTimer);
-    for (const k of [keys.db, keys.key, keys.prefs, `${app}:backup:seen:v1`]) safeRemove(k);
+    for (const k of [keys.db, keys.key, keys.prefs, `${app}:backup:seen:v1`, `${app}:backup:family:v1`]) safeRemove(k);
     db = { records: {}, dirty: [], cursor: 0 };
     dirty.clear();
     prefs.lastSyncAt = 0;
