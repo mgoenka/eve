@@ -236,6 +236,9 @@ WebView has no print dialog), `showFooter` (true).
 {showRules && <RulesOverlay appName="Mohit's Bingo" sections={GAME_RULES} onClose={() => setShowRules(false)} />}
 ```
 
+`RulesOverlay` (also exported as `LazyRulesOverlay`) loads the overlay in its own chunk the first time it opens, so
+apps need no `lazyWithRetry` wrapper of their own (the ones that have one keep working and now really split).
+
 ### `SettingsSheet` (+ `Switch`)
 `sound?: { on, onChange }` makes the "Sound effects" switch show and set the app's own mute (AppHeader passes its `sound` prop).
 "✨ Use this device's AI" shows only in apps with AI features: `AiCreditsHost` (every Sparks app) and the local-AI
@@ -459,6 +462,7 @@ the grounded answer so saved copies still show it; don't serve one user's ground
 | `useMediaQuery(q)` / `useIsPhone()` | live media query / `< 640px` |
 | `useOnline()` | `navigator.onLine`, live |
 | `useWakeLock(enabled)` → `{ supported, active }` | keeps the screen on (host/TV screens), re-acquires on tab focus |
+| `useKeyShortcut(key \| keys, handler, { minGapMs = 250, enabled, allowInInputs, preventDefault })` (+ `createKeyShortcut` without React) | single-key shortcuts that are safe to hold: key repeats ignored, presses closer than `minGapMs` dropped, never while typing in a field or with Ctrl/⌘/Alt; `' '`/`'Space'` and letters in either case; the latest handler is used (inline arrows are fine). Use it for Space / N style host keys (a held Space set state ~30×/s and crashed Bingo's host with React #185) |
 
 ## 7. Utilities
 

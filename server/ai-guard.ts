@@ -1,4 +1,4 @@
-// Synced from app-platform/server-kit/ai-guard. Do not edit here. VERSION 1613fc1 2026-11-27T05:02:42Z
+// Synced from app-platform/server-kit/ai-guard. Do not edit here. VERSION baf2d40 2026-11-27T06:10:15Z
 /**
  * ai-guard: keeps an app responsive when Gemini is overloaded or the project quota is used up.
  *

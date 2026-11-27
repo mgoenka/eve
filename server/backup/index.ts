@@ -1,4 +1,4 @@
-// Synced from app-platform/server-kit/backup/index.ts. Do not edit here. VERSION 1613fc1 2026-11-27T05:02:42Z
+// Synced from app-platform/server-kit/backup/index.ts. Do not edit here. VERSION baf2d40 2026-11-27T06:10:15Z
 /**
  * Backup / sync server: a private-key record store (Firestore, or memory for local runs and tests) and an Express
  * router with rate limits, size caps and one-use link codes. The client is ui-kit/utils/backup.ts; the wire format
@@ -386,7 +386,9 @@ export function backupRouter<R>(express: ExpressLike<R>, opts: BackupRouterOptio
     res.set("Cache-Control", "no-store");
     // Same-origin only: browsers send Origin on POST; anything from another site is refused.
     const source = hostOf(req.get("origin")) ?? hostOf(req.get("referer"));
-    if (source ? !allowed.has(source) : isProd) {
+    // A same-origin GET under a no-referrer policy carries neither header; browsers still say Sec-Fetch-Site.
+    const sameOriginFetch = !source && req.get("sec-fetch-site") === "same-origin";
+    if (source ? !allowed.has(source) : isProd && !sameOriginFetch) {
       res.status(403).json({ error: "forbidden" });
       return;
     }

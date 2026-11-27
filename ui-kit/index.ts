@@ -24,7 +24,9 @@ export { ConfirmDialog, useConfirm } from './components/ConfirmDialog';
 export type { ConfirmDialogProps, ConfirmOptions } from './components/ConfirmDialog';
 export { ToastProvider, useToast } from './components/Toast';
 export type { ToastApi, ToastProviderProps } from './components/Toast';
-export { RulesOverlay } from './components/RulesOverlay';
+// Lazy under both names (its own chunk): apps importing RulesOverlay from the kit keep working unchanged, and a
+// lazyWithRetry(() => import('./ui-kit/components/RulesOverlay')) in an app is a real split point again.
+export { LazyRulesOverlay, LazyRulesOverlay as RulesOverlay } from './components/LazyRulesOverlay';
 export type { RulesOverlayProps, RuleSection } from './components/RulesOverlay';
 export { SettingsSheet } from './components/SettingsSheet';
 export type { SettingsSheetProps } from './components/SettingsSheet';
@@ -86,6 +88,9 @@ export { useWakeLock } from './hooks/useWakeLock';
 export { useLocalAi } from './hooks/useLocalAi';
 export { useSettings } from './hooks/useSettings';
 export { useInstallPrompt, promptInstall } from './hooks/useInstallPrompt';
+export { useKeyShortcut } from './hooks/useKeyShortcut';
+export { createKeyShortcut } from './utils/keyShortcut';
+export type { KeyShortcutOptions, ShortcutKey } from './utils/keyShortcut';
 export type { InstallPromptState } from './hooks/useInstallPrompt';
 
 // utils

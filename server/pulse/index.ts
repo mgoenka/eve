@@ -1,4 +1,4 @@
-// Synced from app-platform/server-kit/pulse/index.ts. Do not edit here. VERSION 1613fc1 2026-11-27T05:02:42Z
+// Synced from app-platform/server-kit/pulse/index.ts. Do not edit here. VERSION baf2d40 2026-11-27T06:10:15Z
 /**
  * Pulse: anonymous, cookie-free usage counts for every app and the website.
  *
