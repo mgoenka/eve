@@ -1,4 +1,4 @@
-// Synced from app-platform/server-kit/backup/index.ts. Do not edit here. VERSION 595736a 2026-11-27T02:54:49Z
+// Synced from app-platform/server-kit/backup/index.ts. Do not edit here. VERSION 0c42d35 2026-11-27T03:09:48Z
 /**
  * Backup / sync server: a private-key record store (Firestore, or memory for local runs and tests) and an Express
  * router with rate limits, size caps and one-use link codes. The client is ui-kit/utils/backup.ts; the wire format

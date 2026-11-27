@@ -172,7 +172,8 @@ export function mergeFamily(list: readonly (FamilyRecord | null | undefined)[]):
   for (const r of list) {
     if (!r) continue;
     if (r.key && (!k || r.at > k.at || (r.at === k.at && r.key < k.key!))) k = r;
-    if (r.onAt > 0 && r.on !== null && (!s || r.onAt > s.onAt)) s = r;
+    // Same moment: off wins, so a tie never turns backup on.
+    if (r.onAt > 0 && r.on !== null && (!s || r.onAt > s.onAt || (r.onAt === s.onAt && r.on === false))) s = r;
   }
   if (!k && !s) return null;
   return { key: k?.key ?? null, at: k?.at ?? 0, on: s?.on ?? null, onAt: s?.onAt ?? 0 };

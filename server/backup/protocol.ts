@@ -1,4 +1,4 @@
-// Synced from app-platform/ui-kit/utils/backupProtocol.ts. Do not edit here. VERSION 595736a 2026-11-27T02:54:49Z
+// Synced from app-platform/ui-kit/utils/backupProtocol.ts. Do not edit here. VERSION 0c42d35 2026-11-27T03:09:48Z
 /* generated from app-platform/ui-kit — edit there and re-sync. */
 /**
  * Backup / sync wire format, shared by the browser engine (utils/backup.ts) and the server
@@ -173,7 +173,8 @@ export function mergeFamily(list: readonly (FamilyRecord | null | undefined)[]):
   for (const r of list) {
     if (!r) continue;
     if (r.key && (!k || r.at > k.at || (r.at === k.at && r.key < k.key!))) k = r;
-    if (r.onAt > 0 && r.on !== null && (!s || r.onAt > s.onAt)) s = r;
+    // Same moment: off wins, so a tie never turns backup on.
+    if (r.onAt > 0 && r.on !== null && (!s || r.onAt > s.onAt || (r.onAt === s.onAt && r.on === false))) s = r;
   }
   if (!k && !s) return null;
   return { key: k?.key ?? null, at: k?.at ?? 0, on: s?.on ?? null, onAt: s?.onAt ?? 0 };

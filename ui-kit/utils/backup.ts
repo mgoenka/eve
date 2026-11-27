@@ -500,7 +500,8 @@ export function createBackup(opts: BackupOptions): Backup {
     if (!k) return false;
     const ok = await moveToKey(k, true);
     if (ok) {
-      prefs.at = Date.now();
+      // Linking / restoring turns the backup on: that is the person's switch too (or an older "off" elsewhere wins).
+      prefs.at = prefs.onAt = Date.now();
       prefs.solo = false;
       savePrefs();
       void familyStep(true);
