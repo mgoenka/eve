@@ -6,7 +6,10 @@ import { useInstallPrompt } from '../hooks/useInstallPrompt';
 import { HUB_LABEL, HUB_URL } from '../utils/constants';
 import { cx } from '../utils/cx';
 import { isNativeApp } from '../utils/native';
-import { HelpIcon, InstallIcon, MoreIcon, SettingsIcon, VolumeOffIcon, VolumeOnIcon } from './icons';
+import { phoneTitle } from '../utils/headerTitle';
+import type { Backup } from '../utils/backup';
+import { BackupButton } from './BackupButton';
+import { CloudIcon, HelpIcon, InstallIcon, MoreIcon, SettingsIcon, VolumeOffIcon, VolumeOnIcon } from './icons';
 import { IconButton } from './IconButton';
 import { InstallButton, installApp } from './InstallButton';
 import { OfflinePill } from './OfflineBanner';
@@ -23,9 +26,11 @@ export interface HeaderMenuItem {
 }
 
 export interface AppHeaderProps {
-  /** e.g. "Mohit's Bingo" */
+  /** e.g. "Mohit's Bingo". A string "Mohit's X" shows as "X" on phones (the full title on wider screens). */
   title: ReactNode;
-  /** Icon next to the title: an image URL (default '/favicon.svg'), any node, or null for none. */
+  /** The title on phones instead (default: a string title without its leading "Mohit's "); pass `title` again to keep it. */
+  phoneTitle?: ReactNode;
+  /** Icon next to the title (wider screens only): an image URL (default '/favicon.svg'), any node, or null for none. */
   icon?: string | ReactNode | null;
   /** Click on the title (e.g. go back to setup). Without it the title is plain text. */
   onTitleClick?: () => void;
@@ -57,6 +62,13 @@ export interface AppHeaderProps {
    * built-in SettingsSheet's "Sound effects" switch follows it. (A mute button in `right` still works.)
    */
   sound?: { muted: boolean; onToggle: () => void };
+  /**
+   * The backup / sync button (utils/backup.ts + useBackupEntry), drawn by the header: the cloud button on wider
+   * screens, a "Sync" ("Backup" for file-only apps) item of the ⋯ menu on phones, so the title keeps its room.
+   *   backup={{ backup, onOpen: backupEntry.show, open: backupEntry.open }}
+   * (A BackupButton in `right` still works, but takes room from the title on phones.)
+   */
+  backup?: { backup: Backup; onOpen: () => void; open?: boolean };
   /** More entries for the ⋯ menu on phones only (put wide-screen buttons in `right`). */
   menuItems?: HeaderMenuItem[];
   /** "Install app" on the website when the browser offers it. Default true (never inside the Android app). */
@@ -144,6 +156,7 @@ function OverflowMenu({ items }: { items: HeaderMenuItem[] }) {
  */
 export function AppHeader({
   title,
+  phoneTitle: phoneTitleProp,
   icon = '/favicon.svg',
   onTitleClick,
   titleLabel,
@@ -157,6 +170,7 @@ export function AppHeader({
   onSettings,
   settingsSheet,
   sound,
+  backup,
   menuItems = [],
   install = true,
   right,
@@ -171,10 +185,12 @@ export function AppHeader({
   const native = isNativeApp();
   const iconNode =
     icon == null || icon === false ? null : typeof icon === 'string' ? (
-      <img src={icon} alt="" width={24} height={24} className="h-5 w-5 shrink-0 md:h-6 md:w-6" />
+      <img src={icon} alt="" width={24} height={24} className="h-5 w-5 shrink-0 max-sm:hidden md:h-6 md:w-6" />
     ) : (
-      <span className="inline-flex shrink-0" aria-hidden="true">{icon}</span>
+      <span className="inline-flex shrink-0 max-sm:hidden" aria-hidden="true">{icon}</span>
     );
+  // Phones: the short title ("Bingo") when there is one; wider screens: the full one.
+  const short = phoneTitleProp !== undefined ? phoneTitleProp : phoneTitle(title);
 
   const leftNode =
     left ??
@@ -195,7 +211,14 @@ export function AppHeader({
     <span className="animate-pulse whitespace-nowrap text-sm font-semibold text-red-400 md:text-base">{confirmText}</span>
   ) : (
     <>
-      <span className="min-w-0 truncate whitespace-nowrap text-sm font-medium text-mg-muted md:text-base in-[.mg-tv]:text-lg">{title}</span>
+      {short != null && short !== title ? (
+        <>
+          <span className="min-w-0 truncate whitespace-nowrap text-sm font-medium text-mg-muted sm:hidden">{short}</span>
+          <span className="min-w-0 truncate whitespace-nowrap text-sm font-medium text-mg-muted max-sm:hidden md:text-base in-[.mg-tv]:text-lg">{title}</span>
+        </>
+      ) : (
+        <span className="min-w-0 truncate whitespace-nowrap text-sm font-medium text-mg-muted md:text-base in-[.mg-tv]:text-lg">{title}</span>
+      )}
       {iconNode}
     </>
   );
@@ -206,13 +229,16 @@ export function AppHeader({
   const showInstall = install && !native && canInstall;
   // Phones: mute / settings / install fold into one ⋯ menu when there are two or more of them, and whenever the app
   // gave menuItems (they have no icon of their own, so the menu is the only place they show).
+  // Backup: never a button on phones (the title needs the room), always an item of the ⋯ menu there.
+  const backupItem: HeaderMenuItem[] = backup ? [{ label: backup.backup.status().cloud ? 'Sync' : 'Backup', icon: <CloudIcon size={ICON} />, onClick: backup.onOpen }] : [];
   const folded: HeaderMenuItem[] = [
+    ...backupItem,
     ...(sound ? [{ label: 'Sound', icon: soundIcon, checked: !sound.muted, onClick: sound.onToggle }] : []),
     ...(settingsAction ? [{ label: 'Settings', icon: <SettingsIcon size={ICON} />, onClick: settingsAction }] : []),
     ...(showInstall ? [{ label: 'Install app', icon: <InstallIcon size={ICON} />, onClick: () => void installApp() }] : []),
     ...menuItems,
   ];
-  const fold = folded.length >= 2 || menuItems.length > 0;
+  const fold = folded.length >= 2 || menuItems.length > 0 || !!backup;
   // max-sm:hidden (a variant) wins over IconButton's own inline-flex; plain `hidden` would not.
   const wideOnly = fold ? 'max-sm:hidden' : undefined;
   const sheetProps = settingsSheet === false ? null : (settingsSheet ?? {});
@@ -244,6 +270,7 @@ export function AppHeader({
       <div className="flex shrink-0 flex-nowrap items-center justify-end gap-1.5 justify-self-end sm:gap-2">
         {showOffline && !online ? <OfflinePill /> : null}
         {right}
+        {backup ? <BackupButton backup={backup.backup} onClick={backup.onOpen} pressed={!!backup.open} className="max-sm:hidden" /> : null}
         {sound ? (
           <IconButton aria-label={sound.muted ? 'Unmute' : 'Mute'} pressed={sound.muted} onClick={sound.onToggle} className={wideOnly}>
             {soundIcon}

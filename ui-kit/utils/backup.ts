@@ -767,16 +767,8 @@ export function createBackup(opts: BackupOptions): Backup {
 }
 
 /** Short status line, e.g. "Backed up 3m ago". */
-export function backupLabel(s: BackupStatus): string {
-  if (!s.cloud) return 'Saved on this device';
-  if (!s.enabled) return 'Cloud backup is off';
-  if (s.state === 'syncing') return 'Syncing';
-  if (s.state === 'offline') return 'Offline: saved on this device';
-  if (s.state === 'error') return s.error ?? "Couldn't sync";
-  if (!s.lastSyncAt) return 'Not synced yet';
-  const sec = Math.round((Date.now() - s.lastSyncAt) / 1000);
-  return `Backed up ${sec < 60 ? 'just now' : sec < 3600 ? `${Math.round(sec / 60)}m ago` : new Date(s.lastSyncAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`;
-}
+// backupLabel lives in ./backupLabel (no engine code), so the header's button stays light.
+export { backupLabel } from './backupLabel';
 
 // ---------- existing localStorage keys ----------
 

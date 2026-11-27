@@ -29,6 +29,7 @@ import {
 import type { CreditsState, CustomAmount, GiftCode } from '../utils/credits';
 import { copyToClipboard, shareOrCopy } from '../utils/share';
 import { isNativeApp } from '../utils/native';
+import { creditsPlatform, nativeSheetNote, nativeSparksRuleItems, sheetParts } from '../utils/creditsSheetParts';
 import { PRIVACY_URL, TERMS_URL } from '../utils/constants';
 import { Button } from './Button';
 import { SparklesIcon } from './icons';
@@ -639,14 +640,17 @@ export function CreditsSheet() {
   const s = useCredits();
   const unavailable = s.pricesStatus === 'unavailable';
   const viaPlay = activeCreditsProvider()?.id === 'play';
+  // iOS: Apple requires its own in-app purchase, so nothing is sold there (no packs, no Google Play text).
+  const platform = creditsPlatform();
+  const parts = sheetParts(platform, s.owner);
   // A wallet that never got Sparks (no starter: paused or limited, never bought) is "getting", not "out of", Sparks.
   const noStarter = (s.starterPaused || s.starterLimited) && !s.paid && !s.owner;
   const neverHad = noStarter && (s.balance ?? 0) <= 0;
   const starterNote = !noStarter || (s.balance ?? 0) > 0
     ? null
     : s.starterPaused
-      ? 'Free starter Sparks are paused for today. Check back tomorrow, or get a pack below.'
-      : 'Free starter Sparks aren’t available on this network right now. You can still get a pack below.';
+      ? parts.canBuy ? 'Free starter Sparks are paused for today. Check back tomorrow, or get a pack below.' : 'Free starter Sparks are paused for today. Check back tomorrow.'
+      : parts.canBuy ? 'Free starter Sparks aren’t available on this network right now. You can still get a pack below.' : 'Free starter Sparks aren’t available on this network right now.';
   return (
     <Modal
       open={s.sheetOpen}
@@ -662,7 +666,9 @@ export function CreditsSheet() {
     >
       {s.sheetReason === 'insufficient' ? (
         <p role="status" className="mb-4 rounded-mg-sm border border-mg-gold/40 bg-mg-gold/10 px-3 py-2 text-sm text-mg-text">
-          {neverHad
+          {!parts.canBuy
+            ? `${neverHad ? 'This needs Sparks' : 'You’re out of Sparks'}${s.needed ? ` (about ${fmt(s.needed)})` : ''}. Everything else stays free.`
+            : neverHad
             ? `Get Sparks to use this${s.needed ? ` (it needs about ${fmt(s.needed)})` : ''}. Everything else stays free.`
             : `You’re out of Sparks${s.needed ? ` (this one needs about ${fmt(s.needed)})` : ''}. Get more to keep the magic going — everything else stays free.`}
         </p>
@@ -690,7 +696,7 @@ export function CreditsSheet() {
         <LocalAiSetting compact />
       </div>
 
-      <ul className={cx('flex flex-col gap-2', s.owner && 'hidden')} aria-label="Sparks packs">
+      <ul className={cx('flex flex-col gap-2', !parts.packs && 'hidden')} aria-label="Sparks packs">
         {s.packs.map((pack) => {
           const price = s.prices[pack.id];
           const busy = s.buying === pack.id;
@@ -721,7 +727,7 @@ export function CreditsSheet() {
       {viaPlay || s.owner || !s.gifts ? null : <GiftForm s={s} unavailable={unavailable} />}
       {viaPlay || s.owner ? null : <SupportTip s={s} unavailable={unavailable} />}
 
-      {unavailable && !s.owner ? (
+      {unavailable && parts.unavailableAlert ? (
         <div role="alert" className="mt-3 rounded-mg-sm border border-mg-border-strong bg-mg-surface-2 px-3 py-2 text-sm text-mg-text-2">
           {viaPlay ? 'Purchases are unavailable on this device right now. Make sure the Google Play Store is installed and you’re signed in, then' : 'Purchases are unavailable right now. Please'}{' '}
           <button type="button" className="font-semibold text-mg-gold underline underline-offset-2" onClick={() => void loadPrices(true)}>
@@ -730,7 +736,7 @@ export function CreditsSheet() {
           .
         </div>
       ) : null}
-      {s.pending ? (
+      {s.pending && parts.pending ? (
         <p role="status" className="mt-3 text-sm text-mg-text-2">
           A payment is pending{viaPlay ? ' at Google Play' : ' at checkout'}. Your Sparks are added as soon as it completes.
         </p>
@@ -738,11 +744,11 @@ export function CreditsSheet() {
 
       <p className="mt-4 text-xs leading-relaxed text-mg-subtle">
         Each magic action uses a few Sparks, based on what it really costs to make, and the ✨ chip shows what each one used. Repeats are free.{' '}
-        {viaPlay
-          ? 'Sparks don’t expire and are for this app. Paid through Google Play. Sparks are stored with this app on this device; uninstalling or clearing the app’s data without a backup removes them.'
+        {viaPlay || platform !== 'web'
+          ? nativeSheetNote(platform === 'ios' ? 'ios' : 'android')
           : 'Sparks work in all of Mohit’s apps and games in this browser. Sparks are tied to this browser and are kept as long as you use them at least once every 400 days. Secure checkout by Stripe (sold through Link), prices in US dollars.'}
       </p>
-      {s.owner ? null : <OwnerCodeForm />}
+      {parts.codeForm ? <OwnerCodeForm /> : null}
       {viaPlay ? null : <LinkDevicesForm />}
       {viaPlay ? null : <BackupForm saved={s.backupSaved} focus={s.sheetFocus === 'backup'} />}
       <p className="mt-4 flex gap-1 text-xs text-mg-subtle">
@@ -804,19 +810,6 @@ export function aiCreditsRuleSections(): RuleSection[] {
       },
     ];
   }
-  const packs = AI_CREDIT_PACKS.map((p) => `${fmt(p.credits)} Sparks for $${p.priceUsd.toFixed(2)}`).join(', ');
-  return [
-    {
-      title: 'Sparks',
-      icon: '✨',
-      items: [
-        `The magic features (freshly made rounds, custom themes and more) use Sparks ✨. New players get ${AI_STARTER_CREDITS} free Sparks to start (while the free daily allowance lasts); your balance is the ✨ chip at the top.`,
-        'Each one uses a few Sparks, based on what it really costs to make, and the ✨ chip shows what each one used. Repeats are free, and everything else is always free.',
-        `Tap the chip to get more: ${packs} (US prices; Google Play shows your local price). Sparks are added as soon as Google Play confirms the payment.`,
-        'Have a promo code? Tap the chip, then “Have a promo code?”, for free Sparks (each code works once in this app).',
-        'Phones with built-in AI (Pixel 9 and newer, Galaxy S25 and newer, and more) make some of these right on the phone, for free: no Sparks used. Switch it off in Settings under “Use this device’s AI”.',
-        'Sparks don’t expire. Sparks are stored with this app on this device; uninstalling or clearing the app’s data without a backup removes them (with Android backup on, they come back after a reinstall on the same Google account).',
-      ],
-    },
-  ];
+  // Android: packs, Google Play, promo codes. iOS: none of those (Apple requires its own in-app purchase).
+  return [{ title: 'Sparks', icon: '✨', items: nativeSparksRuleItems(creditsPlatform() === 'ios' ? 'ios' : 'android', AI_STARTER_CREDITS, AI_CREDIT_PACKS) }];
 }

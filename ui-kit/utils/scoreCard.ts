@@ -5,6 +5,7 @@
  * ScoreCardData describing the result and everyone's score, plus a promo footer for the app.
  */
 import { encode } from '../vendor/uqr.js';
+import { nativePlatform } from './native';
 
 export interface ScoreCardPlayer {
   name: string;
@@ -53,7 +54,7 @@ export interface ScoreCardData {
   emoji?: string;
   /** Promo question in the footer. Default "Can you beat this?". */
   challenge?: string;
-  /** Adds "Also on Google Play" to the footer. Default true. */
+  /** Adds "Also on Google Play" to the footer. Default true (never inside the iOS app: Apple doesn't allow it). */
   playStore?: boolean;
   /** Footer call to action before the host. Default "Play free at" (apps: "Free at", "Cook free at"…). */
   cta?: string;
@@ -406,7 +407,7 @@ export function drawScoreCard(ctx: CanvasRenderingContext2D, data: ScoreCardData
   const ctaLine = (data.cta || 'Play free at') + ' ' + host;
   fitText(ctx, ctaLine, textMax, 32, SANS, 'bold', 18);
   ctx.fillText(ctaLine, pad + 36, fy + fh * 0.62);
-  if (data.playStore !== false) {
+  if (showsPlayFooter(data)) {
     ctx.fillStyle = '#a1a1aa';
     fitText(ctx, 'Also on Google Play', textMax, 28, SANS, '500', 16);
     ctx.fillText('Also on Google Play', pad + 36, fy + fh * 0.84);
@@ -522,4 +523,9 @@ export async function recordScoreCardVideo(data: ScoreCardData, format: ScoreCar
   rec.stop();
   stream.getTracks().forEach((tr) => tr.stop());
   return done;
+}
+
+/** "Also on Google Play" in the card footer: unless the app turned it off, and never inside the iOS app. */
+export function showsPlayFooter(data: { playStore?: boolean }, platform: 'android' | 'ios' | null = nativePlatform()): boolean {
+  return data.playStore !== false && platform !== 'ios';
 }

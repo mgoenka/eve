@@ -1,21 +1,18 @@
 /* generated from app-platform/ui-kit — edit there and re-sync. */
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useBackupStatus } from './BackupButton';
 import { Modal } from './Modal';
 import { Switch } from './Switch';
 import { LazyQRCode } from './LazyQRCode';
-import { IconButton } from './IconButton';
 import { useToast } from './Toast';
-import { CloudIcon, CloudOffIcon, CopyIcon, DownloadIcon, EyeIcon, KeyIcon, LinkIcon, RefreshIcon, UploadIcon } from './icons';
+import { CopyIcon, DownloadIcon, EyeIcon, KeyIcon, LinkIcon, RefreshIcon, UploadIcon } from './icons';
 import { copyToClipboard } from '../utils/share';
 import { FetchError } from '../utils/fetchJson';
-import { cx } from '../utils/cx';
 import { formatKey, normalizeKey, normalizeLinkCode } from '../utils/backupProtocol';
-import { backupLabel, type Backup, type BackupStatus } from '../utils/backup';
+import type { Backup } from '../utils/backup';
+import { backupLabel } from '../utils/backupLabel';
 
-/** React: re-render on every status change. */
-export function useBackupStatus(backup: Backup): BackupStatus {
-  return useSyncExternalStore(backup.subscribe, backup.status, backup.status);
-}
+export { BackupButton, useBackupStatus } from './BackupButton';
 
 const inputClass =
   'w-full p-3 bg-mg-surface border border-mg-border rounded-xl focus:outline-none focus:ring-2 focus:ring-mg-gold focus:border-mg-gold/50 placeholder-mg-muted text-mg-text';
@@ -232,16 +229,6 @@ export function BackupModal({ open, onClose, backup, initialCode, title, what, n
   );
 }
 
-/** Header button: a cloud whose color shows the backup state (Scorer's). Put it in AppHeader `right`. */
-export function BackupButton({ backup, onClick, pressed, className }: { backup: Backup; onClick: () => void; pressed?: boolean; className?: string }) {
-  const s = useBackupStatus(backup);
-  const Icon = s.state === 'syncing' ? RefreshIcon : s.cloud && (!s.enabled || s.state === 'offline' || s.state === 'error') ? CloudOffIcon : CloudIcon;
-  return (
-    <IconButton aria-label={`${s.cloud ? 'Sync' : 'Backup'}: ${backupLabel(s)}`} onClick={onClick} pressed={!!pressed} {...(className ? { className } : {})}>
-      <Icon size={18} className={cx(s.state === 'syncing' && 'animate-spin', s.state === 'error' ? 'text-mg-warning' : s.cloud && s.enabled && s.state !== 'offline' ? 'text-mg-gold' : 'text-mg-muted')} />
-    </IconButton>
-  );
-}
 
 /**
  * Starts the engine and opens the modal for a ?link=CODE URL (the QR's target), removing the parameter.

@@ -7,7 +7,7 @@
 // web (its web credits switch is on); otherwise the website behaves exactly as before.
 import { fetchJson, FetchError } from './fetchJson';
 import type { FetchJsonOptions } from './fetchJson';
-import { isNativeApp } from './native';
+import { isNativeApp, nativePlatform } from './native';
 import { showToast } from './toastBus';
 import { playCreditsProvider } from './creditsPlay';
 import { webCreditsProvider } from './creditsWeb';
@@ -460,6 +460,10 @@ export function speculativeAiAllowed(opts: { userAsked?: boolean } = {}): boolea
   return s.owner;
 }
 
+/** The "old app build" toast (HTTP 426): Google Play on Android, no store name on iOS. */
+export const updateAppText = (platform: 'android' | 'ios' | null = nativePlatform()) =>
+  platform === 'ios' ? 'Update the app to use this feature.' : 'Update the app from Google Play to use this feature.';
+
 /** The cost toast: "✨ 1 Spark used", "✨ 12 Sparks used". */
 export const sparksUsedText = (used: number) => `✨ ${used.toLocaleString('en-US')} Spark${used === 1 ? '' : 's'} used`;
 
@@ -506,7 +510,7 @@ export async function aiFetchJson<T = unknown>(url: string, options: AiFetchJson
     }
     // An Android build from before AI credits (no app user id): the server answers 426.
     if (!metered && err instanceof FetchError && err.status === 426) {
-      showToast({ message: 'Update the app from Google Play to use this feature.', tone: 'info' });
+      showToast({ message: updateAppText(), tone: 'info' });
     }
     if (metered && isInsufficientCredits(err)) {
       const body = (err as FetchError).body as { balance?: unknown; needed?: unknown };

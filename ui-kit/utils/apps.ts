@@ -1,5 +1,5 @@
 /* generated from app-platform/ui-kit — edit there and re-sync. */
-import { isNativeApp } from './native';
+import { isNativeApp, nativePlatform } from './native';
 
 export type AppKind = 'game' | 'tool';
 
@@ -13,6 +13,8 @@ export interface CatalogApp {
   play?: string;
   /** The Play listing isn't public yet (first review pending): no Play links until it is. Checked by release-gate.mjs. */
   playPending?: boolean;
+  /** App Store id (the digits of apps.apple.com/app/id…), once the iOS app is live: the iOS app links there. */
+  appStore?: string;
   kind: AppKind;
   /** Multiplayer party game (phones join a room). */
   party?: boolean;
@@ -65,21 +67,30 @@ export function currentApp(hostname: string = typeof location !== 'undefined' ? 
   return APPS.find((a) => hostOf(a.url) === h || legacy[h] === a.id) ?? null;
 }
 
-/** Where a catalog link should go: the website on the web; the Play listing inside the Android app (or null if not on Play). */
-export function appLink(app: CatalogApp, native: boolean = isNativeApp()): string | null {
+/** Is this app in the store of `platform` (Play for Android, the App Store for iOS)? */
+const inStore = (a: CatalogApp, platform: 'android' | 'ios') => (platform === 'ios' ? !!a.appStore && /^\d{5,12}$/.test(a.appStore) : !!a.play && !a.playPending);
+
+/**
+ * Where a catalog link should go: the website on the web; inside the app, its store listing: Google Play on
+ * Android, the App Store on iOS (Apple doesn't allow Play links; null until the app has an `appStore` id).
+ */
+export function appLink(app: CatalogApp, native: boolean = isNativeApp(), platform: 'android' | 'ios' = nativePlatform() ?? 'android'): string | null {
   if (!native) return app.url;
-  return app.play && !app.playPending ? `https://play.google.com/store/apps/details?id=${app.play}` : null;
+  if (!inStore(app, platform)) return null;
+  return platform === 'ios' ? `https://apps.apple.com/app/id${app.appStore}` : `https://play.google.com/store/apps/details?id=${app.play}`;
 }
 
 /**
  * A few sibling apps to suggest: same kind first (party games after a party game), rotated by day so
- * repeat players see different ones. Excludes the current app and, inside the Android app, apps not on Play.
+ * repeat players see different ones. Excludes the current app and, inside the app, apps not in its store (iOS: none
+ * until App Store ids are filled in).
  */
-export function siblingApps(opts: { count?: number; kind?: AppKind; exclude?: string; native?: boolean; day?: number } = {}): CatalogApp[] {
+export function siblingApps(opts: { count?: number; kind?: AppKind; exclude?: string; native?: boolean; platform?: 'android' | 'ios'; day?: number } = {}): CatalogApp[] {
   const me = opts.exclude ?? currentApp()?.id;
   const native = opts.native ?? isNativeApp();
+  const platform = opts.platform ?? nativePlatform() ?? 'android';
   const kind = opts.kind ?? APPS.find((a) => a.id === me)?.kind ?? 'game';
-  const pool = APPS.filter((a) => a.id !== me && (!native || (a.play && !a.playPending)));
+  const pool = APPS.filter((a) => a.id !== me && (!native || inStore(a, platform)));
   const day = opts.day ?? Math.floor(Date.now() / 86_400_000);
   const rotate = (list: CatalogApp[]) => (list.length ? list.map((_, i) => list[(i + day) % list.length]) : list);
   const same = rotate(pool.filter((a) => a.kind === kind));

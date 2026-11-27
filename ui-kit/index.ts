@@ -65,7 +65,8 @@ export type { DailyReminderPromptProps } from './components/DailyReminderPrompt'
 export type { GuestOutroProps } from './components/GuestOutro';
 export { APPS, currentApp, appLink, siblingApps, isAndroidWeb } from './utils/apps';
 export type { CatalogApp, AppKind } from './utils/apps';
-export { BackupModal, BackupButton, useBackupEntry, useBackupStatus } from './components/BackupModal';
+export { BackupModal, useBackupEntry } from './components/BackupModal';
+export { BackupButton, useBackupStatus } from './components/BackupButton';
 export type { BackupModalProps } from './components/BackupModal';
 export { SearchSuggestions } from './components/SearchSuggestions';
 export { isSearchSuggestionsHtml } from './utils/searchSuggestions';
@@ -73,7 +74,8 @@ export type { SearchSuggestionsProps } from './components/SearchSuggestions';
 export type { ResultsCardProps } from './components/ResultsCard';
 export { SCORER_FEED_URL, reportToScorer } from './utils/scorerFeed';
 export { trackPulse, trackGamePulse, gameFingerprint } from './utils/pulse';
-export { scoreCardAccent } from './utils/scoreCard';
+export { scoreCardAccent, showsPlayFooter } from './utils/scoreCard';
+export { phoneTitle } from './utils/headerTitle';
 export type { QRCodeProps } from './components/QRCode';
 // Static QRCode (pulls the encoder into the importing chunk): import { QRCode } from './ui-kit/components/QRCode'
 export * from './components/icons';
@@ -172,8 +174,11 @@ export {
   speculativeAiAllowedAsync,
   aiCallAllowed,
   sparksUsedText,
+  updateAppText,
   whenCreditsLoaded,
 } from './utils/credits';
+export { creditsPlatform, sheetParts, nativeSparksRuleItems, nativeSheetNote } from './utils/creditsSheetParts';
+export type { CreditsPlatform, SheetParts } from './utils/creditsSheetParts';
 export type { AiFetchJsonOptions, CreditsProvider, CreditsProviderEvents, CreditsState } from './utils/credits';
 export type { GiftCode, PurchaseExtras } from './utils/credits';
 export { playCreditsProvider, getAppUserId, nativeBridge } from './utils/creditsPlay';
@@ -185,3 +190,7 @@ export { createBackup, createKeyBackup, backupKeys, backupLabel } from './utils/
 export type { Backup, BackupOptions, BackupStatus, BackupKeySpec, BackupKeysOptions } from './utils/backup';
 export { formatKey, normalizeKey, normalizeLinkCode } from './utils/backupProtocol';
 export type { SyncRecord, BackupFile } from './utils/backupProtocol';
+
+// Mojo (₥): the play currency of every game.
+export { Mojo } from './components/Mojo';
+export { MOJO_NAME, MOJO_SYMBOL, MOJO_FONT_STACK, MOJO_RULE_LINE, formatMojo, mojoWords, mojoRuleSection, type MojoFormatOptions } from './utils/mojo';

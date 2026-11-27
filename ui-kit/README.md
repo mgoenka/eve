@@ -127,8 +127,10 @@ without `onSettings` the header opens the kit's `SettingsSheet` itself (haptics,
 
 | prop | type | default |
 | --- | --- | --- |
-| `title` | ReactNode | — |
-| `icon` | image URL / node / `null` | `'/favicon.svg'` |
+| `title` | ReactNode | — (a string "Mohit's X" shows as "X" on phones, in full on wider screens) |
+| `phoneTitle` | ReactNode | the phone title instead (pass `title` again to keep the full one) |
+| `icon` | image URL / node / `null` | `'/favicon.svg'` (wider screens only: hidden on phones so the title has room) |
+| `backup` | `{ backup, onOpen, open? }` | the backup cloud button on wider screens, a "Sync" ("Backup") item of the ⋯ menu on phones. Use it instead of a `BackupButton` in `right`: `backup={{ backup, onOpen: backupEntry.show, open: backupEntry.open }}` |
 | `onTitleClick` | `() => void` | plain title |
 | `confirmBack` / `confirmText` | boolean / string | `false` / `'Go back?'` (red pulsing two-tap back) |
 | `hubHref` | string \| false | `'https://mohitgoenka.com/apps/'` (false omits; always hidden when `isNativeApp()`) |
